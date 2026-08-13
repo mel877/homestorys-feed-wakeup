@@ -1,42 +1,119 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "google-product",
-  "title": "GoogleProduct",
-  "description": "Google Merchant Center product payload schema",
+  "title": "Google Product Feed Row",
+  "description": "Validates a single row of the Google Merchant Center TSV feed.",
   "type": "object",
-  "required": ["id", "title", "link", "image_link", "availability", "price", "brand"],
+  "required": ["id", "title", "description", "link", "image_link", "availability", "price", "brand", "condition"],
   "properties": {
-    "id": { "type": "string" },
-    "title": { "type": "string", "maxLength": 150 },
-    "description": { "type": "string", "maxLength": 5000 },
-    "link": { "type": "string", "format": "uri" },
-    "image_link": { "type": "string", "format": "uri" },
-    "additional_image_link": { "type": "array", "items": { "type": "string", "format": "uri" } },
-    "lifestyle_image_link": { "type": "array", "items": { "type": "string", "format": "uri" } },
-    "availability": { "type": "string", "enum": ["in_stock", "out_of_stock", "preorder", "backorder"] },
-    "availability_date": { "type": "string" },
-    "price": { "type": "string", "pattern": "^\\d+\\.\\d{2} [A-Z]{3}$" },
-    "sale_price": { "type": "string" },
-    "sale_price_effective_date": { "type": "string" },
-    "brand": { "type": "string" },
-    "gtin": { "type": "string" },
-    "mpn": { "type": "string" },
-    "identifier_exists": { "type": "string", "enum": ["yes", "no"] },
-    "condition": { "type": "string", "enum": ["new", "refurbished", "used"] },
-    "google_product_category": { "type": "string" },
-    "product_type": { "type": "string" },
-    "item_group_id": { "type": "string" },
-    "color": { "type": "string" },
-    "material": { "type": "string" },
-    "size": { "type": "string" },
-    "shipping": { "type": "string" },
-    "shipping_weight": { "type": "string" },
-    "product_highlight": { "type": "array", "items": { "type": "string" }, "maxItems": 10 },
-    "product_detail": { "type": "array" },
-    "custom_label_0": { "type": "string" },
-    "custom_label_1": { "type": "string" },
-    "custom_label_2": { "type": "string" },
-    "custom_label_3": { "type": "string" },
-    "custom_label_4": { "type": "string" }
-  }
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50,
+      "description": "Unique product ID in format online:{language}:{country}:{variantId}"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 150
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 5000
+    },
+    "link": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "image_link": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "additional_image_link": {
+      "type": "string"
+    },
+    "lifestyle_image_link": {
+      "type": "string"
+    },
+    "availability": {
+      "type": "string",
+      "enum": ["in stock", "out of stock", "preorder", "backorder"]
+    },
+    "price": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]{2} [A-Z]{3}$"
+    },
+    "sale_price": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]{2} [A-Z]{3}$"
+    },
+    "sale_price_effective_date": {
+      "type": "string"
+    },
+    "brand": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 70
+    },
+    "gtin": {
+      "type": "string"
+    },
+    "mpn": {
+      "type": "string",
+      "maxLength": 70
+    },
+    "identifier_exists": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    },
+    "condition": {
+      "type": "string",
+      "enum": ["new", "refurbished", "used"]
+    },
+    "google_product_category": {
+      "type": "string"
+    },
+    "product_type": {
+      "type": "string"
+    },
+    "item_group_id": {
+      "type": "string"
+    },
+    "color": {
+      "type": "string"
+    },
+    "material": {
+      "type": "string"
+    },
+    "size": {
+      "type": "string"
+    },
+    "shipping_weight": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)? (kg|lb|oz|g)$"
+    },
+    "custom_label_0": {
+      "type": "string",
+      "enum": ["outlet", "sale", "new", "evergreen"]
+    },
+    "custom_label_1": {
+      "type": "string",
+      "enum": ["bestseller", "high", "medium", "low", "unknown"]
+    },
+    "custom_label_2": {
+      "type": "string",
+      "enum": ["0_500", "500_1000", "1000_2500", "2500_5000", "5000_plus"]
+    },
+    "custom_label_3": {
+      "type": "string",
+      "enum": ["none", "1_10", "11_20", "21_30", "31_50", "51_70", "70_plus"]
+    },
+    "custom_label_4": {
+      "type": "string",
+      "enum": ["online", "showroom", "online_and_showroom", "made_to_order", "backorder", "out_of_stock"]
+    }
+  },
+  "additionalProperties": true
 }

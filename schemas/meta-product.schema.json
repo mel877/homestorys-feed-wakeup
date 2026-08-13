@@ -1,35 +1,81 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "meta-product",
-  "title": "MetaProduct",
-  "description": "Meta Catalog product feed row schema",
+  "title": "Meta Catalog Feed Row",
+  "description": "Validates a single row of the Meta (Facebook/Instagram) catalog CSV feed.",
   "type": "object",
-  "required": ["id", "title", "availability", "price", "link", "image_link", "brand"],
+  "required": ["id", "title", "description", "availability", "condition", "price", "link", "image_link", "brand"],
   "properties": {
-    "id": { "type": "string" },
-    "title": { "type": "string", "maxLength": 200 },
-    "description": { "type": "string", "maxLength": 9999 },
-    "availability": { "type": "string", "enum": ["in stock", "out of stock", "preorder", "available for order", "discontinued"] },
-    "condition": { "type": "string", "enum": ["new", "refurbished", "used"] },
-    "price": { "type": "string" },
-    "sale_price": { "type": "string" },
-    "link": { "type": "string", "format": "uri" },
-    "image_link": { "type": "string", "format": "uri" },
-    "additional_image_link": { "type": "string" },
-    "brand": { "type": "string" },
-    "gtin": { "type": "string" },
-    "mpn": { "type": "string" },
-    "google_product_category": { "type": "string" },
-    "product_type": { "type": "string" },
-    "item_group_id": { "type": "string" },
-    "color": { "type": "string" },
-    "material": { "type": "string" },
-    "size": { "type": "string" },
-    "shipping": { "type": "string" },
-    "custom_label_0": { "type": "string" },
-    "custom_label_1": { "type": "string" },
-    "custom_label_2": { "type": "string" },
-    "custom_label_3": { "type": "string" },
-    "custom_label_4": { "type": "string" }
-  }
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 9999
+    },
+    "availability": {
+      "type": "string",
+      "enum": ["in stock", "available for order", "out of stock", "discontinued", "preorder"]
+    },
+    "condition": {
+      "type": "string",
+      "enum": ["new", "refurbished", "used"]
+    },
+    "price": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)? [A-Z]{3}$"
+    },
+    "link": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "image_link": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "brand": {
+      "type": "string",
+      "minLength": 1
+    },
+    "gtin": {
+      "type": "string"
+    },
+    "mpn": {
+      "type": "string"
+    },
+    "item_group_id": {
+      "type": "string"
+    },
+    "google_product_category": {
+      "type": "string"
+    },
+    "product_type": {
+      "type": "string"
+    },
+    "color": {
+      "type": "string"
+    },
+    "material": {
+      "type": "string"
+    },
+    "additional_image_link": {
+      "type": "string"
+    },
+    "sale_price": {
+      "type": "string"
+    },
+    "sale_price_effective_date": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
 }

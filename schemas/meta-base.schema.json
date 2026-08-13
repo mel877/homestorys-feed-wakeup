@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "meta-base",
+  "title": "Meta Base Catalog Row",
+  "description": "Validates a row in meta-base.csv — language-agnostic identity and image fields.",
+  "type": "object",
+  "required": ["id", "brand", "condition", "image_link"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "item_group_id": {
+      "type": "string"
+    },
+    "gtin": {
+      "type": "string"
+    },
+    "mpn": {
+      "type": "string"
+    },
+    "brand": {
+      "type": "string",
+      "minLength": 1
+    },
+    "condition": {
+      "type": "string",
+      "enum": ["new", "refurbished", "used"]
+    },
+    "image_link": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "additional_image_link": {
+      "type": "string"
+    },
+    "lifestyle_image_link": {
+      "type": "string"
+    },
+    "google_product_category": {
+      "type": "string"
+    },
+    "product_type": {
+      "type": "string"
+    },
+    "color": {
+      "type": "string"
+    },
+    "material": {
+      "type": "string"
+    },
+    "age_group": {
+      "type": "string"
+    },
+    "gender": {
+      "type": "string"
+    },
+    "custom_label_0": {
+      "type": "string",
+      "enum": ["outlet", "sale", "new", "evergreen"]
+    },
+    "custom_label_1": {
+      "type": "string",
+      "enum": ["bestseller", "high", "medium", "low", "unknown"]
+    },
+    "custom_label_2": {
+      "type": "string",
+      "enum": ["0_500", "500_1000", "1000_2500", "2500_5000", "5000_plus"]
+    },
+    "custom_label_3": {
+      "type": "string",
+      "enum": ["none", "1_10", "11_20", "21_30", "31_50", "51_70", "70_plus"]
+    },
+    "custom_label_4": {
+      "type": "string",
+      "enum": ["online", "showroom", "online_and_showroom", "made_to_order", "backorder", "out_of_stock"]
+    }
+  },
+  "additionalProperties": true
+}

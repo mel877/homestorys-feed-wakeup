@@ -15,7 +15,12 @@ async function buildAll() {
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
-    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    entryPoints: [
+      path.resolve(artifactDir, "src/index.ts"),
+      path.resolve(artifactDir, "src/cli/sync-google.ts"),
+      path.resolve(artifactDir, "src/cli/sync-meta.ts"),
+      path.resolve(artifactDir, "src/cli/validate-feeds.ts"),
+    ],
     platform: "node",
     bundle: true,
     format: "esm",

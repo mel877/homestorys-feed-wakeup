@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "meta-country",
+  "title": "Meta Country Override Row",
+  "description": "Validates a row in meta-country-{CC}.csv — market-specific price and availability.",
+  "type": "object",
+  "required": ["id", "price", "availability"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "price": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)? [A-Z]{3}$"
+    },
+    "sale_price": {
+      "type": "string"
+    },
+    "sale_price_effective_date": {
+      "type": "string"
+    },
+    "availability": {
+      "type": "string",
+      "enum": ["in stock", "available for order", "out of stock", "discontinued", "preorder"]
+    }
+  },
+  "additionalProperties": true
+}
