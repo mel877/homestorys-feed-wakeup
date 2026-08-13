@@ -23,6 +23,10 @@ export const webhookEventsTable = pgTable(
     processedAt: timestamp("processed_at", { withTimezone: true }),
     error: text("error"),
     retryCount: integer("retry_count").notNull().default(0),
+    // When to retry after a failure — NULL means immediately eligible
+    retryAfter: timestamp("retry_after", { withTimezone: true }),
+    // Timestamp of last status change (used for stale-processing recovery)
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

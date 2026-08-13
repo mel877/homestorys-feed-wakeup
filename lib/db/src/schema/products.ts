@@ -4,6 +4,7 @@ import {
   timestamp,
   index,
   uuid,
+  unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -54,7 +55,7 @@ export const productTranslationsTable = pgTable(
       .defaultNow(),
   },
   (t) => [
-    index("product_translations_product_lang_idx").on(t.productId, t.language),
+    unique("product_translations_product_lang_unique").on(t.productId, t.language),
   ],
 );
 

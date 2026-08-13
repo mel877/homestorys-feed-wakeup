@@ -4,6 +4,7 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { loadConfig } from "./config";
+import { startWebhookWorker } from "./jobs/webhook-worker";
 
 const app: Express = express();
 
@@ -29,7 +30,7 @@ app.use(
 app.use(cors());
 
 // Raw body parser for webhook HMAC validation (must come before json parser)
-app.use("/api/webhooks", express.raw({ type: "application/json" }));
+app.use("/api/webhooks", express.raw({ type: "*/*" }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -59,6 +60,14 @@ if (_appEnv !== "development" && _appEnv !== "test") {
       "Set this secret in deployment environment variables before enabling Shopify webhooks.",
     );
   }
+}
+
+// Start webhook event worker (only when Shopify is configured)
+if (process.env["SHOPIFY_ADMIN_ACCESS_TOKEN"]) {
+  startWebhookWorker();
+  logger.info("Webhook worker started");
+} else {
+  logger.info("SHOPIFY_ADMIN_ACCESS_TOKEN not set — webhook worker not started");
 }
 
 export default app;

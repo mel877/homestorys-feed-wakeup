@@ -1,0 +1,295 @@
+/**
+ * Shopify Admin GraphQL client.
+ *
+ * Features:
+ * - Cost-aware rate limiting (token bucket from extensions.cost)
+ * - Exponential backoff + jitter for 429/5xx (max 6 retries)
+ * - Scope validation via REST API at startup
+ * - Access token is never logged
+ */
+
+import { logger as rootLogger } from "../lib/logger";
+import type { GraphQLResponse, ThrottleStatus, CostExtension, ShopifyAccessScope } from "./types";
+
+const logger = rootLogger.child({ module: "shopify-client" });
+
+// ── Errors ────────────────────────────────────────────────────────────────────
+
+export class ShopifyGraphQLError extends Error {
+  constructor(
+    public readonly errors: Array<{ message: string; path?: string[] }>,
+  ) {
+    super(errors.map((e) => e.message).join("; "));
+    this.name = "ShopifyGraphQLError";
+  }
+}
+
+export class ShopifyRateLimitError extends Error {
+  constructor(public readonly retryAfterMs: number) {
+    super(`Shopify rate limit hit — retry after ${retryAfterMs}ms`);
+    this.name = "ShopifyRateLimitError";
+  }
+}
+
+export class ShopifyScopeError extends Error {
+  constructor(public readonly missingScopes: string[]) {
+    super(`Missing Shopify API scopes: ${missingScopes.join(", ")}`);
+    this.name = "ShopifyScopeError";
+  }
+}
+
+// ── Rate limiter ──────────────────────────────────────────────────────────────
+
+class RateLimiter {
+  private currentlyAvailable: number;
+  private maximumAvailable: number;
+  private restoreRate: number; // points per second
+  private lastUpdateTime: number;
+
+  constructor() {
+    // Shopify GraphQL default limits
+    this.currentlyAvailable = 2000;
+    this.maximumAvailable = 2000;
+    this.restoreRate = 100;
+    this.lastUpdateTime = Date.now();
+  }
+
+  update(cost: CostExtension): void {
+    const { throttleStatus } = cost;
+    this.currentlyAvailable = throttleStatus.currentlyAvailable;
+    this.maximumAvailable = throttleStatus.maximumAvailable;
+    this.restoreRate = throttleStatus.restoreRate;
+    this.lastUpdateTime = Date.now();
+
+    logger.debug(
+      {
+        available: throttleStatus.currentlyAvailable,
+        maximum: throttleStatus.maximumAvailable,
+        actualCost: cost.actualQueryCost,
+      },
+      "Rate limiter updated",
+    );
+  }
+
+  async waitIfNeeded(requestedCost = 100): Promise<void> {
+    // Project currently available tokens forward in time
+    const elapsedMs = Date.now() - this.lastUpdateTime;
+    const restored = (elapsedMs / 1000) * this.restoreRate;
+    const projected = Math.min(
+      this.maximumAvailable,
+      this.currentlyAvailable + restored,
+    );
+
+    if (projected < requestedCost) {
+      const needed = requestedCost - projected;
+      const waitSeconds = needed / this.restoreRate;
+      const waitMs = Math.ceil(waitSeconds * 1000) + 200; // 200ms buffer
+      logger.debug({ waitMs, needed, restoreRate: this.restoreRate }, "Rate limiter waiting");
+      await sleep(waitMs);
+    }
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function jitter(maxMs = 1000): number {
+  return Math.floor(Math.random() * maxMs);
+}
+
+function extractNumericId(gid: string): string {
+  return gid.split("/").pop() ?? gid;
+}
+
+// ── ShopifyClient ─────────────────────────────────────────────────────────────
+
+export class ShopifyClient {
+  readonly shopDomain: string;
+  readonly apiVersion: string;
+  readonly graphqlEndpoint: string;
+  readonly restBase: string;
+
+  private readonly accessToken: string;
+  private readonly rateLimiter: RateLimiter;
+
+  constructor() {
+    this.shopDomain = requireEnv("SHOPIFY_SHOP_DOMAIN");
+    this.accessToken = requireEnv("SHOPIFY_ADMIN_ACCESS_TOKEN");
+    this.apiVersion =
+      process.env["SHOPIFY_API_VERSION"] ?? "2025-01";
+
+    this.graphqlEndpoint = `https://${this.shopDomain}/admin/api/${this.apiVersion}/graphql.json`;
+    this.restBase = `https://${this.shopDomain}/admin/api/${this.apiVersion}`;
+    this.rateLimiter = new RateLimiter();
+  }
+
+  /**
+   * Execute a GraphQL query or mutation.
+   * Retries on 429 / 5xx with exponential backoff + jitter.
+   * Never logs the access token.
+   */
+  async request<T>(
+    query: string,
+    variables?: Record<string, unknown>,
+    opts: { expectedCost?: number } = {},
+  ): Promise<T> {
+    await this.rateLimiter.waitIfNeeded(opts.expectedCost ?? 50);
+
+    const maxRetries = 6;
+    let attempt = 0;
+
+    while (attempt <= maxRetries) {
+      let response: Response;
+      try {
+        response = await fetch(this.graphqlEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": this.accessToken,
+          },
+          body: JSON.stringify({ query, variables }),
+        });
+      } catch (err) {
+        // Network error — retry
+        if (attempt >= maxRetries) throw err;
+        const backoff = Math.min(1000 * 2 ** attempt + jitter(), 60_000);
+        logger.warn({ attempt, backoff }, "Network error — retrying");
+        await sleep(backoff);
+        attempt++;
+        continue;
+      }
+
+      if (response.status === 429 || response.status >= 500) {
+        const retryAfter =
+          parseInt(response.headers.get("Retry-After") ?? "0") * 1000;
+        const backoff = Math.max(
+          retryAfter,
+          Math.min(1000 * 2 ** attempt + jitter(), 60_000),
+        );
+        logger.warn(
+          { status: response.status, attempt, backoff },
+          "HTTP error — retrying",
+        );
+        await sleep(backoff);
+        attempt++;
+        continue;
+      }
+
+      const body = (await response.json()) as GraphQLResponse<T>;
+
+      // Update rate limiter from cost extension
+      if (body.extensions?.cost) {
+        this.rateLimiter.update(body.extensions.cost);
+      }
+
+      // Handle throttled errors
+      if (body.errors?.length) {
+        const throttled = body.errors.some(
+          (e) =>
+            e.message.toLowerCase().includes("throttled") ||
+            e.extensions?.code === "THROTTLED",
+        );
+
+        if (throttled && attempt < maxRetries) {
+          const waitMs = await this.rateLimiter.waitIfNeeded(500);
+          const backoff = Math.max(
+            typeof waitMs === "number" ? waitMs : 0,
+            Math.min(2000 * 2 ** attempt + jitter(), 60_000),
+          );
+          logger.warn({ attempt, backoff }, "GraphQL throttled — retrying");
+          await sleep(backoff);
+          attempt++;
+          continue;
+        }
+
+        throw new ShopifyGraphQLError(body.errors);
+      }
+
+      return body.data;
+    }
+
+    throw new Error(`Shopify GraphQL request failed after ${maxRetries} retries`);
+  }
+
+  /**
+   * Execute a REST API request (used for scope validation).
+   * Never logs the access token.
+   */
+  async requestRest<T>(path: string): Promise<T> {
+    const response = await fetch(`${this.restBase}${path}`, {
+      headers: {
+        "X-Shopify-Access-Token": this.accessToken,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Shopify REST ${path} → ${response.status}`);
+    }
+    return response.json() as Promise<T>;
+  }
+
+  /**
+   * Validate that the access token has all required Admin API scopes.
+   * Logs scope names only — never the token itself.
+   */
+  async validateScopes(required: string[]): Promise<void> {
+    let granted: ShopifyAccessScope[];
+
+    try {
+      const result = await this.requestRest<{ access_scopes: ShopifyAccessScope[] }>(
+        "/access_scopes.json",
+      );
+      granted = result.access_scopes;
+    } catch (err) {
+      logger.warn({ err }, "Could not verify Shopify API scopes — continuing");
+      return;
+    }
+
+    const grantedSet = new Set(granted.map((s) => s.handle));
+    const missing = required.filter((s) => !grantedSet.has(s));
+
+    if (missing.length > 0) {
+      logger.error({ missing, granted: [...grantedSet] }, "Missing required Shopify scopes");
+      throw new ShopifyScopeError(missing);
+    }
+
+    logger.info({ granted: granted.map((s) => s.handle) }, "Shopify scopes validated");
+  }
+
+  /** Fetch basic shop information (does not include the token). */
+  async getShopInfo(): Promise<{ name: string; myshopifyDomain: string }> {
+    const query = `{ shop { name myshopifyDomain } }`;
+    const result = await this.request<{ shop: { name: string; myshopifyDomain: string } }>(query);
+    return result.shop;
+  }
+}
+
+// ── Module-level singleton ────────────────────────────────────────────────────
+
+let _client: ShopifyClient | null = null;
+
+export function getShopifyClient(): ShopifyClient {
+  if (!_client) {
+    _client = new ShopifyClient();
+  }
+  return _client;
+}
+
+export function resetShopifyClient(): void {
+  _client = null;
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function requireEnv(name: string): string {
+  const val = process.env[name];
+  if (!val) {
+    throw new Error(`Required environment variable ${name} is not set`);
+  }
+  return val;
+}
+
+export { extractNumericId, sleep };
