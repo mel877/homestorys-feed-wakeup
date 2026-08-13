@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "canonical-product",
+  "title": "CanonicalProduct",
+  "description": "Homestorys canonical product model — single source of truth for all channel exports",
+  "type": "object",
+  "required": [
+    "id", "productId", "variantId", "itemGroupId",
+    "brand", "language", "market",
+    "title", "description",
+    "price", "isOnSale", "discountBucket",
+    "isOutlet", "isExhibitionModel", "isBestseller", "isNew",
+    "availability",
+    "productUrl",
+    "customLabels",
+    "sourceUpdatedAt", "generatedAt"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "productId": { "type": "string" },
+    "variantId": { "type": "string" },
+    "itemGroupId": { "type": "string" },
+    "sku": { "type": ["string", "null"] },
+    "gtin": { "type": ["string", "null"] },
+    "mpn": { "type": ["string", "null"] },
+    "identifierExists": { "type": "boolean" },
+    "brand": { "type": "string" },
+    "vendor": { "type": ["string", "null"] },
+    "language": { "type": "string", "enum": ["fr", "de", "en", "it"] },
+    "market": { "type": "string" },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "productType": { "type": ["string", "null"] },
+    "collections": { "type": "array", "items": { "type": "string" } },
+    "googleProductCategory": { "type": ["string", "null"] },
+    "metaProductCategory": { "type": ["string", "null"] },
+    "material": { "type": "array", "items": { "type": "string" } },
+    "color": { "type": "array", "items": { "type": "string" } },
+    "style": { "type": "array", "items": { "type": "string" } },
+    "room": { "type": "array", "items": { "type": "string" } },
+    "indoorOutdoor": { "type": ["string", "null"], "enum": ["indoor", "outdoor", "both", null] },
+    "price": {
+      "type": "object",
+      "required": ["amount", "currency"],
+      "properties": {
+        "amount": { "type": "number" },
+        "currency": { "type": "string" }
+      }
+    },
+    "compareAtPrice": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["amount", "currency"],
+          "properties": {
+            "amount": { "type": "number" },
+            "currency": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "salePrice": {
+      "oneOf": [{ "type": "null" }, { "type": "object" }]
+    },
+    "isOnSale": { "type": "boolean" },
+    "discountPercentage": { "type": ["number", "null"] },
+    "discountBucket": { "type": "string" },
+    "isOutlet": { "type": "boolean" },
+    "isExhibitionModel": { "type": "boolean" },
+    "isBestseller": { "type": "boolean" },
+    "isNew": { "type": "boolean" },
+    "availability": { "type": "string" },
+    "stockTotal": { "type": ["number", "null"] },
+    "stockOnline": { "type": ["number", "null"] },
+    "stockEupen": { "type": ["number", "null"] },
+    "pickupEupen": { "type": "boolean" },
+    "primaryImage": { "oneOf": [{ "type": "null" }, { "type": "object" }] },
+    "lifestyleImage": { "oneOf": [{ "type": "null" }, { "type": "object" }] },
+    "additionalImages": { "type": "array" },
+    "productUrl": { "type": "string", "format": "uri" },
+    "shippingClass": { "type": ["string", "null"] },
+    "returnClass": { "type": ["string", "null"] },
+    "relatedProductIds": { "type": "array", "items": { "type": "string" } },
+    "complementaryProductIds": { "type": "array", "items": { "type": "string" } },
+    "customLabels": { "type": "object" },
+    "sourceUpdatedAt": { "type": "string", "format": "date-time" },
+    "generatedAt": { "type": "string", "format": "date-time" }
+  }
+}

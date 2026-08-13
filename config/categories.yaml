@@ -1,0 +1,87 @@
+# Category mapping: Shopify product_type / collection → canonical → Google taxonomy → Meta taxonomy
+# Priority: explicit mapping > collection > product_type > fallback
+
+# Google Product Category IDs reference:
+# https://www.google.com/basepages/producttype/taxonomy-with-ids.en-US.txt
+
+# Meta Product Category reference:
+# https://developers.facebook.com/docs/marketing-api/catalog/reference/
+
+fallback_google_category_id: "436"   # Furniture
+fallback_google_category_label: "Furniture"
+fallback_meta_category: "furniture"
+
+mappings:
+  # Format:
+  # - shopify_type: exact product_type from Shopify (case-insensitive match)
+  #   canonical: internal canonical category slug
+  #   google_category_id: numeric Google taxonomy ID
+  #   google_category_label: human-readable Google taxonomy label
+  #   meta_category: Meta product category string
+  #   indoor_outdoor: indoor | outdoor | both
+
+  - shopify_type: "Sofa"
+    canonical: sofa
+    google_category_id: "4234"
+    google_category_label: "Furniture > Sofas & Sectionals"
+    meta_category: "furniture > seating > sofas"
+    indoor_outdoor: indoor
+
+  - shopify_type: "Dining Table"
+    canonical: dining_table
+    google_category_id: "443"
+    google_category_label: "Furniture > Tables > Kitchen & Dining Room Tables"
+    meta_category: "furniture > tables"
+    indoor_outdoor: indoor
+
+  - shopify_type: "Coffee Table"
+    canonical: coffee_table
+    google_category_id: "454"
+    google_category_label: "Furniture > Tables > Coffee Tables"
+    meta_category: "furniture > tables"
+    indoor_outdoor: indoor
+
+  - shopify_type: "Dining Chair"
+    canonical: dining_chair
+    google_category_id: "441"
+    google_category_label: "Furniture > Chairs > Dining Room Chairs"
+    meta_category: "furniture > seating > chairs"
+    indoor_outdoor: indoor
+
+  - shopify_type: "Bed"
+    canonical: bed
+    google_category_id: "563"
+    google_category_label: "Furniture > Beds & Accessories > Beds"
+    meta_category: "furniture > beds"
+    indoor_outdoor: indoor
+
+  - shopify_type: "Sideboard"
+    canonical: sideboard
+    google_category_id: "436"
+    google_category_label: "Furniture > Storage & Organization > Sideboards"
+    meta_category: "furniture > storage"
+    indoor_outdoor: indoor
+
+  - shopify_type: "Bookcase"
+    canonical: bookcase
+    google_category_id: "6543"
+    google_category_label: "Furniture > Bookcases & Storage Cabinets"
+    meta_category: "furniture > storage"
+    indoor_outdoor: indoor
+
+  - shopify_type: "Outdoor Sofa"
+    canonical: outdoor_sofa
+    google_category_id: "4234"
+    google_category_label: "Furniture > Sofas & Sectionals"
+    meta_category: "furniture > outdoor furniture > outdoor seating"
+    indoor_outdoor: outdoor
+
+  - shopify_type: "Outdoor Table"
+    canonical: outdoor_table
+    google_category_id: "443"
+    google_category_label: "Furniture > Tables"
+    meta_category: "furniture > outdoor furniture > outdoor tables"
+    indoor_outdoor: outdoor
+
+# Collection-based fallbacks (lower priority than product_type mapping)
+collection_mappings: []

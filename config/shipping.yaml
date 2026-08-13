@@ -1,0 +1,28 @@
+classes:
+  standard:
+    label: Standard Delivery
+    description: Standard home delivery for small to medium items
+
+  bulky:
+    label: Bulky / Large Furniture
+    description: Dedicated delivery for oversized furniture items
+
+  premium_delivery:
+    label: Premium Delivery & Assembly
+    description: White-glove delivery with in-home assembly
+
+  made_to_order:
+    label: Made to Order
+    description: Custom items — delivery timeline communicated separately
+
+  pickup_only:
+    label: Showroom Pickup Only
+    description: Available for pickup at Eupen showroom only
+
+# Per-market rates — intentionally empty; do not invent rates.
+# Populate from actual business rules provided in /input/shipping/
+# and configure in Google Merchant Center account-level shipping settings.
+rates: {}
+
+# Default class when no metafield is present and no rule matches
+default_class: standard

@@ -1,0 +1,27 @@
+classes:
+  standard:
+    label: Standard Return
+    description: Standard return policy
+    days: 14
+    returnable: true
+
+  made_to_order:
+    label: Made to Order
+    description: Custom-made items — no return possible
+    returnable: false
+
+  exhibition:
+    label: Exhibition / Showroom Model
+    description: Sold as-is; no return
+    returnable: false
+
+  customized:
+    label: Customized Product
+    description: Personalized items — no return possible
+    returnable: false
+
+# Default class when feed.return_class metafield is absent
+default_class: standard
+
+# Note: actual legal return policy text must be provided by business/legal.
+# Never auto-generate return policy text.

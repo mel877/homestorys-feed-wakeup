@@ -1,0 +1,85 @@
+# Google Custom Labels configuration
+# custom_label_0 = lifecycle
+# custom_label_1 = performance
+# custom_label_2 = price_band
+# custom_label_3 = discount
+# custom_label_4 = inventory
+
+# Lifecycle values (priority: outlet > sale > new > evergreen)
+lifecycle_values:
+  - outlet
+  - sale
+  - new
+  - evergreen
+
+# Performance / bestseller classes
+performance_values:
+  - bestseller
+  - high
+  - medium
+  - low
+  - unknown
+
+# Price bands (in EUR; same bands apply to all markets)
+price_bands:
+  - key: "0_500"
+    min: 0
+    max: 499.99
+
+  - key: "500_1000"
+    min: 500
+    max: 999.99
+
+  - key: "1000_2500"
+    min: 1000
+    max: 2499.99
+
+  - key: "2500_5000"
+    min: 2500
+    max: 4999.99
+
+  - key: "5000_plus"
+    min: 5000
+    max: null
+
+# Discount buckets (percentage)
+discount_buckets:
+  - key: "none"
+    min: 0
+    max: 0
+
+  - key: "1_10"
+    min: 1
+    max: 10
+
+  - key: "11_20"
+    min: 11
+    max: 20
+
+  - key: "21_30"
+    min: 21
+    max: 30
+
+  - key: "31_50"
+    min: 31
+    max: 50
+
+  - key: "51_70"
+    min: 51
+    max: 70
+
+  - key: "70_plus"
+    min: 70
+    max: null
+
+# Inventory label values
+inventory_values:
+  - online
+  - showroom
+  - online_and_showroom
+  - made_to_order
+  - backorder
+  - out_of_stock
+
+# New product threshold (days since first published)
+new_product_days: 60

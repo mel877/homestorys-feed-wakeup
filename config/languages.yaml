@@ -1,0 +1,16 @@
+languages:
+  - code: fr
+    name: French
+    locale: fr-FR
+
+  - code: de
+    name: German
+    locale: de-DE
+
+  - code: en
+    name: English
+    locale: en-GB
+
+  - code: it
+    name: Italian
+    locale: it-IT

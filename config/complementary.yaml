@@ -1,0 +1,43 @@
+# Complementary product type mappings
+# When a customer views product of type A, suggest products of types B, C, ...
+
+complementary:
+  sofa:
+    - coffee_table
+    - rug
+    - side_table
+    - lighting
+
+  dining_table:
+    - dining_chair
+    - pendant_light
+    - sideboard
+
+  coffee_table:
+    - sofa
+    - rug
+    - side_table
+
+  bed:
+    - bedside_table
+    - lighting
+    - rug
+
+  outdoor_sofa:
+    - outdoor_coffee_table
+    - outdoor_side_table
+    - outdoor_lighting
+
+  outdoor_table:
+    - outdoor_chair
+    - outdoor_lighting
+    - outdoor_umbrella
+
+  bookcase:
+    - desk
+    - desk_chair
+    - lighting
+
+  sideboard:
+    - dining_table
+    - pendant_light

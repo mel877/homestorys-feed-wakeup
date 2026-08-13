@@ -1,0 +1,62 @@
+# Feed safety and policy configuration
+
+# Alert thresholds
+alerts:
+  # Alert if eligible product count drops more than this % between runs
+  item_count_drop_threshold_pct: 5
+  # Alert if more than this % of products have invalid prices
+  price_invalid_threshold_pct: 2
+  # Alert if meta feed was not regenerated within this many hours
+  meta_feed_stale_hours: 6
+  # Alert if stock was not refreshed within this many hours
+  stock_stale_hours: 3
+  # Optional webhook URL for alert notifications (set via ALERT_WEBHOOK_URL env)
+  webhook_url: ""
+
+# Snapshot publication gate
+snapshot_gate:
+  # Block snapshot publication if eligible item count drops more than this %
+  max_item_count_drop_pct: 10
+  # Block if global validation returns errors
+  require_zero_schema_errors: true
+
+# Dry-run defaults (override with GOOGLE_DRY_RUN / META_DRY_RUN env vars)
+dry_run:
+  google: true
+  meta: true
+
+# Sync schedules (cron expressions, UTC)
+sync_schedule:
+  full: "0 2 * * *"           # nightly at 02:00 UTC
+  prices: "0 */2 * * *"       # every 2 hours
+  inventory: "0 * * * *"      # hourly
+  recommendations: "0 3 * * *" # nightly at 03:00 UTC
+
+# Recommendation engine settings
+recommendations:
+  top_n: 8
+  price_tolerance_pct: 20
+  price_tolerance_max_pct: 40
+
+# Bestseller scoring weights
+bestseller_scoring:
+  sales_30d: 0.55
+  sales_60d: 0.20
+  revenue_normalized: 0.15
+  stock_health: 0.10
+
+# Product conditions
+conditions:
+  # Number of days a product is considered "new"
+  new_product_days: 60
+
+# Data quality score weights (must sum to 100)
+quality_weights:
+  identity: 20
+  pricing: 15
+  inventory: 15
+  images: 15
+  classification: 10
+  content: 10
+  identifiers: 10
+  shipping: 5

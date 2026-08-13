@@ -1,0 +1,16 @@
+stores:
+  eupen:
+    # Populated automatically by audit-shopify script; override with env SHOPIFY_EUPEN_LOCATION_ID
+    shopify_location_id: ""
+    # Google Local Inventory store code — must match Google Merchant Center
+    # Required: set GOOGLE_EUPEN_STORE_CODE env var
+    google_store_code: ""
+    name: Homestorys Eupen
+    address:
+      street: "Industriestraße 38"
+      city: Eupen
+      postal_code: "4700"
+      country: BE
+    phone: ""
+    website_url: "https://www.homestorys.be"
+    pickup_enabled: true

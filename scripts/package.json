@@ -5,7 +5,16 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
+    "bootstrap": "tsx ./src/bootstrap.ts",
+    "audit:shopify": "tsx ./src/audit-shopify.ts",
+    "backfill": "tsx ./src/backfill.ts",
+    "compare-feeds": "tsx ./src/compare-feeds.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@workspace/db": "workspace:*",
+    "yaml": "^2.8.0",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

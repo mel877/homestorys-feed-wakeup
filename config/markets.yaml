@@ -1,0 +1,41 @@
+markets:
+  BE_FR:
+    country: BE
+    language: fr
+    currency: EUR
+    label: Belgium (French)
+
+  BE_DE:
+    country: BE
+    language: de
+    currency: EUR
+    label: Belgium (German)
+
+  FR:
+    country: FR
+    language: fr
+    currency: EUR
+    label: France
+
+  DE:
+    country: DE
+    language: de
+    currency: EUR
+    label: Germany
+
+  AT:
+    country: AT
+    language: de
+    currency: EUR
+    label: Austria
+
+# Language masters — shared content, no per-country duplication
+language_masters:
+  fr:
+    markets: [BE_FR, FR]
+  de:
+    markets: [BE_DE, DE, AT]
+  en:
+    markets: []
+  it:
+    markets: []
