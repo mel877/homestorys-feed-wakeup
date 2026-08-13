@@ -11,24 +11,55 @@ process.env["CONFIG_DIR"] = CONFIG_DIR;
 
 // ── DB mock (feed-health and recommendations require @workspace/db) ───────────
 vi.mock("@workspace/db", () => {
-  const select = vi.fn().mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      orderBy: vi.fn().mockReturnValue({
-        limit: vi.fn().mockResolvedValue([]),
-      }),
-      where: vi.fn().mockReturnValue({
-        groupBy: vi.fn().mockResolvedValue([]),
-        limit: vi.fn().mockResolvedValue([]),
-      }),
-      groupBy: vi.fn().mockResolvedValue([]),
+  // A Proxy that acts as a chainable query builder resolving to [].
+  // Every property access returns a function that returns a new proxy;
+  // `then` / `catch` are forwarded to Promise.resolve([]) so `await chain` = [].
+  function makeQueryProxy(): unknown {
+    return new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === "then") {
+            return (
+              onfulfilled: ((v: unknown[]) => unknown) | null | undefined,
+              onrejected: ((e: unknown) => unknown) | null | undefined,
+            ) => Promise.resolve([]).then(onfulfilled, onrejected);
+          }
+          if (prop === "catch") {
+            return (onrejected: (e: unknown) => unknown) =>
+              Promise.resolve([]).catch(onrejected);
+          }
+          // Any other method → function that returns a fresh proxy
+          return () => makeQueryProxy();
+        },
+      },
+    );
+  }
+
+  const mockInsert = vi.fn().mockReturnValue({
+    values: vi.fn().mockReturnValue({
+      onConflictDoUpdate: vi.fn().mockResolvedValue([]),
+      returning: vi.fn().mockResolvedValue([]),
     }),
   });
+
   return {
-    db: { select },
+    db: {
+      select: vi.fn().mockImplementation(() => makeQueryProxy()),
+      insert: mockInsert,
+      execute: vi.fn().mockResolvedValue({ rows: [] }),
+    },
     syncRunsTable: {},
     feedItemsTable: {},
+    feedSnapshotsTable: {},
+    syncErrorsTable: {},
+    channelDiagnosticsTable: {},
     recommendationsTable: {},
     productsTable: {},
+    variantsTable: {},
+    marketVariantsTable: {},
+    webhookEventsTable: {},
+    sql: vi.fn().mockReturnValue(""),
   };
 });
 

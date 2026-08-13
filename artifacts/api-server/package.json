@@ -13,7 +13,10 @@
     "test:coverage": "vitest run --coverage",
     "sync:google": "node --enable-source-maps ./dist/cli/sync-google.mjs",
     "sync:meta": "node --enable-source-maps ./dist/cli/sync-meta.mjs",
-    "feed:validate": "node --enable-source-maps ./dist/cli/validate-feeds.mjs"
+    "feed:validate": "node --enable-source-maps ./dist/cli/validate-feeds.mjs",
+    "sync:full": "node --enable-source-maps ./dist/cli/sync-full.mjs",
+    "sync:inventory": "node --enable-source-maps ./dist/cli/sync-inventory.mjs",
+    "sync:prices": "node --enable-source-maps ./dist/cli/sync-prices.mjs"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.22.0",

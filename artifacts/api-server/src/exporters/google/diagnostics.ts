@@ -17,7 +17,7 @@
 
 import { GoogleAuth } from "google-auth-library";
 import { db, channelDiagnosticsTable } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 import { logger as rootLogger } from "../../lib/logger";
 import type { InsertChannelDiagnostic } from "@workspace/db";
 
@@ -214,7 +214,37 @@ export async function fetchAndStoreDiagnostics(
     throw err;
   }
 
-  // Persist to DB
+  // ── Snapshot reconciliation ───────────────────────────────────────────────
+  //
+  // A successful Google fetch is a complete snapshot. Any unresolved row that
+  // was fetched BEFORE this batch's start time is now considered resolved
+  // (the issue either cleared or the product was removed from the account).
+  // We mark those rows resolved BEFORE inserting the fresh batch so that
+  // subsequent alert checks only see current data.
+  //
+  // Rows from this batch (fetchedAt === fetchedAt) are inserted below and
+  // have resolvedAt = null, representing the live state from Google.
+  const resolvedCount = await db
+    .update(channelDiagnosticsTable)
+    .set({ resolvedAt: fetchedAt })
+    .where(
+      and(
+        eq(channelDiagnosticsTable.channel, "google"),
+        // Scope reconciliation to the same market (null = global / no market filter)
+        marketCode != null
+          ? eq(channelDiagnosticsTable.marketCode, marketCode)
+          : isNull(channelDiagnosticsTable.marketCode),
+        isNull(channelDiagnosticsTable.resolvedAt),  // only touch currently-unresolved
+        lt(channelDiagnosticsTable.fetchedAt, fetchedAt), // fetched before this batch
+      ),
+    );
+
+  logger.debug(
+    { resolvedCount: (resolvedCount as unknown as { rowCount?: number })?.rowCount ?? "?" },
+    "Prior unresolved diagnostics marked as resolved",
+  );
+
+  // Insert fresh rows (current state from Google)
   if (issues.length > 0) {
     const CHUNK = 100;
     for (let i = 0; i < issues.length; i += CHUNK) {
@@ -222,7 +252,7 @@ export async function fetchAndStoreDiagnostics(
     }
     logger.info({ count: issues.length }, "Google diagnostics stored");
   } else {
-    logger.info("No issues found in Google diagnostics");
+    logger.info("No issues found in Google diagnostics — all prior issues marked resolved");
   }
 
   const critical = issues.filter((i) => i.severity === "critical").length;

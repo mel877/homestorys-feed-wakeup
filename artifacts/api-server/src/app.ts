@@ -70,4 +70,13 @@ if (process.env["SHOPIFY_ADMIN_ACCESS_TOKEN"]) {
   logger.info("SHOPIFY_ADMIN_ACCESS_TOKEN not set — webhook worker not started");
 }
 
+// Start the in-process scheduler (async — does not block server start)
+import("./jobs/scheduler")
+  .then(({ startScheduler }) => {
+    startScheduler().catch((err) =>
+      logger.error({ err }, "Failed to start scheduler"),
+    );
+  })
+  .catch((err) => logger.error({ err }, "Failed to import scheduler"));
+
 export default app;
