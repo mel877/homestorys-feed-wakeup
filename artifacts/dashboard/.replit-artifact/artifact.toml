@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/dashboard/"
+title = "Feed Engine Dashboard"
+description = "Internal monitoring and operations dashboard for the Homestorys product feed engine. Gives the team real-time visibility into sync health, product data quality, Google/Meta channel diagnostics, image classification, inventory breakdown, and manual sync triggers — replacing the operational visibility that Channable provided."
+version = "1.0.0"
+id = "artifacts/dashboard"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/dashboard/" ]
+localPort = 23183
+
+[services.development]
+run = "pnpm --filter @workspace/dashboard run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/dashboard", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/dashboard/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23183"
+BASE_PATH = "/dashboard/"

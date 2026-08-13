@@ -16,6 +16,10 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { downloadFeedFile } from "../lib/storage";
 import { logger as rootLogger } from "../lib/logger";
 import { requireInternalAuth } from "../middlewares/internal-auth";
+import { requireDashboardAuth } from "./dashboard/auth";
+import { db, feedSnapshotsTable } from "@workspace/db";
+import { ListFeedSnapshotsQueryParams } from "@workspace/api-zod";
+import { eq, desc, sql } from "drizzle-orm";
 
 const logger = rootLogger.child({ module: "feed-routes" });
 
@@ -117,5 +121,47 @@ router.get(
     );
   },
 );
+
+// ── Dashboard: feed snapshots list ────────────────────────────────────────────
+
+/**
+ * GET /feeds/snapshots — list feed snapshots for the dashboard.
+ * Secured with dashboard session cookie.
+ */
+router.get("/feeds/snapshots", requireDashboardAuth, async (req: Request, res: Response): Promise<void> => {
+  const params = ListFeedSnapshotsQueryParams.safeParse(req.query);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const { channel, currentOnly } = params.data;
+
+  const conditions = [];
+  if (channel) conditions.push(eq(feedSnapshotsTable.channel, channel));
+  if (currentOnly) conditions.push(eq(feedSnapshotsTable.isCurrent, true));
+
+  const rows = await db.select().from(feedSnapshotsTable)
+    .where(conditions.length ? sql`${conditions.reduce((a, b) => sql`${a} and ${b}`)}` : undefined)
+    .orderBy(desc(feedSnapshotsTable.generatedAt))
+    .limit(200);
+
+  const items = rows.map((r) => ({
+    id: r.id,
+    channel: r.channel,
+    language: r.language ?? null,
+    marketCode: r.marketCode ?? null,
+    storagePath: r.storagePath,
+    itemCount: r.itemCount ?? 0,
+    sha256: r.sha256 ?? null,
+    isCurrent: r.isCurrent ?? false,
+    generatedAt: r.generatedAt?.toISOString() ?? "",
+    downloadUrl: r.storagePath
+      ? `/api/feeds/${r.channel}/${r.storagePath.split("/").pop() ?? ""}`
+      : null,
+  }));
+
+  res.json(items);
+});
 
 export default router;

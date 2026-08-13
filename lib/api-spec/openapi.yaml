@@ -10,6 +10,24 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: dashboard-auth
+    description: Dashboard authentication
+  - name: dashboard-overview
+    description: Dashboard overview and KPIs
+  - name: dashboard-runs
+    description: Sync run history and triggers
+  - name: dashboard-products
+    description: Product inspection
+  - name: dashboard-channels
+    description: Google and Meta channel status
+  - name: dashboard-images
+    description: Image analysis
+  - name: dashboard-inventory
+    description: Inventory breakdown
+  - name: dashboard-quality
+    description: Data quality
+  - name: feeds
+    description: Feed snapshot downloads
 paths:
   /healthz:
     get:
@@ -24,8 +42,382 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── Dashboard Auth ─────────────────────────────────────────────────────────
+  /dashboard/auth/login:
+    post:
+      operationId: dashboardLogin
+      tags: [dashboard-auth]
+      summary: Login to dashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginCredentials"
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /dashboard/auth/logout:
+    post:
+      operationId: dashboardLogout
+      tags: [dashboard-auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+
+  /dashboard/auth/me:
+    get:
+      operationId: getDashboardAuthMe
+      tags: [dashboard-auth]
+      summary: Check authentication status
+      responses:
+        "200":
+          description: Auth status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSession"
+
+  # ── Overview ───────────────────────────────────────────────────────────────
+  /dashboard/overview:
+    get:
+      operationId: getDashboardOverview
+      tags: [dashboard-overview]
+      summary: Dashboard overview KPIs and sync health
+      responses:
+        "200":
+          description: Overview data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardOverview"
+
+  # ── Sync Runs ──────────────────────────────────────────────────────────────
+  /dashboard/sync-runs:
+    get:
+      operationId: listSyncRuns
+      tags: [dashboard-runs]
+      summary: List sync run history
+      parameters:
+        - name: runType
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: status
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: limit
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: offset
+          in: query
+          schema:
+            type: ["number", "null"]
+      responses:
+        "200":
+          description: Sync runs list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncRunList"
+
+  /dashboard/sync-runs/{id}:
+    get:
+      operationId: getSyncRun
+      tags: [dashboard-runs]
+      summary: Get sync run details with errors
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Sync run detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncRunDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /dashboard/sync-runs/trigger:
+    post:
+      operationId: triggerSync
+      tags: [dashboard-runs]
+      summary: Manually trigger a sync job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncTriggerInput"
+      responses:
+        "200":
+          description: Sync triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncTriggerResult"
+        "409":
+          description: Sync already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Products ───────────────────────────────────────────────────────────────
+  /dashboard/products:
+    get:
+      operationId: listDashboardProducts
+      tags: [dashboard-products]
+      summary: List and search products with filters
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: ["string", "null"]
+          description: Search by title, handle, SKU, or GTIN
+        - name: market
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: language
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: brand
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: category
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: availability
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: lifecycle
+          in: query
+          schema:
+            type: ["string", "null"]
+          description: Lifecycle label (outlet, discontinued, bestseller, exhibition_model)
+        - name: eligible
+          in: query
+          schema:
+            type: ["boolean", "null"]
+        - name: minQuality
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: maxQuality
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: limit
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: offset
+          in: query
+          schema:
+            type: ["number", "null"]
+      responses:
+        "200":
+          description: Products list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductList"
+
+  /dashboard/products/{id}:
+    get:
+      operationId: getDashboardProduct
+      tags: [dashboard-products]
+      summary: Full product debug view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Product UUID
+      responses:
+        "200":
+          description: Product debug data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDebug"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Google ─────────────────────────────────────────────────────────────────
+  /dashboard/google/status:
+    get:
+      operationId: getGoogleStatus
+      tags: [dashboard-channels]
+      summary: Google Merchant Center status and diagnostics
+      responses:
+        "200":
+          description: Google status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleChannelStatus"
+
+  # ── Meta ───────────────────────────────────────────────────────────────────
+  /dashboard/meta/status:
+    get:
+      operationId: getMetaStatus
+      tags: [dashboard-channels]
+      summary: Meta Catalog feed status and freshness
+      responses:
+        "200":
+          description: Meta status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetaChannelStatus"
+
+  # ── Images ─────────────────────────────────────────────────────────────────
+  /dashboard/images:
+    get:
+      operationId: listImageAnalysis
+      tags: [dashboard-images]
+      summary: Image analysis with classification scores
+      parameters:
+        - name: productId
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: imageType
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: classified
+          in: query
+          schema:
+            type: ["boolean", "null"]
+        - name: minWhiteScore
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: limit
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: offset
+          in: query
+          schema:
+            type: ["number", "null"]
+      responses:
+        "200":
+          description: Image analysis list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageAnalysisList"
+
+  # ── Inventory ──────────────────────────────────────────────────────────────
+  /dashboard/inventory:
+    get:
+      operationId: getInventoryBreakdown
+      tags: [dashboard-inventory]
+      summary: Inventory breakdown by location and availability
+      responses:
+        "200":
+          description: Inventory breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryBreakdown"
+
+  # ── Data Quality ───────────────────────────────────────────────────────────
+  /dashboard/data-quality:
+    get:
+      operationId: getDataQuality
+      tags: [dashboard-quality]
+      summary: Data quality score breakdown and low-quality products
+      parameters:
+        - name: threshold
+          in: query
+          schema:
+            type: ["number", "null"]
+          description: Score threshold (default 70). Products at or below this score appear in the low-quality list.
+        - name: market
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: limit
+          in: query
+          schema:
+            type: ["number", "null"]
+      responses:
+        "200":
+          description: Data quality report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataQualityReport"
+
+  # ── Feed Snapshots ─────────────────────────────────────────────────────────
+  /feeds/snapshots:
+    get:
+      operationId: listFeedSnapshots
+      tags: [feeds]
+      summary: List available feed snapshots
+      parameters:
+        - name: channel
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: currentOnly
+          in: query
+          schema:
+            type: ["boolean", "null"]
+      responses:
+        "200":
+          description: Feed snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FeedSnapshot"
+
 components:
   schemas:
+    # ── Primitives ─────────────────────────────────────────────────────────────
     HealthStatus:
       type: object
       properties:
@@ -34,3 +426,827 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    OkResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required:
+        - ok
+
+    # ── Auth ───────────────────────────────────────────────────────────────────
+    LoginCredentials:
+      type: object
+      properties:
+        password:
+          type: string
+      required:
+        - password
+
+    AuthSession:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+      required:
+        - authenticated
+
+    # ── Overview ───────────────────────────────────────────────────────────────
+    DashboardOverview:
+      type: object
+      required:
+        - totalProducts
+        - totalVariants
+        - eligibleVariants
+        - byMarket
+        - byAvailability
+        - recentRuns
+        - activeAlerts
+        - feedHealth
+      properties:
+        totalProducts:
+          type: number
+        totalVariants:
+          type: number
+        eligibleVariants:
+          type: number
+        byMarket:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketCount"
+        byAvailability:
+          type: array
+          items:
+            $ref: "#/components/schemas/AvailabilityCount"
+        recentRuns:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncRunSummary"
+        activeAlerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AlertSummary"
+        feedHealth:
+          $ref: "#/components/schemas/FeedHealthKpis"
+
+    MarketCount:
+      type: object
+      required: [marketCode, totalVariants, eligibleVariants]
+      properties:
+        marketCode:
+          type: string
+        totalVariants:
+          type: number
+        eligibleVariants:
+          type: number
+
+    AvailabilityCount:
+      type: object
+      required: [availability, count]
+      properties:
+        availability:
+          type: string
+        count:
+          type: number
+
+    FeedHealthKpis:
+      type: object
+      required:
+        - avgDataQualityScore
+        - variantsBelow70
+        - classifiedImages
+        - totalImages
+        - lastFullSync
+        - lastGooglePush
+        - lastMetaPush
+      properties:
+        avgDataQualityScore:
+          type: ["number", "null"]
+        variantsBelow70:
+          type: number
+        classifiedImages:
+          type: number
+        totalImages:
+          type: number
+        lastFullSync:
+          type: ["string", "null"]
+          description: ISO timestamp
+        lastGooglePush:
+          type: ["string", "null"]
+          description: ISO timestamp
+        lastMetaPush:
+          type: ["string", "null"]
+          description: ISO timestamp
+
+    AlertSummary:
+      type: object
+      required: [type, severity, message]
+      properties:
+        type:
+          type: string
+        severity:
+          type: string
+        message:
+          type: string
+        count:
+          type: ["number", "null"]
+
+    # ── Sync Runs ──────────────────────────────────────────────────────────────
+    SyncRunSummary:
+      type: object
+      required:
+        - id
+        - runType
+        - status
+        - startedAt
+      properties:
+        id:
+          type: string
+        runType:
+          type: string
+        status:
+          type: string
+        startedAt:
+          type: string
+        finishedAt:
+          type: ["string", "null"]
+        durationMs:
+          type: ["number", "null"]
+        recordsRead:
+          type: number
+        recordsChanged:
+          type: number
+        errors:
+          type: number
+        warnings:
+          type: number
+
+    SyncRunList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncRunSummary"
+        total:
+          type: number
+
+    SyncError:
+      type: object
+      required: [id, errorType, message, createdAt]
+      properties:
+        id:
+          type: string
+        errorType:
+          type: string
+        entityType:
+          type: ["string", "null"]
+        entityId:
+          type: ["string", "null"]
+        marketCode:
+          type: ["string", "null"]
+        message:
+          type: string
+        details:
+          type: ["object", "null"]
+          additionalProperties: {}
+        createdAt:
+          type: string
+
+    SyncRunDetail:
+      type: object
+      required: [run, errors]
+      properties:
+        run:
+          $ref: "#/components/schemas/SyncRunSummary"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncError"
+
+    SyncTriggerInput:
+      type: object
+      required: [runType]
+      properties:
+        runType:
+          type: string
+          enum: [full, inventory, prices, recommendations]
+
+    SyncTriggerResult:
+      type: object
+      required: [runId, runType, status]
+      properties:
+        runId:
+          type: string
+        runType:
+          type: string
+        status:
+          type: string
+
+    # ── Products ───────────────────────────────────────────────────────────────
+    ProductSummary:
+      type: object
+      required:
+        - id
+        - handle
+        - vendor
+        - variantCount
+        - eligibleVariantCount
+        - availability
+        - avgQualityScore
+        - markets
+        - updatedAt
+      properties:
+        id:
+          type: string
+        handle:
+          type: string
+        title:
+          type: ["string", "null"]
+        vendor:
+          type: ["string", "null"]
+        productType:
+          type: ["string", "null"]
+        variantCount:
+          type: number
+        eligibleVariantCount:
+          type: number
+        availability:
+          type: string
+        avgQualityScore:
+          type: ["number", "null"]
+        markets:
+          type: array
+          items:
+            type: string
+        lifecycleFlags:
+          type: array
+          items:
+            type: string
+        updatedAt:
+          type: string
+
+    ProductList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductSummary"
+        total:
+          type: number
+
+    ProductDebug:
+      type: object
+      required:
+        - product
+        - variants
+        - translations
+        - marketVariants
+        - images
+        - inventory
+        - feedItems
+        - recommendations
+      properties:
+        product:
+          $ref: "#/components/schemas/ProductSource"
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/VariantDetail"
+        translations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductTranslation"
+        marketVariants:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketVariantDetail"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImageDetail"
+        inventory:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryLevel"
+        feedItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedItemDetail"
+        recommendations:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecommendationDetail"
+
+    ProductSource:
+      type: object
+      required: [id, shopifyGid, handle, status]
+      properties:
+        id:
+          type: string
+        shopifyGid:
+          type: string
+        shopifyId:
+          type: ["string", "null"]
+        handle:
+          type: string
+        vendor:
+          type: ["string", "null"]
+        productType:
+          type: ["string", "null"]
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        publishedAt:
+          type: ["string", "null"]
+        sourceUpdatedAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    ProductTranslation:
+      type: object
+      required: [language, title]
+      properties:
+        language:
+          type: string
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        handle:
+          type: ["string", "null"]
+
+    VariantDetail:
+      type: object
+      required: [id, shopifyGid, title, sku]
+      properties:
+        id:
+          type: string
+        shopifyGid:
+          type: string
+        shopifyId:
+          type: ["string", "null"]
+        title:
+          type: string
+        sku:
+          type: ["string", "null"]
+        gtin:
+          type: ["string", "null"]
+        mpn:
+          type: ["string", "null"]
+        weight:
+          type: ["number", "null"]
+        weightUnit:
+          type: string
+        available:
+          type: boolean
+        googleCategory:
+          type: ["string", "null"]
+        metaCategory:
+          type: ["string", "null"]
+        shippingClass:
+          type: ["string", "null"]
+        returnClass:
+          type: ["string", "null"]
+        outlet:
+          type: ["boolean", "null"]
+        discontinued:
+          type: ["boolean", "null"]
+        bestseller:
+          type: ["boolean", "null"]
+        exhibitionModel:
+          type: ["boolean", "null"]
+        material:
+          type: array
+          items:
+            type: string
+        style:
+          type: array
+          items:
+            type: string
+        room:
+          type: array
+          items:
+            type: string
+
+    MarketVariantDetail:
+      type: object
+      required: [variantId, marketCode, availability, isEligible]
+      properties:
+        variantId:
+          type: string
+        marketCode:
+          type: string
+        priceAmount:
+          type: ["number", "null"]
+        compareAtPriceAmount:
+          type: ["number", "null"]
+        priceCurrency:
+          type: ["string", "null"]
+        availability:
+          type: string
+        productUrl:
+          type: ["string", "null"]
+        isEligible:
+          type: boolean
+        exclusionReason:
+          type: ["string", "null"]
+
+    ImageDetail:
+      type: object
+      required: [id, url, position]
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+        altText:
+          type: ["string", "null"]
+        position:
+          type: number
+        imageType:
+          type: ["string", "null"]
+        width:
+          type: ["number", "null"]
+        height:
+          type: ["number", "null"]
+        whiteBgScore:
+          type: ["number", "null"]
+        solidBgScore:
+          type: ["number", "null"]
+        alphaRatio:
+          type: ["number", "null"]
+        edgeDensity:
+          type: ["number", "null"]
+        resolutionScore:
+          type: ["number", "null"]
+        isClassified:
+          type: boolean
+        classifiedAt:
+          type: ["string", "null"]
+
+    InventoryLevel:
+      type: object
+      required: [shopifyLocationId, locationName, available]
+      properties:
+        shopifyLocationId:
+          type: string
+        locationName:
+          type: ["string", "null"]
+        available:
+          type: number
+
+    FeedItemDetail:
+      type: object
+      required: [variantId, marketCode, language, channel, isEligible]
+      properties:
+        variantId:
+          type: string
+        marketCode:
+          type: string
+        language:
+          type: string
+        channel:
+          type: string
+        isEligible:
+          type: boolean
+        exclusionReason:
+          type: ["string", "null"]
+        dataQualityScore:
+          type: ["number", "null"]
+        generatedAt:
+          type: ["string", "null"]
+
+    RecommendationDetail:
+      type: object
+      required: [marketCode, relatedProductIds, complementaryProductIds]
+      properties:
+        marketCode:
+          type: string
+        relatedProductIds:
+          type: array
+          items:
+            type: string
+        complementaryProductIds:
+          type: array
+          items:
+            type: string
+        generatedAt:
+          type: ["string", "null"]
+
+    # ── Google ─────────────────────────────────────────────────────────────────
+    GoogleChannelStatus:
+      type: object
+      required:
+        - lastPushAt
+        - diagnosticsSummary
+        - byMarket
+        - recentDiagnostics
+      properties:
+        lastPushAt:
+          type: ["string", "null"]
+        diagnosticsSummary:
+          $ref: "#/components/schemas/DiagnosticSummary"
+        byMarket:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketDiagnosticCount"
+        recentDiagnostics:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChannelDiagnostic"
+
+    DiagnosticSummary:
+      type: object
+      required: [total, bySeverity, byIssueType]
+      properties:
+        total:
+          type: number
+        bySeverity:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiagnosticSeverityCount"
+        byIssueType:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiagnosticTypeCount"
+
+    DiagnosticSeverityCount:
+      type: object
+      required: [severity, count]
+      properties:
+        severity:
+          type: string
+        count:
+          type: number
+
+    DiagnosticTypeCount:
+      type: object
+      required: [issueType, count]
+      properties:
+        issueType:
+          type: string
+        count:
+          type: number
+
+    MarketDiagnosticCount:
+      type: object
+      required: [marketCode, totalItems, activeIssues]
+      properties:
+        marketCode:
+          type: string
+        totalItems:
+          type: number
+        activeIssues:
+          type: number
+
+    ChannelDiagnostic:
+      type: object
+      required: [id, channel, issueType, severity, message, fetchedAt]
+      properties:
+        id:
+          type: string
+        channel:
+          type: string
+        marketCode:
+          type: ["string", "null"]
+        productIdExternal:
+          type: ["string", "null"]
+        issueType:
+          type: string
+        severity:
+          type: string
+        message:
+          type: string
+        fetchedAt:
+          type: string
+        resolvedAt:
+          type: ["string", "null"]
+
+    # ── Meta ───────────────────────────────────────────────────────────────────
+    MetaChannelStatus:
+      type: object
+      required:
+        - lastPushAt
+        - feeds
+      properties:
+        lastPushAt:
+          type: ["string", "null"]
+        feeds:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetaFeedStatus"
+
+    MetaFeedStatus:
+      type: object
+      required: [language, itemCount, generatedAt, isCurrent]
+      properties:
+        language:
+          type: string
+        marketCode:
+          type: ["string", "null"]
+        itemCount:
+          type: number
+        generatedAt:
+          type: string
+        isCurrent:
+          type: boolean
+        storagePath:
+          type: ["string", "null"]
+        downloadUrl:
+          type: ["string", "null"]
+
+    # ── Images ─────────────────────────────────────────────────────────────────
+    ImageAnalysisItem:
+      type: object
+      required: [id, url, productId, position, isClassified]
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+        productId:
+          type: string
+        productHandle:
+          type: ["string", "null"]
+        variantId:
+          type: ["string", "null"]
+        position:
+          type: number
+        imageType:
+          type: ["string", "null"]
+        width:
+          type: ["number", "null"]
+        height:
+          type: ["number", "null"]
+        whiteBgScore:
+          type: ["number", "null"]
+        solidBgScore:
+          type: ["number", "null"]
+        alphaRatio:
+          type: ["number", "null"]
+        edgeDensity:
+          type: ["number", "null"]
+        resolutionScore:
+          type: ["number", "null"]
+        isClassified:
+          type: boolean
+        selectionReason:
+          type: ["string", "null"]
+
+    ImageAnalysisList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImageAnalysisItem"
+        total:
+          type: number
+
+    # ── Inventory ──────────────────────────────────────────────────────────────
+    InventoryBreakdown:
+      type: object
+      required: [byLocation, byAvailability, showroomStock]
+      properties:
+        byLocation:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocationInventory"
+        byAvailability:
+          type: array
+          items:
+            $ref: "#/components/schemas/AvailabilityCount"
+        showroomStock:
+          $ref: "#/components/schemas/ShowroomStock"
+        totalVariants:
+          type: number
+        inStockVariants:
+          type: number
+        outOfStockVariants:
+          type: number
+
+    LocationInventory:
+      type: object
+      required: [shopifyLocationId, locationName, variantCount, totalUnits]
+      properties:
+        shopifyLocationId:
+          type: string
+        locationName:
+          type: string
+        variantCount:
+          type: number
+        totalUnits:
+          type: number
+
+    ShowroomStock:
+      type: object
+      required: [locationName, variantCount, totalUnits]
+      properties:
+        locationName:
+          type: string
+        variantCount:
+          type: number
+        totalUnits:
+          type: number
+
+    # ── Data Quality ───────────────────────────────────────────────────────────
+    DataQualityReport:
+      type: object
+      required:
+        - avgScore
+        - distribution
+        - lowQualityProducts
+        - totalVariants
+        - variantsBelowThreshold
+      properties:
+        avgScore:
+          type: ["number", "null"]
+        totalVariants:
+          type: number
+        variantsBelowThreshold:
+          type: number
+        distribution:
+          type: array
+          items:
+            $ref: "#/components/schemas/QualityBucket"
+        lowQualityProducts:
+          type: array
+          items:
+            $ref: "#/components/schemas/LowQualityProduct"
+
+    QualityBucket:
+      type: object
+      required: [label, minScore, maxScore, count]
+      properties:
+        label:
+          type: string
+        minScore:
+          type: number
+        maxScore:
+          type: number
+        count:
+          type: number
+
+    LowQualityProduct:
+      type: object
+      required: [productId, handle, variantId, marketCode, language, score]
+      properties:
+        productId:
+          type: string
+        handle:
+          type: string
+        variantId:
+          type: string
+        marketCode:
+          type: string
+        language:
+          type: string
+        score:
+          type: number
+        exclusionReason:
+          type: ["string", "null"]
+
+    # ── Feed Snapshots ─────────────────────────────────────────────────────────
+    FeedSnapshot:
+      type: object
+      required: [id, channel, storagePath, itemCount, isCurrent, generatedAt]
+      properties:
+        id:
+          type: string
+        channel:
+          type: string
+        language:
+          type: ["string", "null"]
+        marketCode:
+          type: ["string", "null"]
+        storagePath:
+          type: string
+        itemCount:
+          type: number
+        sha256:
+          type: ["string", "null"]
+        isCurrent:
+          type: boolean
+        generatedAt:
+          type: string
+        downloadUrl:
+          type: ["string", "null"]
