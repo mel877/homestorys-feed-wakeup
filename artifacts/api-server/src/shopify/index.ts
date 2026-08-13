@@ -16,6 +16,7 @@ import { syncProducts, syncSingleProduct } from "./sync-products";
 import { syncMarketPricing } from "./sync-markets";
 import { syncInventory, syncSingleInventoryItem } from "./sync-inventory";
 import { syncTranslations, syncProductTranslations } from "./sync-translations";
+import { classifyStoredImages, reclassifyProductImages } from "../images/classify-stored";
 import { db, productsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
@@ -64,6 +65,12 @@ export async function runFullSync(): Promise<string> {
     // Phase 4: Translations
     logger.info({ runId }, "Phase 4: translations");
     await syncTranslations(client, tracker);
+
+    // Phase 5: Image classification — drain all unclassified images in pages
+    // until none remain. The sync deletes/reinserts images, so all are unclassified.
+    logger.info({ runId }, "Phase 5: image classification (draining all unclassified)");
+    const classifyResult = await classifyStoredImages();
+    logger.info({ runId, ...classifyResult }, "Image classification drain complete");
 
     await tracker.complete();
     logger.info({ runId }, "Full sync complete");
@@ -150,6 +157,8 @@ export async function syncProduct(shopifyProductRef: string): Promise<string> {
 
     if (dbProduct) {
       await syncProductTranslations(client, dbProduct.id, productGid);
+      // Re-classify images for this product after sync
+      await reclassifyProductImages(dbProduct.id);
     }
 
     await tracker.complete();

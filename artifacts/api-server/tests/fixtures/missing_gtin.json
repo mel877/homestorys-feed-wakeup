@@ -1,0 +1,95 @@
+{
+  "product": {
+    "id": "prod-010",
+    "shopifyGid": "gid://shopify/Product/1010",
+    "shopifyId": "1010",
+    "handle": "gubi-chair-no-gtin",
+    "vendor": "GUBI",
+    "productType": "Dining Chair",
+    "tags": ["indoor"],
+    "status": "active",
+    "publishedAt": "2024-06-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-010",
+    "productId": "prod-010",
+    "shopifyGid": "gid://shopify/ProductVariant/2010",
+    "shopifyId": "2010",
+    "title": "White",
+    "sku": "GUBI-CH-WHT",
+    "gtin": null,
+    "mpn": null,
+    "inventoryItemId": "gid://shopify/InventoryItem/3010",
+    "weight": "7",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "standard",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": null,
+    "metafieldStyle": null,
+    "metafieldRoom": null,
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-010",
+      "marketCode": "BE_FR",
+      "priceAmount": "450.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/gubi-chair-no-gtin",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-010",
+      "language": "fr",
+      "title": "Chaise GUBI",
+      "description": "<p>Chaise design scandinave en métal blanc. Utilisable en intérieur.</p>",
+      "handle": "gubi-chair-no-gtin"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-100",
+      "productId": "prod-010",
+      "shopifyGid": "gid://shopify/MediaImage/5100",
+      "url": "https://cdn.shopify.com/products/gubi-chair-white.jpg",
+      "urlHash": "stu901",
+      "altText": "GUBI dining chair white",
+      "position": 1,
+      "width": 1000,
+      "height": 1000,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.9100",
+      "solidBgScore": "0.1000",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-010",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 8
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

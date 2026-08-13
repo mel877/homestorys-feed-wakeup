@@ -36,6 +36,7 @@ const BULK_PRODUCTS_QUERY = `
         id
         title
         handle
+        descriptionHtml
         vendor
         productType
         tags
@@ -98,6 +99,7 @@ export const SINGLE_PRODUCT_QUERY = `
       id
       title
       handle
+      descriptionHtml
       vendor
       productType
       tags
@@ -128,7 +130,17 @@ export const SINGLE_PRODUCT_QUERY = `
           }
         }
       }
-      images(first: 30) {
+    }
+  }
+`;
+
+// Paginated product-images query — used by syncSingleProduct to fetch ALL images
+// without the first:30 cap that truncates products with many images.
+const PRODUCT_IMAGES_QUERY = `
+  query GetProductImages($id: ID!, $cursor: String) {
+    product(id: $id) {
+      images(first: 50, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
         edges {
           node { id url altText width height }
         }
@@ -136,6 +148,64 @@ export const SINGLE_PRODUCT_QUERY = `
     }
   }
 `;
+
+interface ProductImagesResponse {
+  product: {
+    images: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      edges: Array<{
+        node: {
+          id: string;
+          url: string;
+          altText: string | null;
+          width: number | null;
+          height: number | null;
+        };
+      }>;
+    };
+  } | null;
+}
+
+type ProductImagesPage = NonNullable<ProductImagesResponse["product"]>["images"];
+
+/** Fetch ALL product images via cursor pagination (avoids first:N cap). */
+export async function fetchAllProductImages(
+  client: ShopifyClient,
+  productGid: string,
+): Promise<BulkImageNode[]> {
+  const images: BulkImageNode[] = [];
+  let cursor: string | null = null;
+
+  for (;;) {
+    const response: ProductImagesResponse = await client.request<ProductImagesResponse>(
+      PRODUCT_IMAGES_QUERY,
+      { id: productGid, cursor },
+      { expectedCost: 5 },
+    );
+
+    const page: ProductImagesPage | null = response.product?.images ?? null;
+    if (!page) break;
+
+    for (const { node: img } of page.edges) {
+      images.push({
+        id: img.id,
+        __parentId: productGid,
+        url: img.url,
+        altText: img.altText,
+        width: img.width,
+        height: img.height,
+      });
+    }
+
+    if (page.pageInfo.hasNextPage) {
+      cursor = page.pageInfo.endCursor;
+    } else {
+      break;
+    }
+  }
+
+  return images;
+}
 
 // ── Node type guards ──────────────────────────────────────────────────────────
 
@@ -396,12 +466,12 @@ export async function syncProducts(
           productDbId = existing.id;
         }
 
-        // ── English translation (primary locale = base title) ───────────────
+        // ── Primary locale translation (title + description from Shopify base content) ─
         const titleTranslation: TranslationInsert = {
           productId: productDbId,
           language: primaryLocale,
           title: node.title,
-          description: null,
+          description: node.descriptionHtml ?? null,
           handle: node.handle,
         };
         await tx
@@ -414,6 +484,7 @@ export async function syncProducts(
             ],
             set: {
               title: titleTranslation.title,
+              description: titleTranslation.description,
               handle: titleTranslation.handle,
               updatedAt: new Date(),
             },
@@ -520,6 +591,7 @@ interface SingleProductResponse {
     id: string;
     title: string;
     handle: string;
+    descriptionHtml: string | null;
     vendor: string | null;
     productType: string | null;
     tags: string[];
@@ -546,11 +618,8 @@ interface SingleProductResponse {
         };
       }>;
     };
-    images: {
-      edges: Array<{
-        node: { id: string; url: string; altText: string | null; width: number | null; height: number | null };
-      }>;
-    };
+    // images intentionally omitted — fetched separately via fetchAllProductImages
+    // to avoid the first:30 truncation that loses images for large products
   } | null;
 }
 
@@ -581,6 +650,7 @@ export async function syncSingleProduct(
     id: product.id,
     title: product.title,
     handle: product.handle,
+    descriptionHtml: product.descriptionHtml ?? null,
     vendor: product.vendor,
     productType: product.productType,
     tags: product.tags,
@@ -619,14 +689,10 @@ export async function syncSingleProduct(
     metafieldsByVariant.set(v.id, metas);
   }
 
-  const imageNodes: BulkImageNode[] = product.images.edges.map(({ node: img }) => ({
-    id: img.id,
-    __parentId: product.id,
-    url: img.url,
-    altText: img.altText,
-    width: img.width,
-    height: img.height,
-  }));
+  // Fetch ALL images via cursor pagination — avoids the first:30 cap in the
+  // initial product query that would truncate and then delete images for
+  // products with more than 30 photos.
+  const imageNodes = await fetchAllProductImages(client, product.id);
 
   await db.transaction(async (tx) => {
     // Upsert product
@@ -656,13 +722,24 @@ export async function syncSingleProduct(
       tracker?.bumpChanged();
     }
 
-    // Primary locale translation
+    // Primary locale translation (title + description from Shopify base content)
     await tx
       .insert(productTranslationsTable)
-      .values({ productId: productDbId, language: primaryLocale, title: product.title, handle: product.handle })
+      .values({
+        productId: productDbId,
+        language: primaryLocale,
+        title: product.title,
+        description: product.descriptionHtml ?? null,
+        handle: product.handle,
+      })
       .onConflictDoUpdate({
         target: [productTranslationsTable.productId, productTranslationsTable.language],
-        set: { title: product.title, handle: product.handle, updatedAt: new Date() },
+        set: {
+          title: product.title,
+          description: product.descriptionHtml ?? null,
+          handle: product.handle,
+          updatedAt: new Date(),
+        },
       });
 
     // Upsert variants
@@ -680,9 +757,11 @@ export async function syncSingleProduct(
         });
     }
 
-    // Replace images
+    // Replace images — delete unconditionally so products that had all images
+    // removed on Shopify don't retain stale rows that would be reclassified
+    // and incorrectly surfaced in the feed.
+    await tx.delete(imagesTable).where(eq(imagesTable.productId, productDbId));
     if (imageNodes.length > 0) {
-      await tx.delete(imagesTable).where(eq(imagesTable.productId, productDbId));
       await tx.insert(imagesTable).values(buildImageRows(imageNodes, productDbId));
     }
   });

@@ -76,6 +76,7 @@ export interface BulkNode {
 export interface BulkProductNode extends BulkNode {
   title: string;
   handle: string;
+  descriptionHtml: string | null; // primary product description; null if Shopify returns empty
   vendor: string | null;
   productType: string | null;
   tags: string[];

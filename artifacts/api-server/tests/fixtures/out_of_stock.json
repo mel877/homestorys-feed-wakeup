@@ -1,0 +1,95 @@
+{
+  "product": {
+    "id": "prod-006",
+    "shopifyGid": "gid://shopify/Product/1006",
+    "shopifyId": "1006",
+    "handle": "muuto-sofa-oos",
+    "vendor": "Muuto",
+    "productType": "Sofa",
+    "tags": ["indoor"],
+    "status": "active",
+    "publishedAt": "2023-01-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-006",
+    "productId": "prod-006",
+    "shopifyGid": "gid://shopify/ProductVariant/2006",
+    "shopifyId": "2006",
+    "title": "Default Title",
+    "sku": "MUT-SOFA-OOS",
+    "gtin": null,
+    "mpn": null,
+    "inventoryItemId": "gid://shopify/InventoryItem/3006",
+    "weight": "80",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": false,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "bulky",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["fabric"],
+    "metafieldStyle": null,
+    "metafieldRoom": ["living_room"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-006",
+      "marketCode": "BE_FR",
+      "priceAmount": "1990.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "out_of_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/muuto-sofa-oos",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-006",
+      "language": "fr",
+      "title": "Canapé Muuto",
+      "description": "<p>Canapé design scandinave. Temporairement indisponible.</p>",
+      "handle": "muuto-sofa-oos"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-060",
+      "productId": "prod-006",
+      "shopifyGid": "gid://shopify/MediaImage/5060",
+      "url": "https://cdn.shopify.com/products/muuto-sofa.jpg",
+      "urlHash": "mno345",
+      "altText": "Muuto sofa",
+      "position": 1,
+      "width": 1000,
+      "height": 1000,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.9000",
+      "solidBgScore": "0.1500",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-006",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 0
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

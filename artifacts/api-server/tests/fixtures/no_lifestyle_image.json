@@ -1,0 +1,95 @@
+{
+  "product": {
+    "id": "prod-011",
+    "shopifyGid": "gid://shopify/Product/1011",
+    "shopifyId": "1011",
+    "handle": "ethnicraft-bookcase",
+    "vendor": "Ethnicraft",
+    "productType": "Bookcase",
+    "tags": ["indoor"],
+    "status": "active",
+    "publishedAt": "2024-04-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-011",
+    "productId": "prod-011",
+    "shopifyGid": "gid://shopify/ProductVariant/2011",
+    "shopifyId": "2011",
+    "title": "Default Title",
+    "sku": "ETH-BC-OAK",
+    "gtin": "5901234123464",
+    "mpn": "BC-OAK",
+    "inventoryItemId": "gid://shopify/InventoryItem/3011",
+    "weight": "60",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "bulky",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["oak"],
+    "metafieldStyle": null,
+    "metafieldRoom": ["living_room"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-011",
+      "marketCode": "BE_FR",
+      "priceAmount": "1299.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/ethnicraft-bookcase",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-011",
+      "language": "fr",
+      "title": "Bibliothèque Ethnicraft",
+      "description": "<p>Bibliothèque en chêne massif. Rangement élégant et intemporel.</p>",
+      "handle": "ethnicraft-bookcase"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-110",
+      "productId": "prod-011",
+      "shopifyGid": "gid://shopify/MediaImage/5110",
+      "url": "https://cdn.shopify.com/products/ethnicraft-bookcase-white.jpg",
+      "urlHash": "vwx234",
+      "altText": "Ethnicraft bookcase oak",
+      "position": 1,
+      "width": 1200,
+      "height": 1200,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.9300",
+      "solidBgScore": "0.1200",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-011",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 3
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

@@ -1,0 +1,95 @@
+{
+  "product": {
+    "id": "prod-002",
+    "shopifyGid": "gid://shopify/Product/1002",
+    "shopifyId": "1002",
+    "handle": "vetsak-sofa",
+    "vendor": "vetsak",
+    "productType": "Sofa",
+    "tags": ["sale", "indoor"],
+    "status": "active",
+    "publishedAt": "2023-05-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-07-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-002",
+    "productId": "prod-002",
+    "shopifyGid": "gid://shopify/ProductVariant/2002",
+    "shopifyId": "2002",
+    "title": "Grey 3-seater",
+    "sku": "VET-SOFA-GRY-3S",
+    "gtin": "8712345678901",
+    "mpn": null,
+    "inventoryItemId": "gid://shopify/InventoryItem/3002",
+    "weight": "70",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "bulky",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["fabric"],
+    "metafieldStyle": ["modern"],
+    "metafieldRoom": ["living_room"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-07-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-002",
+      "marketCode": "BE_FR",
+      "priceAmount": "1190.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": "1490.00",
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/vetsak-sofa",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-002",
+      "language": "fr",
+      "title": "Canapé vetsak",
+      "description": "<p>Canapé design en tissu gris, 3 places. Confort exceptionnel.</p>",
+      "handle": "vetsak-sofa"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-010",
+      "productId": "prod-002",
+      "shopifyGid": "gid://shopify/MediaImage/5010",
+      "url": "https://cdn.shopify.com/products/vetsak-sofa-white.jpg",
+      "urlHash": "ghi789",
+      "altText": "vetsak sofa grey",
+      "position": 1,
+      "width": 1200,
+      "height": 1200,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.8800",
+      "solidBgScore": "0.1500",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-002",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 5
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

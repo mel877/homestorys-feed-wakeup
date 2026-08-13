@@ -66,7 +66,7 @@ discount_buckets:
 
   - key: "51_70"
     min: 51
-    max: 70
+    max: 69    # inclusive; 70% falls into 70_plus (boundary is 70, not 69)
 
   - key: "70_plus"
     min: 70

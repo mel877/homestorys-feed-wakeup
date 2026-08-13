@@ -1,0 +1,95 @@
+{
+  "product": {
+    "id": "prod-007",
+    "shopifyGid": "gid://shopify/Product/1007",
+    "shopifyId": "1007",
+    "handle": "hay-dining-chair-backorder",
+    "vendor": "HAY",
+    "productType": "Dining Chair",
+    "tags": ["made_to_order"],
+    "status": "active",
+    "publishedAt": "2024-03-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-007",
+    "productId": "prod-007",
+    "shopifyGid": "gid://shopify/ProductVariant/2007",
+    "shopifyId": "2007",
+    "title": "Black",
+    "sku": "HAY-DC-BLK-BO",
+    "gtin": null,
+    "mpn": "DC-BLK",
+    "inventoryItemId": "gid://shopify/InventoryItem/3007",
+    "weight": "8",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "standard",
+    "metafieldReturnClass": "made_to_order",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": null,
+    "metafieldStyle": null,
+    "metafieldRoom": ["dining_room"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-007",
+      "marketCode": "BE_FR",
+      "priceAmount": "299.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "backorder",
+      "productUrl": "https://www.homestorys.be/fr/products/hay-dining-chair-backorder",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-007",
+      "language": "fr",
+      "title": "Chaise HAY",
+      "description": "<p>Chaise de salle à manger design. Délai de fabrication : 6-8 semaines.</p>",
+      "handle": "hay-dining-chair-backorder"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-070",
+      "productId": "prod-007",
+      "shopifyGid": "gid://shopify/MediaImage/5070",
+      "url": "https://cdn.shopify.com/products/hay-chair.jpg",
+      "urlHash": "pqr678",
+      "altText": "HAY dining chair black",
+      "position": 1,
+      "width": 800,
+      "height": 800,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.8700",
+      "solidBgScore": "0.1200",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-007",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 0
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

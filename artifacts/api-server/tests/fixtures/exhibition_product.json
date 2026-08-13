@@ -1,0 +1,95 @@
+{
+  "product": {
+    "id": "prod-004",
+    "shopifyGid": "gid://shopify/Product/1004",
+    "shopifyId": "1004",
+    "handle": "gubi-chair-exhibition",
+    "vendor": "GUBI",
+    "productType": "Dining Chair",
+    "tags": ["exhibition", "showroom"],
+    "status": "active",
+    "publishedAt": "2022-09-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-004",
+    "productId": "prod-004",
+    "shopifyGid": "gid://shopify/ProductVariant/2004",
+    "shopifyId": "2004",
+    "title": "Blue Velvet",
+    "sku": "GUBI-CH-BLV-EX",
+    "gtin": null,
+    "mpn": "CH-BLV-EX",
+    "inventoryItemId": "gid://shopify/InventoryItem/3004",
+    "weight": "7",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": true,
+    "metafieldExhibitionStore": "Eupen",
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "standard",
+    "metafieldReturnClass": "exhibition",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["velvet"],
+    "metafieldStyle": null,
+    "metafieldRoom": ["dining_room"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-004",
+      "marketCode": "BE_FR",
+      "priceAmount": "499.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": "750.00",
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/gubi-chair-exhibition",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-004",
+      "language": "fr",
+      "title": "Chaise GUBI Modèle d'exposition",
+      "description": "<p>Chaise de salle à manger GUBI en velours bleu. Modèle d'exposition Eupen.</p>",
+      "handle": "gubi-chair-exhibition"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-040",
+      "productId": "prod-004",
+      "shopifyGid": "gid://shopify/MediaImage/5040",
+      "url": "https://cdn.shopify.com/products/gubi-chair-blue.jpg",
+      "urlHash": "efg901",
+      "altText": "GUBI chair blue velvet",
+      "position": 1,
+      "width": 1000,
+      "height": 1000,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.8600",
+      "solidBgScore": "0.2000",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-004",
+      "shopifyLocationId": "gid://shopify/Location/9002",
+      "locationName": "Eupen",
+      "available": 1
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

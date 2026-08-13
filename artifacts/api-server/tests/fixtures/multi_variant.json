@@ -1,0 +1,148 @@
+{
+  "_comment": "Multi-variant fixture: used to test variant-level data (item_group_id, variant title, individual pricing)",
+  "product": {
+    "id": "prod-008",
+    "shopifyGid": "gid://shopify/Product/1008",
+    "shopifyId": "1008",
+    "handle": "ethnicraft-bed",
+    "vendor": "Ethnicraft",
+    "productType": "Bed",
+    "tags": ["oak", "indoor"],
+    "status": "active",
+    "publishedAt": "2024-01-15T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant_140": {
+    "id": "var-008a",
+    "productId": "prod-008",
+    "shopifyGid": "gid://shopify/ProductVariant/2008a",
+    "shopifyId": "2008a",
+    "title": "Oak 140 cm",
+    "sku": "ETH-BED-OAK-140",
+    "gtin": "5901234123501",
+    "mpn": "BED-OAK-140",
+    "inventoryItemId": "gid://shopify/InventoryItem/3008a",
+    "weight": "90",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "bulky",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["oak"],
+    "metafieldStyle": null,
+    "metafieldRoom": ["bedroom"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant_180": {
+    "id": "var-008b",
+    "productId": "prod-008",
+    "shopifyGid": "gid://shopify/ProductVariant/2008b",
+    "shopifyId": "2008b",
+    "title": "Oak 180 cm",
+    "sku": "ETH-BED-OAK-180",
+    "gtin": "5901234123518",
+    "mpn": "BED-OAK-180",
+    "inventoryItemId": "gid://shopify/InventoryItem/3008b",
+    "weight": "110",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "bulky",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["oak"],
+    "metafieldStyle": null,
+    "metafieldRoom": ["bedroom"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants_140": [
+    {
+      "variantId": "var-008a",
+      "marketCode": "BE_FR",
+      "priceAmount": "1890.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/ethnicraft-bed",
+      "isEligible": true
+    }
+  ],
+  "marketVariants_180": [
+    {
+      "variantId": "var-008b",
+      "marketCode": "BE_FR",
+      "priceAmount": "2190.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/ethnicraft-bed",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-008",
+      "language": "fr",
+      "title": "Lit Ethnicraft",
+      "description": "<p>Lit en chêne massif. Qualité artisanale belge.</p>",
+      "handle": "ethnicraft-bed"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-080",
+      "productId": "prod-008",
+      "shopifyGid": "gid://shopify/MediaImage/5080",
+      "url": "https://cdn.shopify.com/products/ethnicraft-bed-white.jpg",
+      "urlHash": "hij789",
+      "altText": "Ethnicraft bed oak",
+      "position": 1,
+      "width": 1200,
+      "height": 1200,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.9000",
+      "solidBgScore": "0.1200",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels_140": [
+    {
+      "variantId": "var-008a",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 3
+    }
+  ],
+  "inventoryLevels_180": [
+    {
+      "variantId": "var-008b",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 2
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

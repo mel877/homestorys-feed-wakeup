@@ -1,0 +1,7 @@
+- [Discount bucket boundaries](discount-bucket-boundaries.md) — all bucket upper bounds are inclusive; 51_70 max must be 69 so exactly 70% → 70_plus; config/labels.yaml and code must agree.
+- [Inventory label vs availability](inventory-label-logic.md) — deriveInventoryLabel must check showroom stock BEFORE the out_of_stock gate; Eupen-only stock = "showroom" not "out_of_stock".
+- [Made-to-order → backorder](made-to-order-backorder.md) — returnClass made_to_order/backorder implies sellWhenOutOfStock=true in computeInventory; detect from metafieldReturnClass in builder.
+- [Sharp alpha ratio pipeline](sharp-alpha-ratio.md) — do NOT pass a raw pixel buffer to a new sharp() without {raw:{width,height,channels}}; always compute alpha from the same pipeline (ensureAlpha().raw().toBuffer({resolveWithObject:true})).
+- [Recommendation market eligibility](recommendation-eligibility.md) — source and candidate pools must share the same eligibility filter; never use "first variant" for pricing when multi-variant products exist; build eligibleMvByProductId via variantProductMap join.
+- [Shared scoring lib](shared-scoring-lib.md) — scoreRelatedProducts, findComplementaryProducts, and mapCategory live in @workspace/rec-engine; runtime engine and backfill both import from there; parity is structural, not tested-by-copy.
+- [Category override per-channel rule](category-override-per-channel.md) — metafield overrides apply per channel; Google override must not clear Meta channel and vice versa; canonicalCategory always comes from the pipeline, never from overrides.

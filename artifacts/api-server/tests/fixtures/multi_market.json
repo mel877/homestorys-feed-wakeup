@@ -1,0 +1,122 @@
+{
+  "product": {
+    "id": "prod-009",
+    "shopifyGid": "gid://shopify/Product/1009",
+    "shopifyId": "1009",
+    "handle": "ethnicraft-dining-table-multi",
+    "vendor": "Ethnicraft",
+    "productType": "Dining Table",
+    "tags": ["oak", "indoor"],
+    "status": "active",
+    "publishedAt": "2024-01-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-009",
+    "productId": "prod-009",
+    "shopifyGid": "gid://shopify/ProductVariant/2009",
+    "shopifyId": "2009",
+    "title": "Oak 180 cm",
+    "sku": "ETH-DT-OAK-180",
+    "gtin": "5901234123471",
+    "mpn": "DT-OAK-180",
+    "inventoryItemId": "gid://shopify/InventoryItem/3009",
+    "weight": "40",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "bulky",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["oak"],
+    "metafieldStyle": ["scandinavian"],
+    "metafieldRoom": ["dining_room"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-009",
+      "marketCode": "BE_FR",
+      "priceAmount": "1200.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/ethnicraft-dining-table-multi",
+      "isEligible": true
+    },
+    {
+      "variantId": "var-009",
+      "marketCode": "BE_DE",
+      "priceAmount": "1200.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/de/products/ethnicraft-dining-table-multi",
+      "isEligible": true
+    },
+    {
+      "variantId": "var-009",
+      "marketCode": "DE",
+      "priceAmount": "1250.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.de/products/ethnicraft-dining-table-multi",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-009",
+      "language": "fr",
+      "title": "Table à manger Ethnicraft",
+      "description": "<p>Table à manger en chêne 180 cm.</p>",
+      "handle": "ethnicraft-dining-table-multi"
+    },
+    {
+      "productId": "prod-009",
+      "language": "de",
+      "title": "Ethnicraft Esstisch",
+      "description": "<p>Esstisch aus Massivholz Eiche 180 cm.</p>",
+      "handle": "ethnicraft-dining-table-multi"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-090",
+      "productId": "prod-009",
+      "shopifyGid": "gid://shopify/MediaImage/5090",
+      "url": "https://cdn.shopify.com/products/ethnicraft-dt.jpg",
+      "urlHash": "yza567",
+      "altText": "Ethnicraft dining table",
+      "position": 1,
+      "width": 1200,
+      "height": 1200,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.9000",
+      "solidBgScore": "0.1300",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-009",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 6
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

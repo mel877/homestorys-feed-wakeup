@@ -1,0 +1,95 @@
+{
+  "product": {
+    "id": "prod-003",
+    "shopifyGid": "gid://shopify/Product/1003",
+    "shopifyId": "1003",
+    "handle": "ethnicraft-side-table-outlet",
+    "vendor": "Ethnicraft",
+    "productType": "Coffee Table",
+    "tags": ["outlet"],
+    "status": "active",
+    "publishedAt": "2022-01-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-05-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-003",
+    "productId": "prod-003",
+    "shopifyGid": "gid://shopify/ProductVariant/2003",
+    "shopifyId": "2003",
+    "title": "Oak",
+    "sku": "ETH-ST-OAK-OUT",
+    "gtin": null,
+    "mpn": "ST-OAK-OUT",
+    "inventoryItemId": null,
+    "weight": "15",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": true,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "standard",
+    "metafieldReturnClass": "exhibition",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["oak"],
+    "metafieldStyle": null,
+    "metafieldRoom": ["living_room"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-05-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-003",
+      "marketCode": "BE_FR",
+      "priceAmount": "350.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": "599.00",
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/ethnicraft-side-table-outlet",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-003",
+      "language": "fr",
+      "title": "Table basse Ethnicraft Outlet",
+      "description": "<p>Table basse en chêne, pièce d'exposition à prix réduit.</p>",
+      "handle": "ethnicraft-side-table-outlet"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-020",
+      "productId": "prod-003",
+      "shopifyGid": "gid://shopify/MediaImage/5020",
+      "url": "https://cdn.shopify.com/products/outlet-table.jpg",
+      "urlHash": "jkl012",
+      "altText": "Outlet table",
+      "position": 1,
+      "width": 800,
+      "height": 800,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.8500",
+      "solidBgScore": "0.1000",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-003",
+      "shopifyLocationId": "gid://shopify/Location/9002",
+      "locationName": "Eupen",
+      "available": 1
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

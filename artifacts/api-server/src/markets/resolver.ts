@@ -1,0 +1,123 @@
+/**
+ * Market / Language resolver — spec sections 13, 14.
+ *
+ * Rules:
+ * - Language content comes from the language master (FR/DE/EN/IT), not per-country
+ * - DE, AT, BE_DE all use MASTER_DE (same content, different prices/shipping/URLs)
+ * - Prices ALWAYS from market_variants (Shopify Markets is source of truth)
+ * - Never cross-apply a price from one market to another
+ */
+
+import type { MarketsConfig } from "../config/schemas";
+import type { MarketVariantRow, TranslationRow } from "../canonical/types";
+
+export interface ResolvedMarket {
+  marketCode: string;
+  language: "fr" | "de" | "en" | "it";
+  country: string;
+  currency: string;
+  label: string;
+}
+
+export interface ResolvedContent {
+  title: string | null; // localised title from DB translation
+  description: string | null; // localised description from DB translation
+  handle: string | null; // localised URL handle
+}
+
+export interface ResolvedPricing {
+  priceAmount: string | null;
+  priceCurrency: string;
+  compareAtPriceAmount: string | null;
+  productUrl: string | null;
+  availability: string;
+  isEligible: boolean;
+}
+
+/**
+ * Resolve market configuration for a market code.
+ * Returns null if the market code is not configured.
+ */
+export function resolveMarket(
+  marketCode: string,
+  config: MarketsConfig,
+): ResolvedMarket | null {
+  const market = config.markets[marketCode];
+  if (!market) return null;
+
+  return {
+    marketCode,
+    language: market.language,
+    country: market.country,
+    currency: market.currency,
+    label: market.label ?? marketCode,
+  };
+}
+
+/**
+ * Resolve localised content for a product+variant in a given language.
+ *
+ * Language content is shared across all markets that use the same master language.
+ * e.g. DE, AT, BE_DE all use the German translation row.
+ */
+export function resolveContent(
+  language: string,
+  productTitle: string, // base title from products table (primary locale = fr)
+  translations: TranslationRow[],
+): ResolvedContent {
+  // Find matching translation by language code
+  const translation = translations.find((t) => t.language === language);
+
+  return {
+    title: translation?.title ?? productTitle,
+    description: translation?.description ?? null,
+    handle: translation?.handle ?? null,
+  };
+}
+
+/**
+ * Resolve market-specific pricing from market_variants row.
+ * Returns null if no market variant row found for this market.
+ */
+export function resolvePricing(
+  marketCode: string,
+  marketVariants: MarketVariantRow[],
+  defaultCurrency = "EUR",
+): ResolvedPricing | null {
+  const mv = marketVariants.find((r) => r.marketCode === marketCode);
+  if (!mv) return null;
+
+  return {
+    priceAmount: mv.priceAmount,
+    priceCurrency: mv.priceCurrency ?? defaultCurrency,
+    compareAtPriceAmount: mv.compareAtPriceAmount,
+    productUrl: mv.productUrl,
+    availability: mv.availability,
+    isEligible: mv.isEligible,
+  };
+}
+
+/**
+ * Build all configured markets list from config.
+ */
+export function getAllMarkets(config: MarketsConfig): ResolvedMarket[] {
+  return Object.entries(config.markets).map(([code, market]) => ({
+    marketCode: code,
+    language: market.language,
+    country: market.country,
+    currency: market.currency,
+    label: market.label ?? code,
+  }));
+}
+
+/**
+ * Get all market codes that share a given language.
+ */
+export function getMarketsForLanguage(
+  language: string,
+  config: MarketsConfig,
+): string[] {
+  return Object.entries(config.markets)
+    .filter(([, m]) => m.language === language)
+    .map(([code]) => code);
+}

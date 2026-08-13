@@ -1,0 +1,95 @@
+{
+  "product": {
+    "id": "prod-005",
+    "shopifyGid": "gid://shopify/Product/1005",
+    "shopifyId": "1005",
+    "handle": "ethnicraft-bok-sofa",
+    "vendor": "Ethnicraft",
+    "productType": "Sofa",
+    "tags": ["bestseller", "indoor"],
+    "status": "active",
+    "publishedAt": "2023-06-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-005",
+    "productId": "prod-005",
+    "shopifyGid": "gid://shopify/ProductVariant/2005",
+    "shopifyId": "2005",
+    "title": "Natural Oak",
+    "sku": "ETH-BOK-SF-OAK",
+    "gtin": "5901234123488",
+    "mpn": "BOK-SF-OAK",
+    "inventoryItemId": "gid://shopify/InventoryItem/3005",
+    "weight": "85",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": true,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "bulky",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["oak", "fabric"],
+    "metafieldStyle": ["scandinavian"],
+    "metafieldRoom": ["living_room"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-005",
+      "marketCode": "BE_FR",
+      "priceAmount": "2890.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/ethnicraft-bok-sofa",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-005",
+      "language": "fr",
+      "title": "Canapé Bok Ethnicraft",
+      "description": "<p>Canapé design en chêne et tissu naturel. Best-seller de notre collection.</p>",
+      "handle": "ethnicraft-bok-sofa"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-050",
+      "productId": "prod-005",
+      "shopifyGid": "gid://shopify/MediaImage/5050",
+      "url": "https://cdn.shopify.com/products/bok-sofa-white.jpg",
+      "urlHash": "bcd890",
+      "altText": "Ethnicraft Bok Sofa oak",
+      "position": 1,
+      "width": 1200,
+      "height": 1200,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.9100",
+      "solidBgScore": "0.1000",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-005",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 10
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": 0.92
+}

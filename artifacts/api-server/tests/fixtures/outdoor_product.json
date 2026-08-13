@@ -1,0 +1,111 @@
+{
+  "product": {
+    "id": "prod-012",
+    "shopifyGid": "gid://shopify/Product/1012",
+    "shopifyId": "1012",
+    "handle": "ethnicraft-outdoor-sofa",
+    "vendor": "Ethnicraft",
+    "productType": "Outdoor Sofa",
+    "tags": ["outdoor", "teak"],
+    "status": "active",
+    "publishedAt": "2024-02-01T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-012",
+    "productId": "prod-012",
+    "shopifyGid": "gid://shopify/ProductVariant/2012",
+    "shopifyId": "2012",
+    "title": "Teak Natural",
+    "sku": "ETH-OS-TK-NAT",
+    "gtin": "5901234123495",
+    "mpn": "OS-TK-NAT",
+    "inventoryItemId": "gid://shopify/InventoryItem/3012",
+    "weight": "55",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "bulky",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["teak"],
+    "metafieldStyle": null,
+    "metafieldRoom": null,
+    "metafieldIndoorOutdoor": "outdoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-012",
+      "marketCode": "BE_FR",
+      "priceAmount": "3200.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/ethnicraft-outdoor-sofa",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-012",
+      "language": "fr",
+      "title": "Canapé d'extérieur Ethnicraft",
+      "description": "<p>Canapé d'extérieur en teck naturel. Résistant aux intempéries.</p>",
+      "handle": "ethnicraft-outdoor-sofa"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-120",
+      "productId": "prod-012",
+      "shopifyGid": "gid://shopify/MediaImage/5120",
+      "url": "https://cdn.shopify.com/products/outdoor-sofa-lifestyle.jpg",
+      "urlHash": "cde123",
+      "altText": "Ethnicraft outdoor sofa teak on terrace",
+      "position": 1,
+      "width": 1200,
+      "height": 800,
+      "imageType": "lifestyle",
+      "whiteBgScore": "0.0400",
+      "solidBgScore": "0.0800",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    },
+    {
+      "id": "img-121",
+      "productId": "prod-012",
+      "shopifyGid": "gid://shopify/MediaImage/5121",
+      "url": "https://cdn.shopify.com/products/outdoor-sofa-packshot.jpg",
+      "urlHash": "fgh456",
+      "altText": "Ethnicraft outdoor sofa packshot",
+      "position": 2,
+      "width": 1200,
+      "height": 1200,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.8800",
+      "solidBgScore": "0.1500",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-012",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 4
+    }
+  ],
+  "recommendations": null,
+  "normalizedBestsellerScore": null
+}

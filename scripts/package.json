@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@workspace/db": "workspace:*",
+    "@workspace/rec-engine": "workspace:*",
+    "drizzle-orm": "catalog:",
     "yaml": "^2.8.0",
     "zod": "catalog:"
   },

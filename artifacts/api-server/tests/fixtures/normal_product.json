@@ -1,0 +1,116 @@
+{
+  "product": {
+    "id": "prod-001",
+    "shopifyGid": "gid://shopify/Product/1001",
+    "shopifyId": "1001",
+    "handle": "ethnicraft-bok-dining-table",
+    "vendor": "Ethnicraft",
+    "productType": "Dining Table",
+    "tags": ["oak", "indoor"],
+    "status": "active",
+    "publishedAt": "2024-01-15T00:00:00.000Z",
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "variant": {
+    "id": "var-001",
+    "productId": "prod-001",
+    "shopifyGid": "gid://shopify/ProductVariant/2001",
+    "shopifyId": "2001",
+    "title": "Oak 200 cm",
+    "sku": "ETH-BOK-DT-OAK-200",
+    "gtin": "5901234123457",
+    "mpn": "BOK-DT-200-OAK",
+    "inventoryItemId": "gid://shopify/InventoryItem/3001",
+    "weight": "45",
+    "weightUnit": "kg",
+    "requiresShipping": true,
+    "taxable": true,
+    "available": true,
+    "metafieldOutlet": false,
+    "metafieldExhibitionModel": false,
+    "metafieldExhibitionStore": null,
+    "metafieldBestseller": null,
+    "metafieldDiscontinued": false,
+    "metafieldShippingClass": "bulky",
+    "metafieldReturnClass": "standard",
+    "metafieldGoogleCategory": null,
+    "metafieldMetaCategory": null,
+    "metafieldMaterial": ["oak"],
+    "metafieldStyle": ["scandinavian"],
+    "metafieldRoom": ["dining_room"],
+    "metafieldIndoorOutdoor": "indoor",
+    "metafieldLifestyleImageOverride": null,
+    "metafieldPrimaryImageOverride": null,
+    "sourceUpdatedAt": "2025-06-01T10:00:00.000Z"
+  },
+  "marketVariants": [
+    {
+      "variantId": "var-001",
+      "marketCode": "BE_FR",
+      "priceAmount": "899.00",
+      "priceCurrency": "EUR",
+      "compareAtPriceAmount": null,
+      "availability": "in_stock",
+      "productUrl": "https://www.homestorys.be/fr/products/ethnicraft-bok-dining-table",
+      "isEligible": true
+    }
+  ],
+  "translations": [
+    {
+      "productId": "prod-001",
+      "language": "fr",
+      "title": "Table à manger Bok Ethnicraft",
+      "description": "<p>Table à manger en chêne massif de qualité supérieure. Design scandinave intemporel.</p>",
+      "handle": "ethnicraft-bok-dining-table"
+    }
+  ],
+  "images": [
+    {
+      "id": "img-001",
+      "productId": "prod-001",
+      "shopifyGid": "gid://shopify/MediaImage/5001",
+      "url": "https://cdn.shopify.com/products/bok-table-white.jpg",
+      "urlHash": "abc123",
+      "altText": "Ethnicraft Bok Dining Table Oak",
+      "position": 1,
+      "width": 1200,
+      "height": 1200,
+      "imageType": "packshot_white",
+      "whiteBgScore": "0.9200",
+      "solidBgScore": "0.2000",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    },
+    {
+      "id": "img-002",
+      "productId": "prod-001",
+      "shopifyGid": "gid://shopify/MediaImage/5002",
+      "url": "https://cdn.shopify.com/products/bok-table-lifestyle.jpg",
+      "urlHash": "def456",
+      "altText": "Bok table in dining room",
+      "position": 2,
+      "width": 1200,
+      "height": 800,
+      "imageType": "lifestyle",
+      "whiteBgScore": "0.0500",
+      "solidBgScore": "0.1000",
+      "alphaRatio": "0.0000",
+      "isClassified": true
+    }
+  ],
+  "inventoryLevels": [
+    {
+      "variantId": "var-001",
+      "shopifyLocationId": "gid://shopify/Location/9001",
+      "locationName": "Warehouse",
+      "available": 12
+    }
+  ],
+  "recommendations": {
+    "productId": "prod-001",
+    "marketCode": "BE_FR",
+    "relatedProductIds": ["prod-002", "prod-003"],
+    "complementaryProductIds": ["prod-010", "prod-011"]
+  },
+  "normalizedBestsellerScore": null
+}
