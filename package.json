@@ -10,6 +10,7 @@
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "lint": "eslint artifacts/api-server/src scripts/src lib/db/src --ext .ts",
     "test": "pnpm --filter @workspace/api-server run test",
+    "migrate": "pnpm --filter @workspace/db run migrate",
     "bootstrap": "pnpm --filter @workspace/scripts run bootstrap"
   },
   "private": true,
