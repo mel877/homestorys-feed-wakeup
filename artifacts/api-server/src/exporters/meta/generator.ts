@@ -36,6 +36,7 @@ import {
   formatVersionTs,
   type FeedManifest,
 } from "../../lib/storage";
+import { sendFeedBlockAlert, resolveAlertWebhookUrl } from "../../lib/alerting";
 import { processAllCanonicals } from "../canonical-reader";
 import {
   mapToMeta,
@@ -112,6 +113,7 @@ export async function runMetaExport(options: {
   const config = await loadConfig();
   const versionTs = formatVersionTs();
   const dryRun = isDryRun();
+  const alertWebhookUrl = resolveAlertWebhookUrl(config.feedPolicy.alerts.webhook_url);
 
   logger.info({ dryRun, markets: options.markets ?? "all" }, "Meta export starting");
 
@@ -191,6 +193,18 @@ export async function runMetaExport(options: {
           { key, errors: validation.errorCount, schema: validation.schema, firstError: validation.errors[0] },
           "Meta feed schema validation FAILED — blocking publish",
         );
+        await sendFeedBlockAlert(
+          {
+            channel: "meta",
+            marketOrFile: key,
+            previousItemCount: null,
+            newItemCount: rows.length,
+            dropPct: null,
+            reason: "schema_error",
+            syncRunId: options.syncRunId ?? null,
+          },
+          alertWebhookUrl,
+        );
       } else {
         logger.debug({ key, rows: validation.rowCount, schema: validation.schema }, "Meta feed schema validation passed");
       }
@@ -209,6 +223,7 @@ export async function runMetaExport(options: {
           manifest,
           previousItemCount,
           maxDropPct: snapshot_gate.max_item_count_drop_pct,
+          alertWebhookUrl,
         });
 
     if (dryRun) {

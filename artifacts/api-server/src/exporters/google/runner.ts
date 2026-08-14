@@ -28,6 +28,7 @@ import {
   formatVersionTs,
   type FeedManifest,
 } from "../../lib/storage";
+import { sendFeedBlockAlert, resolveAlertWebhookUrl } from "../../lib/alerting";
 import { processAllCanonicals } from "../canonical-reader";
 import {
   mapToGoogleRow,
@@ -73,6 +74,7 @@ export async function runGoogleExport(options: {
   const dryRun = isDryRun();
   const { snapshot_gate } = config.feedPolicy;
   const storeCode = process.env["GOOGLE_EUPEN_STORE_CODE"] ?? "";
+  const alertWebhookUrl = resolveAlertWebhookUrl(config.feedPolicy.alerts.webhook_url);
 
   logger.info({ dryRun, markets: options.markets ?? "all" }, "Google export starting");
 
@@ -176,6 +178,18 @@ export async function runGoogleExport(options: {
           { marketCode, errors: validation.errorCount, firstError: validation.errors[0] },
           "Google feed schema validation FAILED — blocking publish",
         );
+        await sendFeedBlockAlert(
+          {
+            channel: "google",
+            marketOrFile: marketCode,
+            previousItemCount,
+            newItemCount: rows.length,
+            dropPct: null,
+            reason: "schema_error",
+            syncRunId: options.syncRunId ?? null,
+          },
+          alertWebhookUrl,
+        );
       } else {
         logger.info({ marketCode, rows: validation.rowCount }, "Google feed schema validation passed");
       }
@@ -188,6 +202,7 @@ export async function runGoogleExport(options: {
           manifest,
           previousItemCount,
           maxDropPct: snapshot_gate.max_item_count_drop_pct,
+          alertWebhookUrl,
         })
       : false;
 

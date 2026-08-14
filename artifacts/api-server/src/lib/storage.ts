@@ -18,6 +18,7 @@
 import { Storage } from "@google-cloud/storage";
 import { createHash } from "crypto";
 import { logger as rootLogger } from "./logger";
+import { sendFeedBlockAlert, resolveAlertWebhookUrl } from "./alerting";
 
 const logger = rootLogger.child({ module: "feed-storage" });
 
@@ -155,8 +156,11 @@ export async function atomicPublish(params: {
   manifest: FeedManifest;
   previousItemCount: number | null;
   maxDropPct: number;
+  /** Resolved webhook URL (env var takes priority over config). Pass null to skip alerting. */
+  alertWebhookUrl?: string | null;
 }): Promise<boolean> {
   const { versionedPath, currentPath, manifest, previousItemCount, maxDropPct } = params;
+  const alertWebhookUrl = params.alertWebhookUrl ?? resolveAlertWebhookUrl();
 
   // Gate: item count must not drop by more than maxDropPct vs previous snapshot
   if (previousItemCount !== null && previousItemCount > 0) {
@@ -172,6 +176,21 @@ export async function atomicPublish(params: {
         },
         "Feed publish BLOCKED: item count drop exceeds threshold — retaining previous snapshot",
       );
+
+      // Fire webhook alert (non-blocking — errors are swallowed inside sendFeedBlockAlert)
+      await sendFeedBlockAlert(
+        {
+          channel: manifest.channel,
+          marketOrFile: manifest.marketCode ?? manifest.language ?? currentPath,
+          previousItemCount,
+          newItemCount: manifest.itemCount,
+          dropPct,
+          reason: "item_count_drop",
+          syncRunId: manifest.sourceRunId,
+        },
+        alertWebhookUrl,
+      );
+
       return false;
     }
   }
