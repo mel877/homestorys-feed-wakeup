@@ -77,11 +77,38 @@ export interface LocalInventoryEntry {
 /**
  * Push local inventory for all Eupen showroom products.
  * Only products with pickupEupen=true are included.
+ *
+ * @deprecated Prefer `submitLocalInventoryEntries` which accepts pre-built
+ * entries and avoids holding full CanonicalProduct objects in memory.
  */
 export async function syncLocalInventory(
   canonicals: CanonicalProduct[],
   country: string,
   language: string,
+): Promise<{ submitted: number; failed: number }> {
+  const storeCode = process.env["GOOGLE_EUPEN_STORE_CODE"] ?? "";
+
+  const entries: LocalInventoryEntry[] = canonicals
+    .filter((c) => c.pickupEupen && (c.stockEupen ?? 0) > 0)
+    .map((c) => ({
+      offerId: `online:${c.language}:${country}:${c.variantId}`,
+      storeCode,
+      quantity: c.stockEupen ?? 0,
+      availability: "in stock",
+      pickup: "multi-day",
+    }));
+
+  return submitLocalInventoryEntries(entries);
+}
+
+/**
+ * Submit pre-built LocalInventoryEntry objects to the Merchant Inventories API.
+ *
+ * Use this in streaming pipelines where you build entries on-the-fly and
+ * cannot afford to hold full CanonicalProduct objects in memory.
+ */
+export async function submitLocalInventoryEntries(
+  entries: LocalInventoryEntry[],
 ): Promise<{ submitted: number; failed: number }> {
   const merchantId = process.env["GOOGLE_MERCHANT_ID"];
   if (!merchantId) throw new Error("GOOGLE_MERCHANT_ID not set");
@@ -92,27 +119,10 @@ export async function syncLocalInventory(
     return { submitted: 0, failed: 0 };
   }
 
-  // Filter to products with Eupen showroom stock
-  const eligible = canonicals.filter(
-    (c) =>
-      c.pickupEupen &&
-      (c.stockEupen ?? 0) > 0 &&
-      c.market && // must have a market
-      true,
-  );
-
-  if (eligible.length === 0) {
+  if (entries.length === 0) {
     logger.info("No products with Eupen showroom stock — skipping local inventory");
     return { submitted: 0, failed: 0 };
   }
-
-  const entries: LocalInventoryEntry[] = eligible.map((c) => ({
-    offerId: `online:${c.language}:${country}:${c.variantId}`,
-    storeCode,
-    quantity: c.stockEupen ?? 0,
-    availability: "in stock",
-    pickup: "multi-day",
-  }));
 
   if (isDryRun()) {
     logger.info(
@@ -183,3 +193,4 @@ export async function syncLocalInventory(
   logger.info({ submitted, failed, storeCode }, "Local inventory sync complete");
   return { submitted, failed };
 }
+

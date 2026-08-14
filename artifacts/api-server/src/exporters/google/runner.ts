@@ -28,16 +28,15 @@ import {
   formatVersionTs,
   type FeedManifest,
 } from "../../lib/storage";
-import { readAllCanonicals } from "../canonical-reader";
+import { processAllCanonicals } from "../canonical-reader";
 import {
   mapToGoogleRow,
   buildGoogleTsv,
   type GoogleFeedRow,
 } from "./mapper";
 import { isDryRun } from "./client";
-import { syncLocalInventory } from "./local-inventory";
+import { submitLocalInventoryEntries, type LocalInventoryEntry } from "./local-inventory";
 import { validateGoogleFeed } from "../../validation/feed-validator";
-import type { CanonicalProduct } from "../../canonical/types";
 
 const logger = rootLogger.child({ module: "google-runner" });
 
@@ -62,40 +61,6 @@ export interface GoogleRunResult {
   durationMs: number;
 }
 
-// ── Per-market feed generation ─────────────────────────────────────────────────
-
-interface MarketFeedSpec {
-  marketCode: string;
-  language: string;
-  country: string;
-  canonicals: CanonicalProduct[];
-}
-
-async function generateMarketFeed(
-  spec: MarketFeedSpec,
-  versionTs: string,
-  runId: string | null,
-  syncRunId: string | null,
-): Promise<{
-  storagePath: string;
-  itemCount: number;
-  sha256: string;
-  published: boolean;
-}> {
-  const { marketCode, language, country, canonicals } = spec;
-
-  // Filter and map
-  const rows: GoogleFeedRow[] = [];
-  const resources = [];
-  for (const c of canonicals) {
-    // Load config to use in mapper
-  }
-
-  // This is computed in the runner — rows and resources are passed in
-  // (see runGoogleExport for actual usage)
-  throw new Error("Use runGoogleExport directly");
-}
-
 // ── Main runner ───────────────────────────────────────────────────────────────
 
 export async function runGoogleExport(options: {
@@ -106,55 +71,83 @@ export async function runGoogleExport(options: {
   const config = await loadConfig();
   const versionTs = formatVersionTs();
   const dryRun = isDryRun();
+  const { snapshot_gate } = config.feedPolicy;
+  const storeCode = process.env["GOOGLE_EUPEN_STORE_CODE"] ?? "";
 
   logger.info({ dryRun, markets: options.markets ?? "all" }, "Google export starting");
 
-  // ── 1. Read canonicals ─────────────────────────────────────────────────────
-  const { canonicals, eligible, ineligible, excluded } = await readAllCanonicals(config, {
-    markets: options.markets,
-    channel: "google",
-    persistFeedItems: true,
-  });
-
-  logger.info({ eligible, ineligible, excluded }, "Canonicals loaded");
-
-  // Group by market
-  const byMarket = new Map<string, CanonicalProduct[]>();
-  for (const c of canonicals) {
-    const list = byMarket.get(c.market) ?? [];
-    list.push(c);
-    byMarket.set(c.market, list);
-  }
+  const targetMarkets = options.markets ?? Object.keys(config.markets.markets);
 
   const result: GoogleRunResult = {
-    markets: [...byMarket.keys()],
-    totalCanonicals: canonicals.length,
+    markets: targetMarkets,
+    totalCanonicals: 0,
     byMarket: {},
     localInventory: { submitted: 0, failed: 0 },
     dryRun,
     durationMs: 0,
   };
 
-  // ── 2. Process each market ─────────────────────────────────────────────────
-  for (const [marketCode, marketCanonicals] of byMarket) {
+  // Accumulate Belgium showroom entries across BE_FR/BE_DE to deduplicate by variantId+language
+  const beInventoryByKey = new Map<string, LocalInventoryEntry>();
+
+  // ── Process ONE market at a time ──────────────────────────────────────────
+  //
+  // Loading all markets simultaneously would hold 191k+ GoogleFeedRow objects in RAM
+  // (~500MB+). By processing one market at a time, peak memory stays at:
+  //   raw data Maps (~200MB) + one market's rows (~60MB) ≈ 260MB.
+  //
+  // Trade-off: the DB bulk queries run once per market (5×) instead of once total.
+  // This costs a few seconds of extra query time but is well worth the memory saving.
+  for (const marketCode of targetMarkets) {
     const market = config.markets.markets[marketCode];
     if (!market) continue;
-    const language = market.language;
-    const country = market.country;
+    const { language, country } = market;
 
-    logger.info({ marketCode, language, country, count: marketCanonicals.length }, "Processing market");
+    logger.info({ marketCode, language, country }, "Google: streaming market canonicals");
 
-    // Map to rows (skip products with no image)
     const rows: GoogleFeedRow[] = [];
-    for (const canonical of marketCanonicals) {
-      const row = mapToGoogleRow(canonical, config);
-      if (row) rows.push(row);
-    }
 
+    const { eligible, ineligible, excluded } = await processAllCanonicals(
+      config,
+      {
+        markets: [marketCode],
+        channel: "google",
+        // Persist feed_items only on the first full-catalog pass to avoid
+        // 5× upserts for the same canonical data. Markets are independent
+        // so the first persisted value is valid for all channels.
+        persistFeedItems: true,
+      },
+      (canonical) => {
+        result.totalCanonicals++;
+        const row = mapToGoogleRow(canonical, config);
+        if (row) rows.push(row);
+
+        // Eupen showroom local inventory: Belgium only, deduplicated by variantId+language
+        if (
+          (canonical.market === "BE_FR" || canonical.market === "BE_DE") &&
+          canonical.pickupEupen &&
+          (canonical.stockEupen ?? 0) > 0
+        ) {
+          const key = `${canonical.variantId}:${canonical.language}`;
+          if (!beInventoryByKey.has(key)) {
+            beInventoryByKey.set(key, {
+              offerId: `online:${canonical.language}:BE:${canonical.variantId}`,
+              storeCode,
+              quantity: canonical.stockEupen ?? 0,
+              availability: "in stock",
+              pickup: "multi-day",
+            });
+          }
+        }
+      },
+    );
+
+    logger.info({ marketCode, rows: rows.length, eligible, ineligible, excluded }, "Market streamed");
+
+    // ── Generate TSV → upload → validate → publish ─────────────────────────
     const currentPath = googleFeedPath(language, marketCode);
     const versioned = versionedPath(currentPath, versionTs);
 
-    // ── 3. Generate TSV and upload to versioned path ────────────────────────
     const tsv = buildGoogleTsv(rows);
     const sha256 = await uploadFeedFile(versioned, tsv, "text/tab-separated-values");
 
@@ -170,13 +163,10 @@ export async function runGoogleExport(options: {
     };
     await uploadManifest(versioned, manifest);
 
-    // ── 4. Fetch previous snapshot count for gate ───────────────────────────
     let previousItemCount: number | null = null;
     const prevManifest = await downloadManifest(currentPath).catch(() => null);
     if (prevManifest) previousItemCount = prevManifest.itemCount;
 
-    // ── 5. Validation gate ─────────────────────────────────────────────────
-    const { snapshot_gate } = config.feedPolicy;
     let schemaValid = true;
     if (snapshot_gate.require_zero_schema_errors) {
       const validation = await validateGoogleFeed(versioned);
@@ -191,8 +181,7 @@ export async function runGoogleExport(options: {
       }
     }
 
-    // ── 6. Atomic publish ───────────────────────────────────────────────────
-    const published = schemaValid
+    const published = (!dryRun && schemaValid)
       ? await atomicPublish({
           versionedPath: versioned,
           currentPath,
@@ -202,9 +191,11 @@ export async function runGoogleExport(options: {
         })
       : false;
 
-    // ── 7. Record feed snapshot ─────────────────────────────────────────────
+    if (dryRun) {
+      logger.info({ marketCode, rows: rows.length, dryRun: true }, "DRY RUN: TSV generated (not published)");
+    }
+
     if (published) {
-      // Mark all previous snapshots for this market/language as not current
       await db
         .update(feedSnapshotsTable)
         .set({ isCurrent: false })
@@ -234,44 +225,24 @@ export async function runGoogleExport(options: {
       country,
       rows: rows.length,
       storagePath: published ? currentPath : versioned,
-      published,
+      published: published || dryRun,
       publicUrl: `/api/feeds/google/market/${marketCode}.tsv`,
     };
 
-    logger.info(
-      { marketCode, rows: rows.length, published },
-      "Market feed complete",
-    );
+    logger.info({ marketCode, rows: rows.length, published }, "Market feed complete");
+    // rows[] goes out of scope here → V8 can reclaim the memory before the next market
   }
 
-  // ── 8. Sync local inventory (Eupen showroom) ──────────────────────────────
-  //
-  // Only Belgium market products have Eupen showroom relevance.
-  // BE_FR → country=BE, language=fr
-  // BE_DE → country=BE, language=de
-  //
-  // Deduplicate by variantId: a variant appearing in both BE_FR and BE_DE
-  // must only be submitted once per language to avoid duplicate/wrong-country
-  // offer IDs in Merchant Inventories.
-  const beCanonicalsByLang = new Map<string, Map<string, CanonicalProduct>>();
-  for (const c of canonicals) {
-    if (c.market !== "BE_FR" && c.market !== "BE_DE") continue;
-    const lang = c.language;
-    if (!beCanonicalsByLang.has(lang)) beCanonicalsByLang.set(lang, new Map());
-    // last-write wins if same variantId appears in both BE_FR and BE_DE for same lang
-    beCanonicalsByLang.get(lang)!.set(c.variantId, c);
-  }
-
-  for (const [lang, variantMap] of beCanonicalsByLang) {
-    const beSlice = [...variantMap.values()];
-    const invResult = await syncLocalInventory(beSlice, "BE", lang);
+  // ── Sync local inventory (Eupen showroom) ─────────────────────────────────
+  if (beInventoryByKey.size > 0) {
+    const invResult = await submitLocalInventoryEntries([...beInventoryByKey.values()]);
     result.localInventory.submitted += invResult.submitted;
     result.localInventory.failed += invResult.failed;
   }
 
   result.durationMs = Date.now() - startedAt;
   logger.info(
-    { totalCanonicals: canonicals.length, markets: result.markets.length, durationMs: result.durationMs },
+    { totalCanonicals: result.totalCanonicals, markets: result.markets.length, durationMs: result.durationMs },
     "Google export complete",
   );
 

@@ -36,7 +36,7 @@ import {
   formatVersionTs,
   type FeedManifest,
 } from "../../lib/storage";
-import { readAllCanonicals } from "../canonical-reader";
+import { processAllCanonicals } from "../canonical-reader";
 import {
   mapToMeta,
   type MetaBaseRow,
@@ -115,37 +115,41 @@ export async function runMetaExport(options: {
 
   logger.info({ dryRun, markets: options.markets ?? "all" }, "Meta export starting");
 
-  // ── 1. Read canonicals ─────────────────────────────────────────────────────
-  const { canonicals, eligible, ineligible, excluded } = await readAllCanonicals(config, {
-    markets: options.markets,
-    channel: "meta",
-    persistFeedItems: true,
-  });
-  logger.info({ eligible, ineligible, excluded }, "Canonicals loaded");
-
-  // ── 2. Map all products through the Meta mapper ────────────────────────────
+  // ── 1. Stream canonicals → accumulate compact map rows ────────────────────
+  //
+  // processAllCanonicals never builds a large canonicals[] array — each
+  // canonical is mapped immediately and released, keeping peak heap at
+  // ~raw-data-maps + compact-row-maps instead of raw-data + all canonicals.
+  // Feed-items upserts are batched 100 at a time (vs. one DB round-trip each).
   const baseRows = new Map<string, MetaBaseRow>();       // id → row (deduplicated)
   const langFrRows = new Map<string, MetaLanguageRow>(); // id → row
   const langDeRows = new Map<string, MetaLanguageRow>();
   const countryRows = new Map<string, Map<string, MetaCountryRow>>(); // country → id → row
+  let totalCanonicals = 0;
 
-  for (const canonical of canonicals) {
-    const mapped = mapToMeta(canonical, config);
-    if (!mapped) continue;
+  const { eligible, ineligible, excluded } = await processAllCanonicals(
+    config,
+    { markets: options.markets, channel: "meta", persistFeedItems: true },
+    (canonical) => {
+      totalCanonicals++;
+      const mapped = mapToMeta(canonical, config);
+      if (!mapped) return;
 
-    const { id, language, country, base, language_row, country_row } = mapped;
+      const { id, language, country, base, language_row, country_row } = mapped;
 
-    // Base: deduplicated by id (last write wins, they're identical for same variant+market)
-    if (!baseRows.has(id)) baseRows.set(id, base);
+      // Base: deduplicated by id (identical across markets for same variant)
+      if (!baseRows.has(id)) baseRows.set(id, base);
 
-    // Language rows: one per (language × id)
-    if (language === "fr") langFrRows.set(id, language_row);
-    else if (language === "de") langDeRows.set(id, language_row);
+      // Language rows: one per (language × id)
+      if (language === "fr") langFrRows.set(id, language_row);
+      else if (language === "de") langDeRows.set(id, language_row);
 
-    // Country rows: one per (country × id)
-    if (!countryRows.has(country)) countryRows.set(country, new Map());
-    countryRows.get(country)!.set(id, country_row);
-  }
+      // Country rows: one per (country × id)
+      if (!countryRows.has(country)) countryRows.set(country, new Map());
+      countryRows.get(country)!.set(id, country_row);
+    },
+  );
+  logger.info({ eligible, ineligible, excluded, totalCanonicals }, "Canonicals streamed");
 
   // ── 3. Generate and publish each feed file ─────────────────────────────────
   const feedResults: MetaRunResult["files"] = {} as MetaRunResult["files"];
@@ -260,53 +264,48 @@ export async function runMetaExport(options: {
   // Countries represented by the loaded canonicals
   const representedCountries = new Set(countryRows.keys());
 
-  // All feed files in parallel
-  await Promise.all([
-    // Shared layers: only publish in full runs
-    ...(isPartialRun
-      ? [
-          Promise.resolve().then(() => {
-            logger.info(
-              { reason: "partial-market run" },
-              "Skipping base + language shared layers — not safe to publish partial catalog",
-            );
-            // Record as versioned but not published so callers can see the output
-            feedResults["base"] = { itemCount: baseRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["base"]), versionTs), published: false, sha256: "" };
-            feedResults["language-fr"] = { itemCount: langFrRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["language-fr"]), versionTs), published: false, sha256: "" };
-            feedResults["language-de"] = { itemCount: langDeRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["language-de"]), versionTs), published: false, sha256: "" };
-          }),
-        ]
-      : [
-          publishFeed("base", META_FEED_FILES["base"], META_BASE_HEADERS, [...baseRows.values()], null, null),
-          publishFeed("language-fr", META_FEED_FILES["language-fr"], META_LANGUAGE_HEADERS, [...langFrRows.values()], "fr", null),
-          publishFeed("language-de", META_FEED_FILES["language-de"], META_LANGUAGE_HEADERS, [...langDeRows.values()], "de", null),
-        ]),
-    // Country layers: only publish countries represented by the loaded canonicals
-    ...["BE", "FR", "DE", "AT"].map((country) => {
-      const key = `country-${country}` as MetaFeedKey;
-      const filename = META_FEED_FILES[key];
-      const rows = [...(countryRows.get(country)?.values() ?? [])];
+  // ── Publish feed files SEQUENTIALLY ──────────────────────────────────────────
+  //
+  // Each publishFeed call serializes a full CSV string (~30–100 MB per file).
+  // Running them concurrently via Promise.all would spike memory 7× simultaneously.
+  // Sequential publish keeps peak memory to one CSV at a time.
+  if (isPartialRun) {
+    logger.info(
+      { reason: "partial-market run" },
+      "Skipping base + language shared layers — not safe to publish partial catalog",
+    );
+    feedResults["base"] = { itemCount: baseRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["base"]), versionTs), published: false, sha256: "" };
+    feedResults["language-fr"] = { itemCount: langFrRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["language-fr"]), versionTs), published: false, sha256: "" };
+    feedResults["language-de"] = { itemCount: langDeRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["language-de"]), versionTs), published: false, sha256: "" };
+  } else {
+    await publishFeed("base", META_FEED_FILES["base"], META_BASE_HEADERS, [...baseRows.values()], null, null);
+    await publishFeed("language-fr", META_FEED_FILES["language-fr"], META_LANGUAGE_HEADERS, [...langFrRows.values()], "fr", null);
+    await publishFeed("language-de", META_FEED_FILES["language-de"], META_LANGUAGE_HEADERS, [...langDeRows.values()], "de", null);
+  }
 
-      // Skip countries not represented in a partial run to avoid publishing empty files
-      if (isPartialRun && !representedCountries.has(country)) {
-        logger.info({ country, reason: "country not in partial run markets" }, "Skipping country layer publish");
-        feedResults[key] = { itemCount: 0, storagePath: metaFeedPath(filename), published: false, sha256: "" };
-        return Promise.resolve();
-      }
+  for (const country of ["BE", "FR", "DE", "AT"]) {
+    const key = `country-${country}` as MetaFeedKey;
+    const filename = META_FEED_FILES[key];
+    const rows = [...(countryRows.get(country)?.values() ?? [])];
 
-      return publishFeed(key, filename, META_COUNTRY_HEADERS, rows, null, country);
-    }),
-  ]);
+    if (isPartialRun && !representedCountries.has(country)) {
+      logger.info({ country, reason: "country not in partial run markets" }, "Skipping country layer publish");
+      feedResults[key] = { itemCount: 0, storagePath: metaFeedPath(filename), published: false, sha256: "" };
+      continue;
+    }
+
+    await publishFeed(key, filename, META_COUNTRY_HEADERS, rows, null, country);
+  }
 
   const result: MetaRunResult = {
-    totalCanonicals: canonicals.length,
+    totalCanonicals,
     files: feedResults,
     dryRun,
     durationMs: Date.now() - startedAt,
   };
 
   logger.info(
-    { totalCanonicals: canonicals.length, durationMs: result.durationMs },
+    { totalCanonicals, durationMs: result.durationMs },
     "Meta export complete",
   );
 

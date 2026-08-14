@@ -8,3 +8,4 @@
 - [Shopify API 2025-01 migrations](shopify-api-2025-01-migrations.md) — field renames that break sync silently (e.g. InventoryLevel available→quantities yields NaN); check renames on API bumps.
 - [Feed export serialization](feed-export-serialization.md) — every Google/Meta publish path must share the single feed-export lock; concurrent publishes race on current paths/snapshots.
 - [Sync run reaper](feed-export-serialization.md) — sync_runs has no failure-reason column (use metadata JSONB); scheduler startup reaps orphaned "running" runs as failed.
+- [Export OOM fix](export-oom-fix.md) — all "orphaned" syncs were Meta/Google export OOM; fixed with processAllCanonicals streaming + sequential Meta publishFeed + market-by-market Google.
