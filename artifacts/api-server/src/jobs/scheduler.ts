@@ -310,7 +310,7 @@ export async function startScheduler(): Promise<void> {
   ];
 
   function scheduleJob(job: JobDefinition): void {
-    if (job.requiresShopify && !process.env["SHOPIFY_ADMIN_ACCESS_TOKEN"]) {
+    if (job.requiresShopify && (!process.env["SHOPIFY_CLIENT_ID"] || !process.env["SHOPIFY_CLIENT_SECRET"])) {
       logger.debug({ job: job.name }, "Scheduler: Shopify not configured — skipping job");
       return;
     }

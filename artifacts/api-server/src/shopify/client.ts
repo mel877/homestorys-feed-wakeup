@@ -112,18 +112,59 @@ export class ShopifyClient {
   readonly graphqlEndpoint: string;
   readonly restBase: string;
 
-  private readonly accessToken: string;
+  private readonly clientId: string;
+  private readonly clientSecret: string;
   private readonly rateLimiter: RateLimiter;
+  /** Cached short-lived token from client credentials grant (24h, Shopify docs). */
+  private cachedToken: { value: string; expiresAt: number } | null = null;
 
   constructor() {
     this.shopDomain = requireEnv("SHOPIFY_SHOP_DOMAIN");
-    this.accessToken = requireEnv("SHOPIFY_ADMIN_ACCESS_TOKEN");
-    this.apiVersion =
-      process.env["SHOPIFY_API_VERSION"] ?? "2025-01";
+    this.clientId = requireEnv("SHOPIFY_CLIENT_ID");
+    this.clientSecret = requireEnv("SHOPIFY_CLIENT_SECRET");
+    this.apiVersion = process.env["SHOPIFY_API_VERSION"] ?? "2025-01";
 
     this.graphqlEndpoint = `https://${this.shopDomain}/admin/api/${this.apiVersion}/graphql.json`;
     this.restBase = `https://${this.shopDomain}/admin/api/${this.apiVersion}`;
     this.rateLimiter = new RateLimiter();
+  }
+
+  /**
+   * Return a valid Shopify Admin API access token.
+   * Uses Shopify's client credentials grant (no user interaction).
+   * Tokens expire after ~24h; cached with a 30-minute refresh buffer.
+   * Never logs the token value.
+   */
+  private async getAccessToken(): Promise<string> {
+    const now = Date.now();
+    if (this.cachedToken && now < this.cachedToken.expiresAt) {
+      return this.cachedToken.value;
+    }
+
+    const url = `https://${this.shopDomain}/admin/oauth/access_token`;
+    const body = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: this.clientId,
+      client_secret: this.clientSecret,
+    });
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`Shopify token exchange failed: ${response.status} ${text}`);
+    }
+
+    const data = await response.json() as { access_token: string; expires_in: number };
+    // Cache with 30-minute safety buffer so we refresh before actual expiry.
+    const expiresAt = now + (data.expires_in - 1800) * 1000;
+    this.cachedToken = { value: data.access_token, expiresAt };
+    logger.info("Shopify access token refreshed via client credentials grant");
+    return data.access_token;
   }
 
   /**
@@ -148,7 +189,7 @@ export class ShopifyClient {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Shopify-Access-Token": this.accessToken,
+            "X-Shopify-Access-Token": await this.getAccessToken(),
           },
           body: JSON.stringify({ query, variables }),
         });
@@ -221,7 +262,7 @@ export class ShopifyClient {
   async requestRest<T>(path: string): Promise<T> {
     const response = await fetch(`${this.restBase}${path}`, {
       headers: {
-        "X-Shopify-Access-Token": this.accessToken,
+        "X-Shopify-Access-Token": await this.getAccessToken(),
         "Content-Type": "application/json",
       },
     });

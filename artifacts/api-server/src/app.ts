@@ -70,11 +70,11 @@ if (_appEnv !== "development" && _appEnv !== "test") {
 }
 
 // Start webhook event worker (only when Shopify is configured)
-if (process.env["SHOPIFY_ADMIN_ACCESS_TOKEN"]) {
+if (process.env["SHOPIFY_CLIENT_ID"] && process.env["SHOPIFY_CLIENT_SECRET"]) {
   startWebhookWorker();
   logger.info("Webhook worker started");
 } else {
-  logger.info("SHOPIFY_ADMIN_ACCESS_TOKEN not set — webhook worker not started");
+  logger.info("SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET not set — webhook worker not started");
 }
 
 // Start the in-process scheduler (async — does not block server start)
