@@ -43,7 +43,7 @@ export default function Inventory() {
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold font-mono text-green-600">{inStockVariants?.toLocaleString() || '--'}</div>
-            <p className="text-xs text-muted-foreground mt-1">Variants with >0 qty</p>
+            <p className="text-xs text-muted-foreground mt-1">Variants with {'>'}0 qty</p>
           </CardContent>
         </Card>
 

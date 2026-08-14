@@ -154,7 +154,7 @@ export default function ProductDebug() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-sm font-mono text-muted-foreground mb-4">Handle: {t.handle || product.handle}</div>
-                  <div className="prose prose-sm max-w-none text-muted-foreground line-clamp-6" dangerouslySetInnerHTML={{ __html: t.description || 'No description' }} />
+                  <p className="text-sm text-muted-foreground line-clamp-6 whitespace-pre-wrap">{t.description || 'No description'}</p>
                 </CardContent>
               </Card>
             ))}

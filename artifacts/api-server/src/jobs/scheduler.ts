@@ -126,7 +126,7 @@ async function isRunningInDb(runType: SyncRunType): Promise<boolean> {
 
 type LockResult = { acquired: true } | { acquired: false; reason: string };
 
-async function tryAcquireLock(jobName: string, runType: SyncRunType): Promise<LockResult> {
+export async function tryAcquireLock(jobName: string, runType: SyncRunType): Promise<LockResult> {
   // Synchronous check + claim before any await.
   // Because Node.js is single-threaded, no other code can run between these
   // two lines. A concurrent caller will see the Set entry on its next tick.
@@ -150,7 +150,7 @@ async function tryAcquireLock(jobName: string, runType: SyncRunType): Promise<Lo
   return { acquired: true };
 }
 
-function releaseLock(jobName: string): void {
+export function releaseLock(jobName: string): void {
   runningJobs.delete(jobName);
 }
 

@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { useListSyncRuns, useTriggerSync } from "@workspace/api-client-react";
+import React, { useState, useEffect, useRef } from "react";
+import { useListSyncRuns, getListSyncRunsQueryKey, useTriggerSync } from "@workspace/api-client-react";
 import { format } from "date-fns";
 import { Link } from "wouter";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -13,13 +13,26 @@ import { Card } from "@/components/ui/card";
 export default function Runs() {
   const [page, setPage] = useState(0);
   const [runType, setRunType] = useState<string>("all");
+  const [pollingUntil, setPollingUntil] = useState<number | null>(null);
   const limit = 20;
 
-  const { data: runsData, isLoading, refetch } = useListSyncRuns({
-    limit,
-    offset: page * limit,
-    ...(runType !== "all" && { runType }),
-  });
+  // Poll every 3s for up to 45s after a sync is dispatched so the launched run
+  // becomes visible without requiring a manual refresh.
+  const isPolling = pollingUntil !== null && Date.now() < pollingUntil;
+  const pollingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const queryParams = { limit, offset: page * limit, ...(runType !== "all" && { runType }) };
+  const { data: runsData, isLoading, refetch } = useListSyncRuns(
+    queryParams,
+    { query: { queryKey: getListSyncRunsQueryKey(queryParams), refetchInterval: isPolling ? 3000 : false } },
+  );
+
+  // Stop polling once a running row is visible or the deadline passes.
+  useEffect(() => {
+    if (!isPolling) return;
+    const hasRunning = runsData?.items.some(r => r.status === "running");
+    if (hasRunning) setPollingUntil(null);
+  }, [runsData, isPolling]);
 
   const triggerSync = useTriggerSync();
   const { toast } = useToast();
@@ -27,11 +40,15 @@ export default function Runs() {
   const handleManualSync = (type: 'full'|'inventory'|'prices'|'recommendations') => {
     triggerSync.mutate({ data: { runType: type } }, {
       onSuccess: () => {
-        toast({ title: "Sync Started", description: `Triggered ${type} sync.` });
+        toast({ title: "Sync Dispatched", description: `${type} sync is running in the background.` });
+        // Poll the runs list for 45s so the new run appears automatically.
+        setPollingUntil(Date.now() + 45_000);
+        if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
+        pollingTimerRef.current = setTimeout(() => setPollingUntil(null), 45_000);
         refetch();
       },
       onError: (err) => {
-        toast({ variant: "destructive", title: "Sync failed", description: err.error || "Unknown error" });
+        toast({ variant: "destructive", title: "Sync failed", description: err.message || "Unknown error" });
       }
     });
   };

@@ -7,7 +7,6 @@
  */
 
 export interface SyncTriggerResult {
-  runId: string;
   runType: string;
   status: string;
 }

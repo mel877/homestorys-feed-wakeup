@@ -159,7 +159,6 @@ export const TriggerSyncBody = zod.object({
 })
 
 export const TriggerSyncResponse = zod.object({
-  "runId": zod.string(),
   "runType": zod.string(),
   "status": zod.string()
 })

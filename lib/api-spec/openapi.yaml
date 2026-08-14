@@ -177,8 +177,8 @@ paths:
             schema:
               $ref: "#/components/schemas/SyncTriggerInput"
       responses:
-        "200":
-          description: Sync triggered
+        "202":
+          description: Sync dispatched to background — monitor via sync-runs list
           content:
             application/json:
               schema:
@@ -643,10 +643,8 @@ components:
 
     SyncTriggerResult:
       type: object
-      required: [runId, runType, status]
+      required: [runType, status]
       properties:
-        runId:
-          type: string
         runType:
           type: string
         status:

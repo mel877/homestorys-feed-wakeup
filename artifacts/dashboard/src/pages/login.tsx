@@ -37,7 +37,7 @@ export default function Login() {
         toast({
           variant: "destructive",
           title: "Login Failed",
-          description: err.error || "Invalid password",
+          description: err.message || "Invalid password",
         });
       }
     });

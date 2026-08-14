@@ -49,10 +49,10 @@ router.get("/dashboard/products", requireDashboardAuth, async (req, res): Promis
         ilike(variantsTable.gtin ?? sql`''`, `%${q}%`),
       ) : undefined,
       lifecycle ? (
-        lifecycle === "outlet" ? sql`${variantsTable.outlet} = true` :
-        lifecycle === "discontinued" ? sql`${variantsTable.discontinued} = true` :
-        lifecycle === "bestseller" ? sql`${variantsTable.bestseller} = true` :
-        lifecycle === "exhibition_model" ? sql`${variantsTable.exhibitionModel} = true` :
+        lifecycle === "outlet" ? sql`${variantsTable.metafieldOutlet} = true` :
+        lifecycle === "discontinued" ? sql`${variantsTable.metafieldDiscontinued} = true` :
+        lifecycle === "bestseller" ? sql`${variantsTable.metafieldBestseller} = true` :
+        lifecycle === "exhibition_model" ? sql`${variantsTable.metafieldExhibitionModel} = true` :
         undefined
       ) : undefined,
       ...marketConditions,
@@ -80,10 +80,10 @@ router.get("/dashboard/products", requireDashboardAuth, async (req, res): Promis
         ilike(variantsTable.gtin ?? sql`''`, `%${q}%`),
       ) : undefined,
       lifecycle ? (
-        lifecycle === "outlet" ? sql`${variantsTable.outlet} = true` :
-        lifecycle === "discontinued" ? sql`${variantsTable.discontinued} = true` :
-        lifecycle === "bestseller" ? sql`${variantsTable.bestseller} = true` :
-        lifecycle === "exhibition_model" ? sql`${variantsTable.exhibitionModel} = true` :
+        lifecycle === "outlet" ? sql`${variantsTable.metafieldOutlet} = true` :
+        lifecycle === "discontinued" ? sql`${variantsTable.metafieldDiscontinued} = true` :
+        lifecycle === "bestseller" ? sql`${variantsTable.metafieldBestseller} = true` :
+        lifecycle === "exhibition_model" ? sql`${variantsTable.metafieldExhibitionModel} = true` :
         undefined
       ) : undefined,
       ...marketConditions,
@@ -108,10 +108,10 @@ router.get("/dashboard/products", requireDashboardAuth, async (req, res): Promis
         ilike(variantsTable.gtin ?? sql`''`, `%${q}%`),
       ) : undefined,
       lifecycle ? (
-        lifecycle === "outlet" ? sql`${variantsTable.outlet} = true` :
-        lifecycle === "discontinued" ? sql`${variantsTable.discontinued} = true` :
-        lifecycle === "bestseller" ? sql`${variantsTable.bestseller} = true` :
-        lifecycle === "exhibition_model" ? sql`${variantsTable.exhibitionModel} = true` :
+        lifecycle === "outlet" ? sql`${variantsTable.metafieldOutlet} = true` :
+        lifecycle === "discontinued" ? sql`${variantsTable.metafieldDiscontinued} = true` :
+        lifecycle === "bestseller" ? sql`${variantsTable.metafieldBestseller} = true` :
+        lifecycle === "exhibition_model" ? sql`${variantsTable.metafieldExhibitionModel} = true` :
         undefined
       ) : undefined,
       ...marketConditions,
@@ -125,37 +125,39 @@ router.get("/dashboard/products", requireDashboardAuth, async (req, res): Promis
   const productIds = productRows.map((p) => p.id);
 
   // Aggregate stats per product
-  const [translations, variantStats, marketStats, qualityStats, lifecycleRows] = await Promise.all([
+  const [translations, variantStats, marketStats, qualityStats] = await Promise.all([
     db.select().from(productTranslationsTable)
       .where(sql`${productTranslationsTable.productId} = ANY(${sql.raw(`ARRAY[${productIds.map((id) => `'${id}'`).join(",")}]::uuid[]`)})`)
       .orderBy(productTranslationsTable.language),
+    // Variant stats including lifecycle flags
     db.select({
       productId: variantsTable.productId,
       variantCount: sql<number>`count(*)::int`,
-      outlet: sql<boolean>`bool_or(${variantsTable.outlet})`,
-      discontinued: sql<boolean>`bool_or(${variantsTable.discontinued})`,
-      bestseller: sql<boolean>`bool_or(${variantsTable.bestseller})`,
-      exhibitionModel: sql<boolean>`bool_or(${variantsTable.exhibitionModel})`,
+      outlet: sql<boolean>`bool_or(${variantsTable.metafieldOutlet})`,
+      discontinued: sql<boolean>`bool_or(${variantsTable.metafieldDiscontinued})`,
+      bestseller: sql<boolean>`bool_or(${variantsTable.metafieldBestseller})`,
+      exhibitionModel: sql<boolean>`bool_or(${variantsTable.metafieldExhibitionModel})`,
     }).from(variantsTable)
       .where(sql`${variantsTable.productId} = ANY(${sql.raw(`ARRAY[${productIds.map((id) => `'${id}'`).join(",")}]::uuid[]`)})`)
       .groupBy(variantsTable.productId),
+    // Market stats joined through variants to get productId (one row per variant×market)
     db.select({
+      productId: variantsTable.productId,
       variantId: marketVariantsTable.variantId,
       marketCode: marketVariantsTable.marketCode,
       isEligible: marketVariantsTable.isEligible,
       availability: marketVariantsTable.availability,
     }).from(marketVariantsTable)
-      .leftJoin(variantsTable, eq(variantsTable.id, marketVariantsTable.variantId))
+      .innerJoin(variantsTable, eq(variantsTable.id, marketVariantsTable.variantId))
       .where(sql`${variantsTable.productId} = ANY(${sql.raw(`ARRAY[${productIds.map((id) => `'${id}'`).join(",")}]::uuid[]`)})`),
+    // Quality scores
     db.select({
       productId: variantsTable.productId,
       avgScore: sql<number | null>`avg(${feedItemsTable.dataQualityScore})::numeric`,
     }).from(feedItemsTable)
-      .leftJoin(variantsTable, eq(variantsTable.id, feedItemsTable.variantId))
+      .innerJoin(variantsTable, eq(variantsTable.id, feedItemsTable.variantId))
       .where(sql`${variantsTable.productId} = ANY(${sql.raw(`ARRAY[${productIds.map((id) => `'${id}'`).join(",")}]::uuid[]`)})`)
       .groupBy(variantsTable.productId),
-    // placeholder
-    Promise.resolve([]),
   ]);
 
   // Build lookup maps
@@ -167,22 +169,40 @@ router.get("/dashboard/products", requireDashboardAuth, async (req, res): Promis
   const variantStatMap = new Map(variantStats.map((v) => [v.productId, v]));
   const qualityMap = new Map(qualityStats.map((q) => [q.productId, q.avgScore]));
 
-  // Markets per product
+  // Markets and eligible counts per product, aggregated from market variant rows.
+  // eligibleVariants tracks distinct variant IDs (not market-variant pairs) to avoid
+  // inflating counts when a single variant is eligible in multiple markets.
   const marketsMap = new Map<string, Set<string>>();
-  const eligibleMap = new Map<string, number>();
-  const availMap = new Map<string, string>();
+  const eligibleVariantsMap = new Map<string, Set<string>>(); // productId → Set<variantId>
+  const availabilityMap = new Map<string, Map<string, number>>(); // productId → availability → count
+
   for (const mv of marketStats) {
-    const variant = variantStats.find((v) => v.productId && mv.variantId); // we don't have productId here easily
-    // We need to get productId from variantId — we already have it in variantStats
+    const pid = mv.productId;
+    if (!marketsMap.has(pid)) marketsMap.set(pid, new Set());
+    marketsMap.get(pid)!.add(mv.marketCode);
+
+    if (mv.isEligible) {
+      if (!eligibleVariantsMap.has(pid)) eligibleVariantsMap.set(pid, new Set());
+      eligibleVariantsMap.get(pid)!.add(mv.variantId);
+    }
+
+    if (!availabilityMap.has(pid)) availabilityMap.set(pid, new Map());
+    const avail = mv.availability ?? "unknown";
+    const aMap = availabilityMap.get(pid)!;
+    aMap.set(avail, (aMap.get(avail) ?? 0) + 1);
   }
 
-  // Simpler: get productId for each variant from variantStatMap by iterating variants
-  const variantProductMap = new Map<string, string>();
-  for (const vs of variantStats) {
-    // We need the actual variant IDs. Re-query...
+  function dominantAvailability(pid: string): string {
+    const aMap = availabilityMap.get(pid);
+    if (!aMap || aMap.size === 0) return "unknown";
+    // Priority: in_stock > preorder > out_of_stock > unknown
+    const priority = ["in_stock", "preorder", "backorder", "out_of_stock", "unknown"];
+    for (const p of priority) {
+      if ((aMap.get(p) ?? 0) > 0) return p;
+    }
+    return "unknown";
   }
 
-  // Actually let's just build items from what we have with basic aggregation
   const items = productRows.map((p) => {
     const vs = variantStatMap.get(p.id);
     const qs = qualityMap.get(p.id);
@@ -192,11 +212,6 @@ router.get("/dashboard/products", requireDashboardAuth, async (req, res): Promis
     if (vs?.bestseller) lifecycleFlags.push("bestseller");
     if (vs?.exhibitionModel) lifecycleFlags.push("exhibition_model");
 
-    const mvForProduct = marketStats.filter((mv) => {
-      // We don't have productId in mv easily without another join, skip for now
-      return false;
-    });
-
     return {
       id: p.id,
       handle: p.handle,
@@ -204,10 +219,10 @@ router.get("/dashboard/products", requireDashboardAuth, async (req, res): Promis
       vendor: p.vendor ?? null,
       productType: p.productType ?? null,
       variantCount: vs?.variantCount ?? 0,
-      eligibleVariantCount: 0,
-      availability: "unknown",
+      eligibleVariantCount: eligibleVariantsMap.get(p.id)?.size ?? 0,
+      availability: dominantAvailability(p.id),
       avgQualityScore: qs != null ? Number(qs) : null,
-      markets: [] as string[],
+      markets: Array.from(marketsMap.get(p.id) ?? []).sort(),
       lifecycleFlags,
       updatedAt: p.updatedAt?.toISOString() ?? "",
     };
@@ -281,17 +296,17 @@ router.get("/dashboard/products/:id", requireDashboardAuth, async (req, res): Pr
       weight: v.weight != null ? Number(v.weight) : null,
       weightUnit: v.weightUnit ?? "kg",
       available: v.available ?? false,
-      googleCategory: v.googleCategory ?? null,
-      metaCategory: v.metaCategory ?? null,
-      shippingClass: v.shippingClass ?? null,
-      returnClass: v.returnClass ?? null,
-      outlet: v.outlet ?? null,
-      discontinued: v.discontinued ?? null,
-      bestseller: v.bestseller ?? null,
-      exhibitionModel: v.exhibitionModel ?? null,
-      material: v.material ?? [],
-      style: v.style ?? [],
-      room: v.room ?? [],
+      googleCategory: v.metafieldGoogleCategory ?? null,
+      metaCategory: v.metafieldMetaCategory ?? null,
+      shippingClass: v.metafieldShippingClass ?? null,
+      returnClass: v.metafieldReturnClass ?? null,
+      outlet: v.metafieldOutlet ?? null,
+      discontinued: v.metafieldDiscontinued ?? null,
+      bestseller: v.metafieldBestseller ?? null,
+      exhibitionModel: v.metafieldExhibitionModel ?? null,
+      material: v.metafieldMaterial ?? [],
+      style: v.metafieldStyle ?? [],
+      room: v.metafieldRoom ?? [],
     })),
     translations: translations.map((t) => ({
       language: t.language,

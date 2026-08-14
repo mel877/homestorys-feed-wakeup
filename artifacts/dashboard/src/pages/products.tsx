@@ -95,7 +95,7 @@ export default function Products() {
               </TableRow>
             ) : (
               productsData?.items.map(product => (
-                <TableRow key={product.id} className="hover:bg-muted/50 cursor-pointer" onClick={() => window.location.href = `/products/${product.id}`}>
+                <TableRow key={product.id} className="hover:bg-muted/50 cursor-pointer" onClick={() => window.location.href = `/dashboard/products/${product.id}`}>
                   <TableCell>
                     <Link href={`/products/${product.id}`} className="font-medium text-primary hover:underline" onClick={e => e.stopPropagation()}>
                       {product.handle}

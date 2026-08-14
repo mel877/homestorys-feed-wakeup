@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
-  useGetDashboardOverview, 
+  useGetDashboardOverview,
+  getGetDashboardOverviewQueryKey,
   useTriggerSync 
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,18 +13,35 @@ import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Overview() {
-  const { data: overview, isLoading, refetch } = useGetDashboardOverview();
+  const [pollingUntil, setPollingUntil] = useState<number | null>(null);
+  const isPolling = pollingUntil !== null && Date.now() < pollingUntil;
+  const pollingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { data: overview, isLoading, refetch } = useGetDashboardOverview(
+    { query: { queryKey: getGetDashboardOverviewQueryKey(), refetchInterval: isPolling ? 4000 : false } },
+  );
+
+  // Stop polling when a running sync appears in the recent runs list.
+  useEffect(() => {
+    if (!isPolling) return;
+    const hasRunning = overview?.recentRuns?.some((r: { status: string }) => r.status === "running");
+    if (hasRunning) setPollingUntil(null);
+  }, [overview, isPolling]);
+
   const triggerSync = useTriggerSync();
   const { toast } = useToast();
 
   const handleManualSync = (type: 'full'|'inventory'|'prices'|'recommendations') => {
     triggerSync.mutate({ data: { runType: type } }, {
       onSuccess: () => {
-        toast({ title: "Sync Started", description: `Triggered ${type} sync.` });
+        toast({ title: "Sync Dispatched", description: `${type} sync is running in the background.` });
+        setPollingUntil(Date.now() + 45_000);
+        if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
+        pollingTimerRef.current = setTimeout(() => setPollingUntil(null), 45_000);
         refetch();
       },
       onError: (err) => {
-        toast({ variant: "destructive", title: "Sync failed", description: err.error || "Unknown error" });
+        toast({ variant: "destructive", title: "Sync failed", description: err.message || "Unknown error" });
       }
     });
   };

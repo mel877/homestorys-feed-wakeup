@@ -122,6 +122,37 @@ router.get(
   },
 );
 
+// ── Dashboard: Google feed download (auth-gated) ──────────────────────────────
+
+/**
+ * GET /feeds/google/dashboard/:file — serve a Google TSV snapshot for dashboard users.
+ * Uses the same session cookie auth as the rest of the dashboard.
+ * Separated from the internal-secret route to avoid leaking the internal key.
+ */
+router.get(
+  "/feeds/google/dashboard/:file",
+  requireDashboardAuth,
+  async (req: Request, res: Response): Promise<void> => {
+    const rawFile = req.params["file"];
+    const file = Array.isArray(rawFile) ? rawFile[0] : rawFile;
+    if (!file || !/^[\w\-\.]+\.tsv$/.test(file)) {
+      res.status(400).json({ error: "Invalid feed filename" });
+      return;
+    }
+    // Authenticated endpoint — must not be cached by shared proxies or CDNs.
+    // Do NOT reuse serveFeedFile() which sets Cache-Control: public.
+    const buf = await downloadFeedFile(`feeds/google/${file}`);
+    if (!buf) {
+      res.status(404).json({ error: "Feed file not found", storagePath: `feeds/google/${file}` });
+      return;
+    }
+    res.setHeader("Content-Type", "text/tab-separated-values; charset=utf-8");
+    res.setHeader("Content-Length", buf.length);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.send(buf);
+  },
+);
+
 // ── Dashboard: feed snapshots list ────────────────────────────────────────────
 
 /**
@@ -157,7 +188,9 @@ router.get("/feeds/snapshots", requireDashboardAuth, async (req: Request, res: R
     isCurrent: r.isCurrent ?? false,
     generatedAt: r.generatedAt?.toISOString() ?? "",
     downloadUrl: r.storagePath
-      ? `/api/feeds/${r.channel}/${r.storagePath.split("/").pop() ?? ""}`
+      ? r.channel === "google"
+        ? `/api/feeds/google/dashboard/${r.storagePath.split("/").pop() ?? ""}`
+        : `/api/feeds/${r.channel}/${r.storagePath.split("/").pop() ?? ""}`
       : null,
   }));
 

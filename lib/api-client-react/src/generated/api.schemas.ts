@@ -138,7 +138,6 @@ export interface SyncTriggerInput {
 }
 
 export interface SyncTriggerResult {
-  runId: string;
   runType: string;
   status: string;
 }

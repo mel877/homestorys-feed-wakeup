@@ -35,7 +35,12 @@ app.use("/api/webhooks", express.raw({ type: "*/*" }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser(process.env["SESSION_SECRET"] ?? "fallback-dev-secret"));
+const _sessionSecret = process.env["SESSION_SECRET"];
+if (!_sessionSecret) {
+  logger.error("SESSION_SECRET env var is required — refusing to start without a session signing key");
+  process.exit(1);
+}
+app.use(cookieParser(_sessionSecret));
 
 app.use("/api", router);
 

@@ -10,7 +10,10 @@ const COOKIE_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 /** Derive the expected cookie value from the SESSION_SECRET so it can't be forged. */
 function makeSessionToken(): string {
-  const secret = process.env["SESSION_SECRET"] ?? "fallback-dev-secret";
+  const secret = process.env["SESSION_SECRET"];
+  if (!secret) {
+    throw new Error("SESSION_SECRET env var is required for dashboard session signing");
+  }
   return crypto.createHmac("sha256", secret).update("dash:authenticated").digest("hex");
 }
 

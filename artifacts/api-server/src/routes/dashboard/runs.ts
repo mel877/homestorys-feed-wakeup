@@ -4,6 +4,16 @@ import { requireDashboardAuth } from "./auth";
 import { ListSyncRunsQueryParams, GetSyncRunParams, TriggerSyncBody } from "@workspace/api-zod";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { logger } from "../../lib/logger";
+import { tryAcquireLock, releaseLock } from "../../jobs/scheduler";
+import type { SyncRunType } from "../../shopify/sync-run-tracker";
+
+/** Map dashboard runType to scheduler job name and SyncRunType. */
+const JOB_MAP: Record<string, { jobName: string; runType: SyncRunType }> = {
+  full: { jobName: "full-sync", runType: "full" },
+  inventory: { jobName: "inventory-sync", runType: "inventory" },
+  prices: { jobName: "price-sync", runType: "prices" },
+  recommendations: { jobName: "recommendations-sync", runType: "recommendations" },
+};
 
 const router: IRouter = Router();
 
@@ -105,38 +115,78 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
   }
 
   const { runType } = parsed.data;
-
-  // Use the internal sync route — call the job directly
-  try {
-    let runId: string;
-
-    if (runType === "full") {
-      const { runFullSync } = await import("../../shopify/index");
-      runId = await runFullSync();
-    } else if (runType === "inventory") {
-      const { runInventorySync } = await import("../../shopify/index");
-      runId = await runInventorySync();
-    } else if (runType === "prices") {
-      const { runPriceSync } = await import("../../shopify/index");
-      runId = await runPriceSync();
-    } else if (runType === "recommendations") {
-      const { runRecommendationsSync } = await import("../../jobs/sync-recommendations");
-      runId = await runRecommendationsSync();
-    } else {
-      res.status(400).json({ error: `Unknown runType: ${runType as string}` });
-      return;
-    }
-
-    res.json({ runId, runType, status: "started" });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("lock") || message.includes("running")) {
-      res.status(409).json({ error: "A sync of this type is already running" });
-    } else {
-      logger.error({ err }, "Failed to trigger sync");
-      res.status(500).json({ error: "Failed to trigger sync" });
-    }
+  const job = JOB_MAP[runType];
+  if (!job) {
+    res.status(400).json({ error: `Unknown runType: ${runType}` });
+    return;
   }
+
+  // Atomically acquire the scheduler lock BEFORE sending 202.
+  // tryAcquireLock does a synchronous in-process check (Node.js single-threaded) and
+  // an async DB check for process-restart orphans. If the lock is taken by the
+  // scheduler or a concurrent request, we return 409 without dispatching anything.
+  const lock = await tryAcquireLock(job.jobName, job.runType);
+  if (!lock.acquired) {
+    res.status(409).json({ error: `A ${runType} sync is already running` });
+    return;
+  }
+
+  // Lock acquired — respond 202 immediately and run the job in the background.
+  // The background job owns the already-held lock and MUST release it in finally.
+  res.status(202).json({ runType, status: "dispatched" });
+
+  setImmediate(() => {
+    const runBackground = async (): Promise<void> => {
+      let runId: string | null = null;
+      try {
+        logger.info({ job: job.jobName }, "Dashboard trigger: job starting");
+
+        if (runType === "full") {
+          const { runFullSync } = await import("../../shopify/index");
+          const { runGoogleExport } = await import("../../exporters/google/runner");
+          const { runMetaExport } = await import("../../exporters/meta/generator");
+          const { fetchAndStoreDiagnostics } = await import("../../exporters/google/diagnostics");
+          // Complete full-sync pipeline, matching the scheduler exactly.
+          runId = await runFullSync();
+          await runGoogleExport({ syncRunId: runId }).catch((err: unknown) =>
+            logger.error({ err, runId }, "Dashboard trigger: Google export failed"),
+          );
+          await runMetaExport({ syncRunId: runId }).catch((err: unknown) =>
+            logger.error({ err, runId }, "Dashboard trigger: Meta export failed"),
+          );
+          await fetchAndStoreDiagnostics().catch((err: unknown) =>
+            logger.error({ err, runId }, "Dashboard trigger: Google diagnostics reconciliation failed"),
+          );
+        } else if (runType === "inventory") {
+          const { runInventorySync } = await import("../../shopify/index");
+          runId = await runInventorySync();
+        } else if (runType === "prices") {
+          const { runPriceSync } = await import("../../shopify/index");
+          runId = await runPriceSync();
+        } else if (runType === "recommendations") {
+          const { runRecommendationsSync } = await import("../../jobs/sync-recommendations");
+          runId = await runRecommendationsSync();
+        }
+
+        logger.info({ job: job.jobName, runId }, "Dashboard trigger: job completed");
+      } catch (err: unknown) {
+        logger.error({ err, runType, job: job.jobName }, "Dashboard trigger: job failed");
+      } finally {
+        releaseLock(job.jobName);
+        // Post-run alert check — same as runJobWithLock's finally block.
+        // Runs for all triggered syncs, success or failure. Fire-and-forget.
+        const capturedRunId = runId;
+        import("../../observability/alerts")
+          .then(({ checkAlerts }) => checkAlerts(capturedRunId))
+          .catch((alertErr: unknown) =>
+            logger.error({ err: alertErr, runId: capturedRunId }, "Dashboard trigger: post-run alert check failed"),
+          );
+      }
+    };
+    runBackground().catch((err: unknown) =>
+      logger.error({ err, runType }, "Dashboard trigger: unexpected error in background runner"),
+    );
+  });
 });
 
 export default router;
