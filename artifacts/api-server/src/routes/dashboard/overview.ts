@@ -1,7 +1,9 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { requireDashboardAuth } from "./auth";
-import { sql, isNull, desc } from "drizzle-orm";
+import { sql, desc, eq, and, ne } from "drizzle-orm";
+import { loadConfig } from "../../config";
+import { getActiveAlerts } from "../../observability/alerts";
 import {
   productsTable,
   variantsTable,
@@ -9,8 +11,8 @@ import {
   feedItemsTable,
   imagesTable,
   syncRunsTable,
-  channelDiagnosticsTable,
   feedSnapshotsTable,
+  productTranslationsTable,
 } from "@workspace/db";
 
 const router: IRouter = Router();
@@ -23,16 +25,18 @@ router.get("/dashboard/overview", requireDashboardAuth, async (req, res): Promis
     byMarket,
     byAvailability,
     recentRuns,
-    activeAlerts,
+    computedAlerts,
     avgQuality,
     below70,
     imageCounts,
     lastFullSync,
     lastGooglePush,
     lastMetaPush,
+    dbTranslationCoverage,
   ] = await Promise.all([
-    // Total products
-    db.select({ count: sql<number>`count(*)::int` }).from(productsTable),
+    // Active products only — denominator for translation coverage and the "Total Products" card;
+    // inactive/draft products are not feedable so they should not count toward totals.
+    db.select({ count: sql<number>`count(*)::int` }).from(productsTable).where(eq(productsTable.status, "active")),
     // Total variants
     db.select({ count: sql<number>`count(*)::int` }).from(variantsTable),
     // Eligible variants (any market)
@@ -57,18 +61,9 @@ router.get("/dashboard/overview", requireDashboardAuth, async (req, res): Promis
       .groupBy(marketVariantsTable.availability),
     // Recent sync runs
     db.select().from(syncRunsTable).orderBy(desc(syncRunsTable.startedAt)).limit(10),
-    // Active unresolved diagnostics grouped by type
-    db.select({
-      type: channelDiagnosticsTable.issueType,
-      severity: channelDiagnosticsTable.severity,
-      message: sql<string>`max(${channelDiagnosticsTable.message})`,
-      count: sql<number>`count(*)::int`,
-    })
-      .from(channelDiagnosticsTable)
-      .where(isNull(channelDiagnosticsTable.resolvedAt))
-      .groupBy(channelDiagnosticsTable.issueType, channelDiagnosticsTable.severity)
-      .orderBy(desc(sql`count(*)`))
-      .limit(20),
+    // All active alert conditions — includes translation coverage, feed staleness,
+    // product count drops, and Merchant Center diagnostics. Read-only, no side-effects.
+    getActiveAlerts(),
     // Avg quality score
     db.select({ avg: sql<number | null>`avg(${feedItemsTable.dataQualityScore})::numeric` }).from(feedItemsTable),
     // Variants below 70
@@ -99,7 +94,40 @@ router.get("/dashboard/overview", requireDashboardAuth, async (req, res): Promis
       .where(sql`${feedSnapshotsTable.channel} = 'meta'`)
       .orderBy(desc(feedSnapshotsTable.generatedAt))
       .limit(1),
+    // Translation coverage: count distinct ACTIVE products with a complete translation
+    // (non-empty title required — syncLocale writes "" when no title translation exists).
+    // Joining to productsTable with status='active' ensures inactive/deleted products
+    // do not inflate the numerator — consistent with the active-product denominator.
+    db.select({
+      language: productTranslationsTable.language,
+      productCount: sql<number>`count(distinct ${productTranslationsTable.productId})::int`,
+    })
+      .from(productTranslationsTable)
+      .innerJoin(
+        productsTable,
+        and(
+          eq(productsTable.id, productTranslationsTable.productId),
+          eq(productsTable.status, "active"),
+        ),
+      )
+      .where(ne(productTranslationsTable.title, ""))
+      .groupBy(productTranslationsTable.language),
   ]);
+
+  // Build complete per-language coverage including all configured locales, even those
+  // with 0 rows (the GROUP BY above omits them).
+  // Primary locale (fr) content lives on the products table, not product_translations —
+  // use the active product count so it never shows a false zero.
+  const config = loadConfig();
+  const primaryLocale = "fr";
+  const translationCountMap = new Map(dbTranslationCoverage.map((r) => [r.language, r.productCount]));
+  const byLanguage = config.languages.languages.map((lang) => ({
+    language: lang.code,
+    productCount:
+      lang.code === primaryLocale
+        ? (productCount[0]?.count ?? 0)
+        : (translationCountMap.get(lang.code) ?? 0),
+  }));
 
   res.json({
     totalProducts: productCount[0]?.count ?? 0,
@@ -119,11 +147,11 @@ router.get("/dashboard/overview", requireDashboardAuth, async (req, res): Promis
       errors: r.errors ?? 0,
       warnings: r.warnings ?? 0,
     })),
-    activeAlerts: activeAlerts.map((a) => ({
+    activeAlerts: computedAlerts.map((a) => ({
       type: a.type,
       severity: a.severity,
       message: a.message,
-      count: a.count,
+      count: null,
     })),
     feedHealth: {
       avgDataQualityScore: avgQuality[0]?.avg != null ? Number(avgQuality[0].avg) : null,
@@ -136,6 +164,7 @@ router.get("/dashboard/overview", requireDashboardAuth, async (req, res): Promis
       lastGooglePush: lastGooglePush[0]?.generatedAt?.toISOString() ?? null,
       lastMetaPush: lastMetaPush[0]?.generatedAt?.toISOString() ?? null,
     },
+    byLanguage,
   });
 });
 

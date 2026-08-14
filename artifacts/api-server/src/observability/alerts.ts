@@ -15,8 +15,8 @@
  *   - Critical Merchant Center diagnostics
  */
 
-import { db, syncRunsTable, syncErrorsTable, feedSnapshotsTable, channelDiagnosticsTable } from "@workspace/db";
-import { eq, and, gte, desc, gt, inArray, count, isNull } from "drizzle-orm";
+import { db, syncRunsTable, syncErrorsTable, feedSnapshotsTable, channelDiagnosticsTable, productsTable, productTranslationsTable } from "@workspace/db";
+import { eq, and, gte, desc, gt, inArray, count, isNull, sql, ne } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config/loader";
 
@@ -316,6 +316,110 @@ async function checkMerchantDiagnostics(): Promise<Alert[]> {
   return [];
 }
 
+/**
+ * Pure logic for translation coverage alert computation.
+ *
+ * Exported for unit testing — the DB-backed wrapper is `checkTranslationCoverage()`.
+ *
+ * @param total        - Number of active products (denominator)
+ * @param locales      - Configured non-primary locales to check
+ * @param countMap     - Translated active-product count per language code
+ */
+export function computeTranslationCoverageAlerts(
+  total: number,
+  locales: Array<{ code: string; name: string }>,
+  countMap: Map<string, number>,
+): Alert[] {
+  if (total === 0) return [];
+
+  const alerts: Alert[] = [];
+  for (const lang of locales) {
+    const translated = countMap.get(lang.code) ?? 0;
+    if (translated >= total) continue; // 100% coverage — no alert
+
+    const pct = Math.round((translated / total) * 100);
+    if (translated === 0) {
+      alerts.push({
+        type: "translation_missing",
+        severity: "warning",
+        message:
+          `Language '${lang.code}' (${lang.name}) has 0 translations — ` +
+          (lang.code === "de"
+            ? "publish the DE locale in Shopify admin → Settings → Languages, then run a full sync"
+            : "configure this locale in Shopify admin and run a full sync"),
+        details: { language: lang.code, translated: 0, total, coveragePct: 0 },
+      });
+    } else {
+      alerts.push({
+        type: "translation_partial",
+        severity: "warning",
+        message:
+          `Language '${lang.code}' (${lang.name}) has partial translations — ` +
+          `${translated.toLocaleString()} of ${total.toLocaleString()} products translated (${pct}%). ` +
+          `${total - translated} products will fall back to the primary locale in feeds.`,
+        details: { language: lang.code, translated, total, coveragePct: pct },
+      });
+    }
+  }
+
+  return alerts;
+}
+
+/**
+ * Check that all configured non-primary locales have translations for all active products.
+ *
+ * Fires a "warning" alert when any non-primary locale (e.g. de, en, it) is missing
+ * translations for one or more active products so that operators know German-market
+ * feeds are falling back to the French primary locale rather than serving native content.
+ *
+ * Numerator and denominator are both scoped to active products — translations belonging
+ * only to inactive/deleted products do not inflate coverage.
+ */
+async function checkTranslationCoverage(): Promise<Alert[]> {
+  let config;
+  try {
+    config = loadConfig();
+  } catch {
+    return [];
+  }
+
+  const PRIMARY_LOCALE = "fr";
+  const nonPrimary = config.languages.languages.filter((l) => l.code !== PRIMARY_LOCALE);
+  if (nonPrimary.length === 0) return [];
+
+  // Active product count — denominator for all non-primary locales
+  const [activeRow] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(productsTable)
+    .where(eq(productsTable.status, "active"));
+
+  const total = activeRow?.total ?? 0;
+  if (total === 0) return [];
+
+  // Count distinct ACTIVE products with a complete translation (non-empty title).
+  // syncLocale writes title="" when no title translation exists — only rows with a real
+  // title are counted, matching the feed export's content requirement.
+  // Join to productsTable so inactive/deleted product translations don't inflate the count.
+  const rows = await db
+    .select({
+      language: productTranslationsTable.language,
+      translated: sql<number>`count(distinct ${productTranslationsTable.productId})::int`,
+    })
+    .from(productTranslationsTable)
+    .innerJoin(
+      productsTable,
+      and(
+        eq(productsTable.id, productTranslationsTable.productId),
+        eq(productsTable.status, "active"),
+      ),
+    )
+    .where(ne(productTranslationsTable.title, ""))
+    .groupBy(productTranslationsTable.language);
+
+  const countMap = new Map(rows.map((r) => [r.language, r.translated]));
+  return computeTranslationCoverageAlerts(total, nonPrimary, countMap);
+}
+
 // ── Exported individual checks (for testing and targeted use) ─────────────────
 
 /**
@@ -358,6 +462,7 @@ export async function checkAlerts(syncRunId: string | null = null): Promise<Aler
     checkMetaFeedStaleness(policy.meta_feed_stale_hours),
     checkStockStaleness(policy.stock_stale_hours),
     checkMerchantDiagnostics(),
+    checkTranslationCoverage(),
   ]);
 
   for (const result of checks) {
@@ -417,6 +522,7 @@ export async function getActiveAlerts(): Promise<Alert[]> {
     checkMetaFeedStaleness(policy.meta_feed_stale_hours),
     checkStockStaleness(policy.stock_stale_hours),
     checkMerchantDiagnostics(),
+    checkTranslationCoverage(),
   ]);
 
   const activeAlerts: Alert[] = [];

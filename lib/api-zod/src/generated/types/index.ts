@@ -53,4 +53,5 @@ export * from './syncRunSummary';
 export * from './syncTriggerInput';
 export * from './syncTriggerInputRunType';
 export * from './syncTriggerResult';
+export * from './translationCoverage';
 export * from './variantDetail';

@@ -188,7 +188,17 @@ async function syncLocale(
     }
   } while (cursor);
 
-  logger.info({ locale, upserted, pageCount }, "Locale sync complete");
+  if (upserted === 0) {
+    logger.warn(
+      { locale, pageCount },
+      "Locale sync complete with 0 translations upserted — " +
+        "this usually means the locale is not published in Shopify admin. " +
+        "Go to Shopify admin → Settings → Languages and publish the locale, " +
+        "then run a full sync to populate translations.",
+    );
+  } else {
+    logger.info({ locale, upserted, pageCount }, "Locale sync complete");
+  }
 }
 
 // ── Targeted single-product translation sync ─────────────────────────────────

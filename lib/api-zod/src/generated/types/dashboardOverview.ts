@@ -10,6 +10,7 @@ import type { AvailabilityCount } from './availabilityCount';
 import type { FeedHealthKpis } from './feedHealthKpis';
 import type { MarketCount } from './marketCount';
 import type { SyncRunSummary } from './syncRunSummary';
+import type { TranslationCoverage } from './translationCoverage';
 
 export interface DashboardOverview {
   totalProducts: number;
@@ -20,4 +21,6 @@ export interface DashboardOverview {
   recentRuns: SyncRunSummary[];
   activeAlerts: AlertSummary[];
   feedHealth: FeedHealthKpis;
+  /** Translation coverage per configured language */
+  byLanguage: TranslationCoverage[];
 }

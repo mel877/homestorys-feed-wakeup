@@ -7,7 +7,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { AlertCircle, ArrowRight, Package, Percent, Activity, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowRight, Package, Percent, Activity, RefreshCw, Languages } from "lucide-react";
 import { format } from "date-fns";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -189,6 +189,65 @@ export default function Overview() {
         </div>
       </section>
       
+      <section>
+        {(() => {
+          const LANG_LABELS: Record<string, string> = { fr: "French", de: "German", en: "English", it: "Italian" };
+          const PRIMARY_LOCALE = "fr";
+          const total = overview.totalProducts;
+
+          // For non-primary locales: incomplete coverage = fewer translations than active products
+          const deRow = overview.byLanguage.find((l: { language: string; productCount: number }) => l.language === "de");
+          const deCoverage = deRow ? deRow.productCount : 0;
+          const deIncomplete = deCoverage < total;
+
+          return (
+            <>
+              <div className="flex items-center gap-3 mb-4">
+                <h2 className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Translation Coverage</h2>
+                {deIncomplete && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#e7000b] uppercase tracking-wide">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    {deCoverage === 0
+                      ? "German missing — publish DE locale in Shopify admin"
+                      : `German partial — ${deCoverage.toLocaleString()} / ${total.toLocaleString()} products`}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {overview.byLanguage.map((lang: { language: string; productCount: number }) => {
+                  const isPrimary = lang.language === PRIMARY_LOCALE;
+                  // Non-primary locales are flagged when coverage < 100% of active products
+                  const isIncomplete = !isPrimary && lang.productCount < total;
+                  const pct = total > 0 ? Math.round((lang.productCount / total) * 100) : 100;
+                  return (
+                    <Card key={lang.language} className={`p-5 ${isIncomplete ? "border-[#e7000b]/40 bg-[#fff5f5]" : ""}`}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className={`w-8 h-8 rounded-[10px] flex items-center justify-center ${isIncomplete ? "bg-[#ffe4e4]" : "bg-[#f5f5f5]"}`}>
+                          <Languages className={`w-4 h-4 ${isIncomplete ? "text-[#e7000b]" : "text-foreground"}`} />
+                        </div>
+                        <span className="text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">{lang.language.toUpperCase()}</span>
+                      </div>
+                      <div className={`text-[24px] font-semibold tracking-tight leading-none ${isIncomplete ? "text-[#e7000b]" : "text-foreground"}`}>
+                        {isPrimary ? lang.productCount.toLocaleString() : `${lang.productCount.toLocaleString()} / ${total.toLocaleString()}`}
+                      </div>
+                      <div className="text-[12px] text-muted-foreground mt-1.5">
+                        {isPrimary
+                          ? "Primary locale (source)"
+                          : lang.productCount === 0
+                            ? lang.language === "de" ? "Publish DE in Shopify admin" : "No translations yet"
+                            : isIncomplete
+                              ? `${pct}% — ${total - lang.productCount} products use FR fallback`
+                              : `${LANG_LABELS[lang.language] ?? lang.language} — 100% translated`}
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
+      </section>
+
       <section className="border-t border-border pt-6 pb-8">
         <div className="flex flex-wrap gap-8 text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">
           <div>LAST FULL SYNC: <span className="text-foreground">{overview.feedHealth.lastFullSync ? format(new Date(overview.feedHealth.lastFullSync), "yyyy-MM-dd HH:mm") : 'NEVER'}</span></div>

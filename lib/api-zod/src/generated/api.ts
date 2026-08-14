@@ -84,12 +84,16 @@ export const GetDashboardOverviewResponse = zod.object({
   "variantsBelow70": zod.number(),
   "classifiedImages": zod.number(),
   "totalImages": zod.number(),
-  "productsWithImages": zod.number(),
-  "productsWithoutImages": zod.number(),
+  "productsWithImages": zod.number().describe('Number of products that have at least one image'),
+  "productsWithoutImages": zod.number().describe('Number of products with no images at all'),
   "lastFullSync": zod.string().nullable().describe('ISO timestamp'),
   "lastGooglePush": zod.string().nullable().describe('ISO timestamp'),
   "lastMetaPush": zod.string().nullable().describe('ISO timestamp')
-})
+}),
+  "byLanguage": zod.array(zod.object({
+  "language": zod.string().describe('Language code (e.g. fr, de, en, it)'),
+  "productCount": zod.number().describe('Number of products with at least one translated field in this language')
+})).describe('Translation coverage per configured language')
 })
 
 
@@ -455,4 +459,5 @@ export const ListFeedSnapshotsResponseItem = zod.object({
   "downloadUrl": zod.string().nullish()
 })
 export const ListFeedSnapshotsResponse = zod.array(ListFeedSnapshotsResponseItem)
+
 

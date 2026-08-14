@@ -471,6 +471,7 @@ components:
         - recentRuns
         - activeAlerts
         - feedHealth
+        - byLanguage
       properties:
         totalProducts:
           type: number
@@ -496,6 +497,22 @@ components:
             $ref: "#/components/schemas/AlertSummary"
         feedHealth:
           $ref: "#/components/schemas/FeedHealthKpis"
+        byLanguage:
+          type: array
+          description: Translation coverage per configured language
+          items:
+            $ref: "#/components/schemas/TranslationCoverage"
+
+    TranslationCoverage:
+      type: object
+      required: [language, productCount]
+      properties:
+        language:
+          type: string
+          description: Language code (e.g. fr, de, en, it)
+        productCount:
+          type: number
+          description: Number of products with at least one translated field in this language
 
     MarketCount:
       type: object

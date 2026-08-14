@@ -246,6 +246,80 @@ describe("Scheduler lock logic", () => {
   });
 });
 
+// ── Translation coverage alert computation ────────────────────────────────────
+
+import { computeTranslationCoverageAlerts } from "../src/observability/alerts";
+
+describe("computeTranslationCoverageAlerts", () => {
+  const locales = [
+    { code: "de", name: "German" },
+    { code: "en", name: "English" },
+    { code: "it", name: "Italian" },
+  ];
+
+  it("returns no alerts when all locales are fully translated", () => {
+    const countMap = new Map([["de", 100], ["en", 100], ["it", 100]]);
+    const alerts = computeTranslationCoverageAlerts(100, locales, countMap);
+    expect(alerts).toHaveLength(0);
+  });
+
+  it("fires translation_missing for DE when DE has 0 rows", () => {
+    const countMap = new Map([["en", 100], ["it", 100]]);
+    const alerts = computeTranslationCoverageAlerts(100, locales, countMap);
+    const deAlert = alerts.find((a) => a.details?.["language"] === "de");
+    expect(deAlert).toBeDefined();
+    expect(deAlert?.type).toBe("translation_missing");
+    expect(deAlert?.severity).toBe("warning");
+    expect(deAlert?.message).toContain("Shopify admin");
+    expect(deAlert?.details?.["coveragePct"]).toBe(0);
+  });
+
+  it("fires translation_partial when DE has some but not all translations", () => {
+    const countMap = new Map([["de", 60], ["en", 100], ["it", 100]]);
+    const alerts = computeTranslationCoverageAlerts(100, locales, countMap);
+    const deAlert = alerts.find((a) => a.details?.["language"] === "de");
+    expect(deAlert).toBeDefined();
+    expect(deAlert?.type).toBe("translation_partial");
+    expect(deAlert?.details?.["coveragePct"]).toBe(60);
+    expect(deAlert?.message).toContain("60");
+    expect(deAlert?.message).toContain("40 products will fall back");
+  });
+
+  it("does not count inactive-product translations (countMap scoped to active)", () => {
+    // Simulate: 100 active products, DE has 100 from a prior inactive-only run —
+    // the DB query's active-product join means countMap only reflects active products.
+    // If active DE count is actually 0, translation_missing should fire.
+    const countMap = new Map([["de", 0]]); // active-scoped count is 0
+    const alerts = computeTranslationCoverageAlerts(100, locales, countMap);
+    const deAlert = alerts.find((a) => a.details?.["language"] === "de");
+    expect(deAlert?.type).toBe("translation_missing");
+  });
+
+  it("returns no alerts when total active products is 0", () => {
+    const countMap = new Map<string, number>();
+    const alerts = computeTranslationCoverageAlerts(0, locales, countMap);
+    expect(alerts).toHaveLength(0);
+  });
+
+  it("fires alerts for multiple incomplete locales independently", () => {
+    const countMap = new Map([["de", 0], ["en", 50], ["it", 100]]);
+    const alerts = computeTranslationCoverageAlerts(100, locales, countMap);
+    expect(alerts).toHaveLength(2);
+    expect(alerts.find((a) => a.type === "translation_missing")).toBeDefined();
+    expect(alerts.find((a) => a.type === "translation_partial")).toBeDefined();
+  });
+
+  it("translation_partial message counts products that will fall back to FR", () => {
+    const countMap = new Map([["de", 1500], ["en", 2096], ["it", 0]]);
+    const alerts = computeTranslationCoverageAlerts(2096, locales, countMap);
+    const deAlert = alerts.find((a) => a.details?.["language"] === "de");
+    expect(deAlert).toBeDefined();
+    expect(deAlert?.type).toBe("translation_partial");
+    // 2096 - 1500 = 596 products fall back
+    expect(deAlert?.message).toContain("596 products will fall back");
+  });
+});
+
 // ── msUntilNext helper ────────────────────────────────────────────────────────
 
 import { msUntilNext } from "../src/jobs/scheduler";

@@ -86,6 +86,13 @@ export interface FeedHealthKpis {
   lastMetaPush: string | null;
 }
 
+export interface TranslationCoverage {
+  /** Language code (e.g. fr, de, en, it) */
+  language: string;
+  /** Number of products with at least one translated field in this language */
+  productCount: number;
+}
+
 export interface DashboardOverview {
   totalProducts: number;
   totalVariants: number;
@@ -95,6 +102,8 @@ export interface DashboardOverview {
   recentRuns: SyncRunSummary[];
   activeAlerts: AlertSummary[];
   feedHealth: FeedHealthKpis;
+  /** Translation coverage per configured language */
+  byLanguage: TranslationCoverage[];
 }
 
 export interface SyncRunList {
@@ -591,3 +600,4 @@ channel?: string | null;
  */
 currentOnly?: boolean | null;
 };
+
