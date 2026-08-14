@@ -120,8 +120,10 @@ export class ShopifyClient {
 
   constructor() {
     this.shopDomain = requireEnv("SHOPIFY_SHOP_DOMAIN");
-    this.clientId = requireEnv("SHOPIFY_CLIENT_ID");
-    this.clientSecret = requireEnv("SHOPIFY_CLIENT_SECRET");
+    // Accept either a permanent Admin API token (custom apps) or client
+    // credentials (Dev Dashboard / partner apps). Token takes priority.
+    this.clientId = process.env["SHOPIFY_CLIENT_ID"] ?? "";
+    this.clientSecret = process.env["SHOPIFY_CLIENT_SECRET"] ?? "";
     this.apiVersion = process.env["SHOPIFY_API_VERSION"] ?? "2025-01";
 
     this.graphqlEndpoint = `https://${this.shopDomain}/admin/api/${this.apiVersion}/graphql.json`;
@@ -131,11 +133,29 @@ export class ShopifyClient {
 
   /**
    * Return a valid Shopify Admin API access token.
-   * Uses Shopify's client credentials grant (no user interaction).
-   * Tokens expire after ~24h; cached with a 30-minute refresh buffer.
+   *
+   * Strategy (in order):
+   *  1. SHOPIFY_ADMIN_ACCESS_TOKEN env var — permanent token for custom apps
+   *     created in Shopify Admin. Never expires; used as-is.
+   *  2. Client credentials grant — for Dev Dashboard / partner apps that
+   *     have been OAuth-installed on the shop. Tokens last ~24h and are
+   *     cached with a 30-minute refresh buffer.
+   *
    * Never logs the token value.
    */
   private async getAccessToken(): Promise<string> {
+    // Strategy 1: permanent admin token (custom apps).
+    const staticToken = process.env["SHOPIFY_ADMIN_ACCESS_TOKEN"];
+    if (staticToken) return staticToken;
+
+    // Strategy 2: client credentials grant (partner / Dev Dashboard apps).
+    if (!this.clientId || !this.clientSecret) {
+      throw new Error(
+        "Shopify: set SHOPIFY_ADMIN_ACCESS_TOKEN (custom app) or " +
+        "both SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (partner app).",
+      );
+    }
+
     const now = Date.now();
     if (this.cachedToken && now < this.cachedToken.expiresAt) {
       return this.cachedToken.value;
