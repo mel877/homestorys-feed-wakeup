@@ -37,7 +37,10 @@ const BULK_INVENTORY_QUERY = `
         inventoryLevels {
           edges {
             node {
-              available
+              quantities(names: ["available"]) {
+                name
+                quantity
+              }
               location {
                 id
                 name
@@ -60,7 +63,10 @@ export const SINGLE_INVENTORY_QUERY = `
       inventoryLevels(first: 30) {
         edges {
           node {
-            available
+            quantities(names: ["available"]) {
+              name
+              quantity
+            }
             location { id name }
           }
         }
@@ -78,7 +84,8 @@ interface InventoryItemNode extends BulkNode {
 
 interface InventoryLevelNode extends BulkNode {
   __parentId: string;
-  available: number;
+  // In API 2025-01+, `available` was replaced by quantities(names:["available"]).
+  quantities: Array<{ name: string; quantity: number }>;
   location: { id: string; name: string };
 }
 
@@ -89,9 +96,14 @@ function isInventoryItemNode(n: BulkNode): n is InventoryItemNode {
 function isInventoryLevelNode(n: BulkNode): n is InventoryLevelNode {
   return (
     !!n.__parentId &&
-    typeof (n as InventoryLevelNode).available === "number" &&
+    Array.isArray((n as InventoryLevelNode).quantities) &&
     typeof (n as InventoryLevelNode).location === "object"
   );
+}
+
+/** Extract the "available" quantity from the quantities array. */
+function getAvailable(level: InventoryLevelNode): number {
+  return level.quantities.find((q) => q.name === "available")?.quantity ?? 0;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -161,7 +173,7 @@ export async function syncInventory(
         variantId: variant.id,
         shopifyLocationId: level.location.id,
         locationName: level.location.name,
-        available: level.available,
+        available: getAvailable(level),
       });
     }
   }
@@ -246,7 +258,7 @@ interface InventoryQueryResponse {
     inventoryLevels: {
       edges: Array<{
         node: {
-          available: number;
+          quantities: Array<{ name: string; quantity: number }>;
           location: { id: string; name: string };
         };
       }>;
@@ -283,18 +295,19 @@ export async function syncSingleInventoryItem(
   }
 
   for (const { node: level } of item.inventoryLevels.edges) {
+    const available = level.quantities.find((q) => q.name === "available")?.quantity ?? 0;
     await db
       .insert(inventoryLevelsTable)
       .values({
         variantId: variant.id,
         shopifyLocationId: level.location.id,
         locationName: level.location.name,
-        available: level.available,
+        available,
       })
       .onConflictDoUpdate({
         target: [inventoryLevelsTable.variantId, inventoryLevelsTable.shopifyLocationId],
         set: {
-          available: level.available,
+          available,
           locationName: level.location.name,
           updatedAt: new Date(),
         },

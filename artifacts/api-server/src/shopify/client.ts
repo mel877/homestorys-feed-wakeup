@@ -247,8 +247,16 @@ export class ShopifyClient {
       }
 
       // Handle throttled errors
+      // Shopify sometimes returns `errors` as a plain string (e.g. when the
+      // access token is invalid after an app reinstall) instead of an array.
+      // Normalize to array so .some() never throws.
       if (body.errors?.length) {
-        const throttled = body.errors.some(
+        const errorsArray: Array<{ message: string; extensions?: { code?: string } }> =
+          Array.isArray(body.errors)
+            ? body.errors
+            : [{ message: String(body.errors) }];
+
+        const throttled = errorsArray.some(
           (e) =>
             e.message.toLowerCase().includes("throttled") ||
             e.extensions?.code === "THROTTLED",
@@ -266,7 +274,26 @@ export class ShopifyClient {
           continue;
         }
 
-        throw new ShopifyGraphQLError(body.errors);
+        // If Shopify returns an "unauthorized" error it means the cached token
+        // was revoked (e.g. app reinstall). Clear it so the next attempt gets
+        // a fresh token via client-credentials grant.
+        const isUnauthorized = errorsArray.some(
+          (e) =>
+            e.message.toLowerCase().includes("unauthorized") ||
+            e.message.toLowerCase().includes("invalid api key") ||
+            e.message.toLowerCase().includes("access token") ||
+            e.extensions?.code === "UNAUTHORIZED",
+        );
+        if (isUnauthorized) {
+          this.cachedToken = null;
+          if (attempt < maxRetries) {
+            logger.warn({ attempt }, "GraphQL unauthorized — clearing token cache and retrying");
+            attempt++;
+            continue;
+          }
+        }
+
+        throw new ShopifyGraphQLError(errorsArray);
       }
 
       return body.data;
@@ -287,6 +314,11 @@ export class ShopifyClient {
       },
     });
     if (!response.ok) {
+      // 401 means the cached token was revoked (e.g. app reinstall). Clear it
+      // so the next GraphQL call triggers a fresh client-credentials grant.
+      if (response.status === 401) {
+        this.cachedToken = null;
+      }
       throw new Error(`Shopify REST ${path} → ${response.status}`);
     }
     return response.json() as Promise<T>;

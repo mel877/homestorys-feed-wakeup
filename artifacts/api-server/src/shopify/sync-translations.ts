@@ -22,7 +22,7 @@ const logger = rootLogger.child({ module: "sync-translations" });
 
 const TRANSLATABLE_RESOURCES_QUERY = `
   query TranslatableProducts($locale: String!, $cursor: String) {
-    translatableResources(resourceType: ONLINE_STORE_PRODUCT, first: 100, after: $cursor) {
+    translatableResources(resourceType: PRODUCT, first: 100, after: $cursor) {
       nodes {
         resourceId
         translations(locale: $locale) {

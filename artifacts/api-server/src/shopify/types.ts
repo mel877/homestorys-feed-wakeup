@@ -209,7 +209,13 @@ export interface ShopifyPriceList {
       type: string;
       value: number;
     };
-    market: { id: string; name: string; handle: string } | null;
+  } | null;
+  // In API 2025-01+, the market link moved from parent.market to catalog.
+  // catalog is a MarketCatalog when the price list is market-scoped.
+  catalog: {
+    markets: {
+      nodes: Array<{ id: string; name: string; handle: string }>;
+    };
   } | null;
   prices: {
     nodes: ShopifyPriceListPrice[];
@@ -220,7 +226,8 @@ export interface ShopifyPriceList {
 // ── Inventory ─────────────────────────────────────────────────────────────────
 
 export interface ShopifyInventoryLevel {
-  available: number;
+  // In API 2025-01+, `available` was replaced by quantities(names:["available"]).
+  quantities: Array<{ name: string; quantity: number }>;
   location: {
     id: string;
     name: string;

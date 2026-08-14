@@ -52,7 +52,13 @@ const PRICE_LISTS_QUERY = `
         currency
         parent {
           adjustment { type value }
-          market { id name handle }
+        }
+        catalog {
+          ... on MarketCatalog {
+            markets(first: 10) {
+              nodes { id name handle }
+            }
+          }
         }
         prices(first: 250) {
           nodes {
@@ -319,9 +325,12 @@ export async function syncMarketPricing(
   tracker.bumpApiCalls();
 
   for (const priceList of priceListsResult.priceLists.nodes) {
-    const marketInfo = priceList.parent?.market;
-    if (!marketInfo) continue;
+    // In API 2025-01+, the market is found via catalog (MarketCatalog inline fragment).
+    // A price list may span multiple markets; we associate it with each matched one.
+    const catalogMarkets = priceList.catalog?.markets?.nodes ?? [];
+    if (catalogMarkets.length === 0) continue;
 
+    for (const marketInfo of catalogMarkets) {
     const marketEntry = marketMapping.get(marketInfo.id);
     if (!marketEntry) continue;
 
@@ -351,7 +360,8 @@ export async function syncMarketPricing(
       { marketCode, priceListId: priceList.id, overrideCount: overrideMap.size },
       "Price list loaded",
     );
-  }
+    } // end for catalogMarkets
+  } // end for priceLists
 
   // 4. Load variant DB IDs (need to map shopifyGid → DB id)
   const dbVariants = await db
