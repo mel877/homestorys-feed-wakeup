@@ -59,6 +59,16 @@ export function resolveMarket(
  *
  * Language content is shared across all markets that use the same master language.
  * e.g. DE, AT, BE_DE all use the German translation row.
+ *
+ * Fallback chain for description:
+ *   1. Localised translation (e.g. German)
+ *   2. French translation (primary locale — always present after product sync)
+ *   3. Any other available translation
+ *
+ * This ensures German/English/Italian market products remain eligible in all
+ * channels even before their Shopify translations are set up. Without this
+ * fallback, Meta would exclude ALL products from non-French markets with
+ * MISSING_REQUIRED_TRANSLATION because it requires a non-empty description.
  */
 export function resolveContent(
   language: string,
@@ -68,9 +78,15 @@ export function resolveContent(
   // Find matching translation by language code
   const translation = translations.find((t) => t.language === language);
 
+  // Description fallback: French primary → any available translation
+  const fallbackDescription =
+    translations.find((t) => t.language === "fr" && t.description)?.description ??
+    translations.find((t) => t.description)?.description ??
+    null;
+
   return {
     title: translation?.title ?? productTitle,
-    description: translation?.description ?? null,
+    description: translation?.description ?? fallbackDescription,
     handle: translation?.handle ?? null,
   };
 }

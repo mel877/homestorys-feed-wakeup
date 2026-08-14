@@ -390,7 +390,7 @@ export function selectGoogleImages(
   primaryOverrideUrl?: string | null,
   lifestyleOverrideUrl?: string | null,
 ): { primary: ClassifiedImage | null; lifestyle: ClassifiedImage | null; additional: ClassifiedImage[] } {
-  const valid = images.filter((i) => i.imageType !== "invalid" && !isFabricImage(i));
+  const valid = images.filter((i) => i.imageType !== "invalid" && !isExcludedFeedImage(i));
 
   // Primary override
   let primary: ClassifiedImage | null = null;
@@ -423,31 +423,38 @@ export function selectGoogleImages(
   return { primary, lifestyle, additional };
 }
 
-// ── Fabric / swatch image guard ───────────────────────────────────────────────
+// ── Non-product image guard ───────────────────────────────────────────────────
 
 /**
- * Returns true when an image is a fabric or material swatch — never a product
- * photo suitable for channel feeds.
+ * Returns true when an image should NEVER appear in Google or Meta channel
+ * feeds because it is not a product photo.
  *
- * Detection strategy (any match → fabric):
- *   • URL contains fabric-related path segments or keywords.
- *   • Alt text matches the Shopify fabric-swatch naming convention used by
- *     manufacturers: "C{digits} · NAME" or "CF{digits} · NAME"
- *     (e.g. "C148 · TENDER EARTH", "CF171 · SOFT GREY").
+ * Two categories are excluded:
+ *
+ * 1. Fabric / material swatches
+ *    • URL path segments: /fabric/, swatch, /stof/, /tissu/, /stoff/, etc.
+ *    • Alt text swatch-code pattern: "C148 · TENDER EARTH", "CF171 · SOFT GREY"
+ *      (capital C or CF followed by digits, then a separator)
+ *
+ * 2. Technical drawings / dimension plans / croquis
+ *    • URL keywords: zeichnung, modellzeichnung, dimensions_, _dim_, picto_dim,
+ *      -masse (measurements), skizze, schets (Dutch: sketch), tekening (Dutch:
+ *      drawing), croquis, blueprint, schematic
+ *    • Alt text: maßzeichnung, masszeichnung, technische…zeichnung
  */
-function isFabricImage(img: ClassifiedImage): boolean {
+function isExcludedFeedImage(img: ClassifiedImage): boolean {
   const url = img.url.toLowerCase();
-  const alt = img.altText ?? "";
+  const alt = (img.altText ?? "").toLowerCase();
 
-  // URL-based signals
+  // ── Fabric / swatch ────────────────────────────────────────────────────────
   if (
     url.includes("/fabric/") ||
     url.includes("fabric-") ||
     url.includes("-fabric") ||
     url.includes("_fabric") ||
-    url.includes("/stof/") ||   // Dutch
-    url.includes("/tissu/") ||  // French
-    url.includes("/stoff/") ||  // German
+    url.includes("/stof/") ||    // Dutch
+    url.includes("/tissu/") ||   // French
+    url.includes("/stoff/") ||   // German
     url.includes("swatch") ||
     url.includes("kleurstaal") ||
     url.includes("farbmuster")
@@ -455,8 +462,40 @@ function isFabricImage(img: ClassifiedImage): boolean {
     return true;
   }
 
-  // Alt text: swatch code pattern — "C148 · NAME", "CF171 · NAME", "C049-GRAPHITE", etc.
-  if (/^CF?\d+[\s·\-–]/i.test(alt)) return true;
+  // Swatch code: "C148 · TENDER EARTH", "CF171 · SOFT GREY", "C049-GRAPHITE"
+  if (/^cf?\d+[\s·\-–]/i.test(img.altText ?? "")) return true;
+
+  // ── Technical drawings / plans / croquis ──────────────────────────────────
+  if (
+    url.includes("zeichnung") ||       // German: drawing (zeichnung, modellzeichnung)
+    url.includes("_dimensions_") ||    // "NoaDiningTables_dimensions_300x200"
+    url.includes("-dimensions_") ||
+    url.includes("/dimensions/") ||
+    url.includes("picto_dim") ||       // "PICTO_DIM_IOS_SOLIFLORE"
+    url.includes("_dim_") ||           // isolated "_dim_" token
+    url.includes("-masse.") ||         // German: mass/measurement — "bistrotisch-masse.png"
+    url.includes("_masse.") ||
+    url.includes("skizze") ||          // German: sketch
+    url.includes("schets") ||          // Dutch: sketch
+    url.includes("tekening") ||        // Dutch: drawing (distinct from "stekening")
+    url.includes("croquis") ||
+    url.includes("blueprint") ||
+    url.includes("schematic") ||
+    url.includes("line-draw") ||
+    url.includes("line_draw")
+  ) {
+    return true;
+  }
+
+  if (
+    alt.includes("maßzeichnung") ||
+    alt.includes("masszeichnung") ||
+    alt.includes("maatschets") ||
+    alt.includes("technische zeichnung") ||
+    alt.includes("technische maß")
+  ) {
+    return true;
+  }
 
   return false;
 }
@@ -475,7 +514,7 @@ export function selectMetaImages(
   primaryOverrideUrl?: string | null,
   lifestyleOverrideUrl?: string | null,
 ): { primary: ClassifiedImage | null; lifestyle: ClassifiedImage | null; additional: ClassifiedImage[] } {
-  const valid = images.filter((i) => i.imageType !== "invalid" && !isFabricImage(i));
+  const valid = images.filter((i) => i.imageType !== "invalid" && !isExcludedFeedImage(i));
 
   let lifestyle: ClassifiedImage | null = null;
   if (lifestyleOverrideUrl) {
