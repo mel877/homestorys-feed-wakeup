@@ -24,5 +24,29 @@ classes:
 # and configure in Google Merchant Center account-level shipping settings.
 rates: {}
 
+# Meta catalog feed: flat shipping rate per country (Fix 9).
+# Key = ISO country code matching config/markets.yaml (BE, FR, DE, AT).
+# Format emitted in the Meta CSV: "country::service:price currency"
+# Leave meta_feed_rates empty ({}) to omit the shipping field from Meta feeds
+# — Meta will show "Shipping calculated at checkout" as fallback.
+# Update with actual rates from your logistics/carrier agreements.
+meta_feed_rates: {}
+#  BE:
+#    service: "Livraison Standard"
+#    price: "29.90"
+#    currency: "EUR"
+#  FR:
+#    service: "Livraison Standard"
+#    price: "39.90"
+#    currency: "EUR"
+#  DE:
+#    service: "Standardlieferung"
+#    price: "39.90"
+#    currency: "EUR"
+#  AT:
+#    service: "Standardlieferung"
+#    price: "49.90"
+#    currency: "EUR"
+
 # Default class when no metafield is present and no rule matches
 default_class: standard

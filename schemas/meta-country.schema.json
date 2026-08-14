@@ -23,6 +23,10 @@
     "availability": {
       "type": "string",
       "enum": ["in stock", "available for order", "out of stock", "discontinued", "preorder"]
+    },
+    "shipping": {
+      "type": "string",
+      "description": "Fix 9: flat shipping rate. Format: country::service:price currency (e.g. BE::Standard:29.90 EUR)"
     }
   },
   "additionalProperties": true

@@ -6,6 +6,17 @@
  *   - TSV snapshot row (flat string record)
  *
  * Spec reference: §30 (required fields), §31 (custom labels), §23 (availability).
+ *
+ * Audit fixes applied (2026-08):
+ *   Fix 1  — availability_date populated for backorder (Google required field)
+ *   Fix 2  — description brand suffix localised per market language (was FR-only on all markets)
+ *   Fix 5  — TSV sale_price gated on isOnSale (aligned with API resource behaviour)
+ *   Fix 6  — product_highlight and product_detail section names localised per language
+ *   Fix 10 — sale_price_effective_date: requires Shopify price-rule dates (TODO in sync-prices)
+ *   Fix 11 — N/A: title already enriched via buildTitle (brand + product + variant title)
+ *   Fix 12 — dimensions (height/width/depth): requires Shopify metafields — TODO in sync-products
+ *   Fix 14 — product_type uses metaProductCategory hierarchy when available
+ *   Fix 15 — delivery lead time added to product_highlight for backorder / made_to_order
  */
 
 import type { CanonicalProduct } from "../../canonical/types";
@@ -135,30 +146,37 @@ export interface GoogleProductResource {
   channel: "online";
 }
 
-// ── Description helper ────────────────────────────────────────────────────────
+// ── Fix 2: locale-aware description suffix ────────────────────────────────────
 
 /**
- * Brand suffix appended when the localised description is shorter than 500
- * characters (rule 3.3 — "Beschreibung zu kurz", Channable rule set v1.0).
+ * Brand suffix appended when the localised description is shorter than 500 characters.
+ * One version per feed language — previously only the French text was used on all markets
+ * (including DE, AT, BE_DE), which created linguistically inconsistent ads.
  */
-const HOMESTORYS_BRAND_SUFFIX =
-  " Avec Homestorys partez dans un voyage passionnant avec nos 9 Homestorys pour découvrir les meilleures idées d'aménagement et de style de vie à la Belge sur les thèmes suivants : le plaisir, famille et traditions, loisirs et voyages, expériences dans la nature et paradis du jardin, design et une nouvelle forme de luxe.";
+const BRAND_SUFFIX_BY_LANGUAGE: Record<string, string> = {
+  fr: " Avec Homestorys partez dans un voyage passionnant avec nos 9 Homestorys pour découvrir les meilleures idées d'aménagement et de style de vie à la Belge : le plaisir, famille et traditions, loisirs et voyages, expériences dans la nature et paradis du jardin, design et une nouvelle forme de luxe.",
+  de: " Mit Homestorys begeben Sie sich auf eine faszinierende Reise durch unsere 9 Homestorys und entdecken Sie die besten belgischen Wohn- und Lifestyle-Ideen: Genuss, Familie und Traditionen, Freizeit und Reisen, Naturerlebnisse und Gartenparadies, Design und eine neue Form von Luxus.",
+  en: " With Homestorys, embark on a fascinating journey through our 9 Homestorys to discover the best Belgian living and lifestyle ideas: pleasure, family and traditions, leisure and travel, nature experiences and garden paradise, design and a new form of luxury.",
+  it: " Con Homestorys, intraprendi un affascinante viaggio attraverso le nostre 9 Homestorys per scoprire le migliori idee di arredamento e stile di vita belga: piacere, famiglia e tradizioni, tempo libero e viaggi, esperienze nella natura, design e una nuova forma di lusso.",
+};
 
 function buildDescription(canonical: CanonicalProduct): string {
   const raw = canonical.description || canonical.title;
-  const padded = raw.length < 500 ? raw + HOMESTORYS_BRAND_SUFFIX : raw;
+  const suffix =
+    BRAND_SUFFIX_BY_LANGUAGE[canonical.language] ??
+    BRAND_SUFFIX_BY_LANGUAGE["fr"] ??
+    "";
+  const padded = raw.length < 500 ? raw + suffix : raw;
   return padded.slice(0, 5000);
 }
 
 // ── Condition helper ──────────────────────────────────────────────────────────
 
 /**
- * Rules 3.11/3.12 (Channable rule set v1.0):
- *  - outlet tag or isOutlet metafield → "used"
- *  - everything else → "new"
+ * outlet metafield or lifecycle label → "used"; everything else → "new".
+ * Furniture is "used" only for outlet / showroom-floor models.
  */
 function resolveCondition(canonical: CanonicalProduct): string {
-  // isOutlet metafield OR the lifecycle custom label set to "outlet"
   if (canonical.isOutlet || canonical.customLabels.custom_label_0 === "outlet") {
     return "used";
   }
@@ -167,9 +185,7 @@ function resolveCondition(canonical: CanonicalProduct): string {
 
 // ── Availability mapping ──────────────────────────────────────────────────────
 
-function mapAvailability(
-  status: CanonicalProduct["availability"],
-): string {
+function mapAvailability(status: CanonicalProduct["availability"]): string {
   switch (status) {
     case "in_stock":
     case "low_stock":
@@ -185,26 +201,66 @@ function mapAvailability(
   }
 }
 
+// ── Fix 1: availability_date for backorder ────────────────────────────────────
+
+/**
+ * Compute availability_date for Google.
+ *
+ * Google REQUIRES availability_date when availability = "backorder".
+ * Shopify does not expose a per-variant restock date, so we derive a
+ * conservative estimate from returnClass:
+ *   made_to_order → +16 weeks
+ *   backorder / other → +12 weeks
+ *
+ * When actual lead times are known per product, sync the expected date from
+ * a Shopify metafield (e.g. custom.restock_date) and surface it on
+ * CanonicalProduct.availabilityDate for use here.
+ */
+function computeAvailabilityDate(
+  availability: CanonicalProduct["availability"],
+  returnClass: string | null,
+): string {
+  if (availability !== "backorder") return "";
+  const weeks = returnClass === "made_to_order" ? 16 : 12;
+  const d = new Date();
+  d.setDate(d.getDate() + weeks * 7);
+  // ISO 8601 with timezone offset — Google requires a timezone-aware datetime
+  return d.toISOString().replace("Z", "+01:00");
+}
+
 // ── Price formatting ──────────────────────────────────────────────────────────
 
 function formatPrice(amount: number, currency: string): string {
   return `${amount.toFixed(2)} ${currency}`;
 }
 
+// ── Fix 14: product_type hierarchy ────────────────────────────────────────────
+
+/**
+ * Build the product_type string.
+ *
+ * Prefer metaProductCategory when it contains ">" because it already encodes
+ * the full classification path (e.g. "Furniture > Sofas & Couches"), which
+ * improves Performance Max targeting and Shopping campaign segmentation vs a
+ * single-level "Sofas".  Falls back to the raw Shopify productType.
+ *
+ * Fix 12 (dimensions): height/width/depth require syncing Shopify metafields
+ * (e.g. custom.dimensions). Add to sync-products phase when available.
+ * Fix 13 (video): video_thumbnail_url requires a variant video metafield.
+ */
+function buildProductType(canonical: CanonicalProduct): string {
+  if (canonical.metaProductCategory?.includes(">")) {
+    return canonical.metaProductCategory.slice(0, 750);
+  }
+  return canonical.productType ?? "";
+}
+
 // ── Product ID ────────────────────────────────────────────────────────────────
 
 /**
  * Build the Google Content API REST product ID.
- *
- * This is the full identifier that the Merchant Center API assigns to an
- * uploaded product and that must be used for delete and local-inventory
- * operations. Format: channel:contentLanguage:targetCountry:offerId
- *
+ * Format: channel:contentLanguage:targetCountry:offerId
  * e.g. online:fr:BE:{variantId}
- *
- * NOTE: This is NOT the offerId field in a product resource.
- * The offerId must be just the raw stable identifier (variantId).
- * The REST product ID is derived by the API: channel:language:country:offerId.
  */
 export function buildGoogleRestProductId(
   canonical: CanonicalProduct,
@@ -213,7 +269,7 @@ export function buildGoogleRestProductId(
   return `online:${canonical.language}:${country}:${canonical.variantId}`;
 }
 
-/** @deprecated Use buildGoogleRestProductId — kept for backwards compat during migration. */
+/** @deprecated Use buildGoogleRestProductId — kept for backwards compat. */
 export const buildGoogleProductId = buildGoogleRestProductId;
 
 // ── Additional images ─────────────────────────────────────────────────────────
@@ -226,55 +282,115 @@ function getAdditionalImageLinks(canonical: CanonicalProduct): string[] {
     .map((img) => img.url);
 }
 
-// ── Product details ──────────────────────────────────────────────────────────
+// ── Fix 6: localised product_detail section names ─────────────────────────────
+
+const DETAIL_I18N: Record<string, { specs: string; style: string; usage: string; io: string }> = {
+  fr: { specs: "Spécifications",   style: "Style", usage: "Utilisation", io: "Intérieur/Extérieur" },
+  de: { specs: "Spezifikationen",  style: "Stil",  usage: "Verwendung",  io: "Innen/Außen"         },
+  en: { specs: "Specifications",   style: "Style", usage: "Usage",       io: "Indoor/Outdoor"      },
+  it: { specs: "Specifiche",       style: "Stile", usage: "Utilizzo",    io: "Interno/Esterno"     },
+};
 
 function buildProductDetails(
   canonical: CanonicalProduct,
 ): Array<{ sectionName: string; attributeName: string; attributeValue: string }> {
+  const i18n = DETAIL_I18N[canonical.language] ?? DETAIL_I18N["fr"]!;
   const details: Array<{ sectionName: string; attributeName: string; attributeValue: string }> = [];
 
   if (canonical.material.length > 0) {
     details.push({
-      sectionName: "Specifications",
+      sectionName: i18n.specs,
       attributeName: "Material",
       attributeValue: canonical.material.join(", ").slice(0, 1000),
     });
   }
   if (canonical.style.length > 0) {
     details.push({
-      sectionName: "Style",
+      sectionName: i18n.style,
       attributeName: "Style",
       attributeValue: canonical.style.join(", ").slice(0, 1000),
     });
   }
   if (canonical.room.length > 0) {
     details.push({
-      sectionName: "Usage",
+      sectionName: i18n.usage,
       attributeName: "Room",
       attributeValue: canonical.room.join(", ").slice(0, 1000),
     });
   }
   if (canonical.indoorOutdoor) {
     details.push({
-      sectionName: "Usage",
-      attributeName: "Indoor/Outdoor",
+      sectionName: i18n.usage,
+      attributeName: i18n.io,
       attributeValue: canonical.indoorOutdoor,
     });
   }
   return details;
 }
 
-// ── Product highlights ────────────────────────────────────────────────────────
+// ── Fix 6 + Fix 15: localised highlights with delivery lead time ───────────────
+
+type HighlightI18n = {
+  bestseller: string;
+  new_arrival: string;
+  sale: (pct: number) => string;
+  pickup: string;
+  delivery_backorder: string;
+  delivery_made_to_order: string;
+};
+
+const HIGHLIGHT_I18N: Record<string, HighlightI18n> = {
+  fr: {
+    bestseller:            "Bestseller",
+    new_arrival:           "Nouveauté",
+    sale:                  (pct) => `${pct}% de réduction`,
+    pickup:                "Retrait disponible au showroom d'Eupen",
+    delivery_backorder:    "Livraison estimée en 10-14 semaines",
+    delivery_made_to_order:"Fabriqué sur commande — délai 12-16 semaines",
+  },
+  de: {
+    bestseller:            "Bestseller",
+    new_arrival:           "Neuheit",
+    sale:                  (pct) => `${pct}% Rabatt`,
+    pickup:                "Abholung im Showroom Eupen möglich",
+    delivery_backorder:    "Lieferung in ca. 10-14 Wochen",
+    delivery_made_to_order:"Auf Bestellung gefertigt — Lieferzeit 12-16 Wochen",
+  },
+  en: {
+    bestseller:            "Bestseller",
+    new_arrival:           "New arrival",
+    sale:                  (pct) => `${pct}% off`,
+    pickup:                "Available for showroom pickup in Eupen",
+    delivery_backorder:    "Delivery in 10-14 weeks",
+    delivery_made_to_order:"Made to order — typically 12-16 weeks",
+  },
+  it: {
+    bestseller:            "Bestseller",
+    new_arrival:           "Novità",
+    sale:                  (pct) => `${pct}% di sconto`,
+    pickup:                "Ritiro disponibile presso lo showroom di Eupen",
+    delivery_backorder:    "Consegna stimata in 10-14 settimane",
+    delivery_made_to_order:"Prodotto su ordinazione — consegna 12-16 settimane",
+  },
+};
 
 function buildProductHighlights(canonical: CanonicalProduct): string[] {
+  const i18n = HIGHLIGHT_I18N[canonical.language] ?? HIGHLIGHT_I18N["en"]!;
   const highlights: string[] = [];
 
-  if (canonical.isBestseller) highlights.push("Bestseller");
-  if (canonical.isNew) highlights.push("New arrival");
+  if (canonical.isBestseller) highlights.push(i18n.bestseller);
+  if (canonical.isNew) highlights.push(i18n.new_arrival);
   if (canonical.isOnSale && canonical.discountPercentage) {
-    highlights.push(`${Math.round(canonical.discountPercentage)}% off`);
+    highlights.push(i18n.sale(Math.round(canonical.discountPercentage)));
   }
-  if (canonical.pickupEupen) highlights.push("Available for showroom pickup in Eupen");
+  if (canonical.pickupEupen) highlights.push(i18n.pickup);
+
+  // Fix 15: delivery lead-time highlight for backorder / made-to-order
+  if (canonical.availability === "backorder") {
+    const isM2O = canonical.returnClass === "made_to_order";
+    highlights.push(isM2O ? i18n.delivery_made_to_order : i18n.delivery_backorder);
+  }
+
   if (canonical.material.length > 0) {
     highlights.push(canonical.material.slice(0, 3).join(", "));
   }
@@ -298,13 +414,12 @@ function formatShippingWeight(
 
 /**
  * Map a CanonicalProduct to a Google Content API product resource.
- * Returns null if the product has exclusion reasons that make it unfeedable.
+ * Returns null if the product has no primary image (unfeedable).
  */
 export function mapToGoogleResource(
   canonical: CanonicalProduct,
   config: AppConfig,
 ): GoogleProductResource | null {
-  // Hard exclusions: no image, discontinued, missing required fields
   if (!canonical.primaryImage) return null;
 
   const market = config.markets.markets[canonical.market];
@@ -316,9 +431,8 @@ export function mapToGoogleResource(
   const lifestyleImageLinks = canonical.lifestyleImage ? [canonical.lifestyleImage.url] : [];
 
   const resource: GoogleProductResource = {
-    // offerId is the raw stable identifier. The API derives the REST product ID
-    // as channel:contentLanguage:targetCountry:offerId automatically.
-    // Do NOT use buildGoogleRestProductId here — that would double the prefix.
+    // offerId is the raw stable identifier; the API derives the REST product ID as
+    // channel:contentLanguage:targetCountry:offerId — do NOT use buildGoogleRestProductId here.
     offerId: canonical.variantId,
     title: canonical.title.slice(0, 150),
     description: buildDescription(canonical),
@@ -333,10 +447,9 @@ export function mapToGoogleResource(
     },
     brand: canonical.brand.slice(0, 70),
     identifierExists: canonical.identifierExists,
-    // Rules 3.11/3.12 — outlet → "used", otherwise "new"
     condition: resolveCondition(canonical),
     googleProductCategory: canonical.googleProductCategory ?? "",
-    productTypes: canonical.productType ? [canonical.productType] : [],
+    productTypes: [buildProductType(canonical)].filter(Boolean), // Fix 14
     itemGroupId: canonical.itemGroupId,
     targetCountry: country,
     contentLanguage: language,
@@ -353,11 +466,15 @@ export function mapToGoogleResource(
   if (canonical.color.length > 0) resource.color = canonical.color.join("/").slice(0, 100);
   if (canonical.material.length > 0) resource.material = canonical.material.join("/").slice(0, 200);
 
+  // Fix 5: sale price only when product is actively on sale
   if (canonical.isOnSale && canonical.salePrice) {
     resource.salePrice = {
       value: canonical.salePrice.amount.toFixed(2),
       currency: canonical.salePrice.currency,
     };
+    // Fix 10: sale_price_effective_date requires Shopify price-rule start/end timestamps.
+    // These are not currently synced from variants (compare_at_price has no date range).
+    // Add to sync-prices phase when Shopify exposes promotion windows.
   }
 
   if (canonical.weight && canonical.weightUnit) {
@@ -384,8 +501,6 @@ export function mapToGoogleRow(
   const resource = mapToGoogleResource(canonical, config);
   if (!resource) return null;
 
-  const market = config.markets.markets[canonical.market]!;
-
   const additionalImages = getAdditionalImageLinks(canonical);
   const lifestyleImage = canonical.lifestyleImage?.url ?? "";
 
@@ -404,28 +519,30 @@ export function mapToGoogleRow(
     additional_image_link: additionalImages.join(","),
     lifestyle_image_link: lifestyleImage,
     availability: resource.availability,
-    availability_date: "",
+    // Fix 1: required by Google when availability = "backorder"
+    availability_date: computeAvailabilityDate(canonical.availability, canonical.returnClass),
     price: formatPrice(canonical.price.amount, canonical.price.currency),
-    sale_price: canonical.salePrice
+    // Fix 5: was emitting salePrice whenever non-null, regardless of isOnSale flag
+    sale_price: canonical.isOnSale && canonical.salePrice
       ? formatPrice(canonical.salePrice.amount, canonical.salePrice.currency)
       : "",
-    sale_price_effective_date: "",
+    sale_price_effective_date: "", // Fix 10: see TODO in mapToGoogleResource
     brand: resource.brand,
     gtin: resource.gtin ?? "",
     mpn: resource.mpn ?? "",
     identifier_exists: resource.identifierExists ? "yes" : "no",
     condition: resolveCondition(canonical),
     google_product_category: resource.googleProductCategory,
-    product_type: canonical.productType ?? "",
+    product_type: buildProductType(canonical), // Fix 14
     item_group_id: resource.itemGroupId,
     color: resource.color ?? "",
     material: resource.material ?? "",
     size: "",
-    gender: "Unisex",           // rule 3.1
-    age_group: "Adult",         // rule 3.2
-    size_system: "EU",          // rule 3.4
-    size_type: "Normal",        // rule 3.5
-    unit_pricing_base_measure: "1 item", // rule 3.8
+    gender: "Unisex",
+    age_group: "Adult",
+    size_system: "EU",
+    size_type: "Normal",
+    unit_pricing_base_measure: "1 item",
     shipping_weight: formatShippingWeight(canonical.weight, canonical.weightUnit),
     custom_label_0: canonical.customLabels.custom_label_0,
     custom_label_1: canonical.customLabels.custom_label_1,

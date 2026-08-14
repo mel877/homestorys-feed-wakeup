@@ -130,7 +130,7 @@ router.get("/feed-health", async (req, res) => {
     // ── 5. Active alerts ────────────────────────────────────────────────────
     const activeAlerts = await getActiveAlerts().catch((err) => {
       logger.warn({ err }, "Failed to fetch active alerts — returning empty list");
-      return [];
+      return [] as Awaited<ReturnType<typeof getActiveAlerts>>;
     });
 
     // ── 6. Overall health status ────────────────────────────────────────────

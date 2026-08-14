@@ -68,10 +68,27 @@ export const ShippingClassSchema = z.object({
   description: z.string().optional(),
 });
 
+// Fix 9: per-country flat shipping rate for Meta catalog feed
+export const MetaShippingRateSchema = z.object({
+  service: z.string(),  // e.g. "Livraison Standard"
+  price: z.string(),    // e.g. "29.90"
+  currency: z.string().length(3), // ISO 4217, e.g. "EUR"
+});
+
+export type MetaShippingRate = z.infer<typeof MetaShippingRateSchema>;
+
 export const ShippingConfigSchema = z.object({
   classes: z.record(z.string(), ShippingClassSchema),
   rates: z.record(z.string(), z.unknown()).default({}),
   default_class: z.string().default("standard"),
+  /**
+   * Per-country flat shipping rates for the Meta catalog feed.
+   * Key = ISO country code (BE, FR, DE, AT).
+   * Emitted in the Meta CSV country layer as: "country::service:price currency"
+   * Leave empty ({}) to omit shipping from Meta feeds (shows "calculated at checkout").
+   * Configure actual rates from business/logistics data.
+   */
+  meta_feed_rates: z.record(z.string(), MetaShippingRateSchema).optional().default({}),
 });
 
 export type ShippingConfig = z.infer<typeof ShippingConfigSchema>;

@@ -56,6 +56,10 @@
     "gender": {
       "type": "string"
     },
+    "return_policy_info": {
+      "type": "string",
+      "description": "Fix 8: per-product return policy. Format: {\"is_final_sale\":\"true/false\",\"return_policy_days\":\"N\"}"
+    },
     "custom_label_0": {
       "type": "string",
       "enum": ["outlet", "sale", "new", "evergreen"]
