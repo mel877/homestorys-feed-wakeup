@@ -65,6 +65,10 @@ export interface FeedHealthKpis {
   variantsBelow70: number;
   classifiedImages: number;
   totalImages: number;
+  /** Number of products that have at least one image */
+  productsWithImages: number;
+  /** Number of products with no images at all */
+  productsWithoutImages: number;
   /**
      * ISO timestamp
      * @nullable
@@ -587,4 +591,3 @@ channel?: string | null;
  */
 currentOnly?: boolean | null;
 };
-

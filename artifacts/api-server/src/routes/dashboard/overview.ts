@@ -79,6 +79,7 @@ router.get("/dashboard/overview", requireDashboardAuth, async (req, res): Promis
     db.select({
       total: sql<number>`count(*)::int`,
       classified: sql<number>`sum(case when ${imagesTable.isClassified} then 1 else 0 end)::int`,
+      productsWithImages: sql<number>`count(distinct ${imagesTable.productId})::int`,
     }).from(imagesTable),
     // Last full sync
     db.select({ startedAt: syncRunsTable.startedAt })
@@ -129,6 +130,8 @@ router.get("/dashboard/overview", requireDashboardAuth, async (req, res): Promis
       variantsBelow70: below70[0]?.count ?? 0,
       classifiedImages: imageCounts[0]?.classified ?? 0,
       totalImages: imageCounts[0]?.total ?? 0,
+      productsWithImages: imageCounts[0]?.productsWithImages ?? 0,
+      productsWithoutImages: Math.max(0, (productCount[0]?.count ?? 0) - (imageCounts[0]?.productsWithImages ?? 0)),
       lastFullSync: lastFullSync[0]?.startedAt?.toISOString() ?? null,
       lastGooglePush: lastGooglePush[0]?.generatedAt?.toISOString() ?? null,
       lastMetaPush: lastMetaPush[0]?.generatedAt?.toISOString() ?? null,

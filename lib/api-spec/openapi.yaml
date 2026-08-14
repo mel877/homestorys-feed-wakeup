@@ -524,6 +524,8 @@ components:
         - variantsBelow70
         - classifiedImages
         - totalImages
+        - productsWithImages
+        - productsWithoutImages
         - lastFullSync
         - lastGooglePush
         - lastMetaPush
@@ -536,6 +538,12 @@ components:
           type: number
         totalImages:
           type: number
+        productsWithImages:
+          type: number
+          description: Number of products that have at least one image
+        productsWithoutImages:
+          type: number
+          description: Number of products with no images at all
         lastFullSync:
           type: ["string", "null"]
           description: ISO timestamp

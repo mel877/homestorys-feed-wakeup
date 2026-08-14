@@ -84,6 +84,8 @@ export const GetDashboardOverviewResponse = zod.object({
   "variantsBelow70": zod.number(),
   "classifiedImages": zod.number(),
   "totalImages": zod.number(),
+  "productsWithImages": zod.number(),
+  "productsWithoutImages": zod.number(),
   "lastFullSync": zod.string().nullable().describe('ISO timestamp'),
   "lastGooglePush": zod.string().nullable().describe('ISO timestamp'),
   "lastMetaPush": zod.string().nullable().describe('ISO timestamp')
@@ -453,5 +455,4 @@ export const ListFeedSnapshotsResponseItem = zod.object({
   "downloadUrl": zod.string().nullish()
 })
 export const ListFeedSnapshotsResponse = zod.array(ListFeedSnapshotsResponseItem)
-
 
