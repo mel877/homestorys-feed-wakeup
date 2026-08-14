@@ -22,4 +22,4 @@ timeoutMs = 20000
 [userenv]
 
 [userenv.shared]
-SHOPIFY_SHOP_DOMAIN = "st-feuillien.myshopify.com"
+SHOPIFY_SHOP_DOMAIN = "villaromana01.myshopify.com"
