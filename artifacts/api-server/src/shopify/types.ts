@@ -175,7 +175,8 @@ export interface GraphQLResponse<T = unknown> {
 
 export interface ShopifyMarketWebPresence {
   rootUrls: Array<{ locale: string; url: string }>;
-  defaultLocale: string;
+  /** Shopify API 2025-01: defaultLocale is now an object { locale } not a bare string. */
+  defaultLocale: { locale: string } | null;
   domain: { host: string } | null;
 }
 

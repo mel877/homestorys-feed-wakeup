@@ -34,7 +34,7 @@ const MARKETS_QUERY = `
           baseCurrency { currencyCode }
         }
         webPresence {
-          defaultLocale
+          defaultLocale { locale }
           domain { host }
           rootUrls { locale url }
         }
@@ -115,7 +115,7 @@ function matchMarketCode(
   market: ShopifyMarket,
   ourMarkets: Record<string, MarketConfig>,
 ): string | null {
-  const locale = market.webPresence?.defaultLocale ?? "";
+  const locale = market.webPresence?.defaultLocale?.locale ?? "";
   const handle = market.handle.toLowerCase();
   const name = market.name.toLowerCase();
 
@@ -162,7 +162,7 @@ function getMarketBaseUrl(market: ShopifyMarket): string | null {
   if (!wp) return null;
 
   const defaultLocaleUrl = wp.rootUrls.find(
-    (r) => r.locale === wp.defaultLocale,
+    (r) => r.locale === wp.defaultLocale?.locale,
   );
   const url = defaultLocaleUrl?.url ?? wp.rootUrls[0]?.url;
   if (!url) return null;
