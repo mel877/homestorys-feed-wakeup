@@ -178,6 +178,26 @@ router.post("/alerts/check", async (req, res) => {
 });
 
 /**
+ * POST /api/internal/classify
+ * Trigger a standalone image classification drain without a full sync.
+ * Useful to classify images that are already in the DB but were never
+ * processed (e.g. after the first sync or when Phase 5 was interrupted).
+ * Runs in background; responds immediately.
+ */
+router.post("/classify", (req, res) => {
+  req.log.info("Standalone image classification triggered via internal API");
+
+  import("../images/classify-stored")
+    .then(({ classifyStoredImages }) => classifyStoredImages())
+    .then((result) =>
+      logger.info({ ...result }, "Standalone image classification complete"),
+    )
+    .catch((err) => logger.error({ err }, "Standalone image classification failed"));
+
+  res.json({ status: "started", message: "Image classification started in background" });
+});
+
+/**
  * POST /api/internal/sync/product/:productRef
  * Trigger a targeted sync for a single product (by numeric ID or GID).
  * Single-product syncs do not go through the scheduler lock — they are

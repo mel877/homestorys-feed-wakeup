@@ -538,12 +538,64 @@ export async function syncProducts(
         // ── Images: replace per product ─────────────────────────────────────
         // Always delete-and-reinsert for every product we see in the sync,
         // even if Shopify returned zero images (e.g. all images were removed).
+        // Preserve existing classification results so Phase 5 work is not
+        // destroyed by subsequent syncs. Images whose URL hash matches an
+        // already-classified row retain their imageType, scores, etc.
         const imageNodes = imagesByProduct.get(productGid) ?? [];
+
+        let classificationByHash = new Map<string, {
+          imageType: string | null;
+          whiteBgScore: string | null;
+          solidBgScore: string | null;
+          alphaRatio: string | null;
+          edgeDensity: string | null;
+          variance: string | null;
+          resolutionScore: string | null;
+          isClassified: boolean;
+          classifiedAt: Date | null;
+        }>();
+
+        if (imageNodes.length > 0) {
+          const existing = await tx
+            .select({
+              urlHash: imagesTable.urlHash,
+              imageType: imagesTable.imageType,
+              whiteBgScore: imagesTable.whiteBgScore,
+              solidBgScore: imagesTable.solidBgScore,
+              alphaRatio: imagesTable.alphaRatio,
+              edgeDensity: imagesTable.edgeDensity,
+              variance: imagesTable.variance,
+              resolutionScore: imagesTable.resolutionScore,
+              isClassified: imagesTable.isClassified,
+              classifiedAt: imagesTable.classifiedAt,
+            })
+            .from(imagesTable)
+            .where(eq(imagesTable.productId, productDbId));
+          classificationByHash = new Map(
+            existing.filter((c) => c.isClassified).map((c) => [c.urlHash, c]),
+          );
+        }
+
         await tx
           .delete(imagesTable)
           .where(eq(imagesTable.productId, productDbId));
         if (imageNodes.length > 0) {
-          const imageRows = buildImageRows(imageNodes, productDbId);
+          const imageRows = buildImageRows(imageNodes, productDbId).map((row) => {
+            const saved = classificationByHash.get(row.urlHash ?? "");
+            if (!saved) return row;
+            return {
+              ...row,
+              imageType: saved.imageType,
+              whiteBgScore: saved.whiteBgScore,
+              solidBgScore: saved.solidBgScore,
+              alphaRatio: saved.alphaRatio,
+              edgeDensity: saved.edgeDensity,
+              variance: saved.variance,
+              resolutionScore: saved.resolutionScore,
+              isClassified: saved.isClassified,
+              classifiedAt: saved.classifiedAt,
+            };
+          });
           await tx.insert(imagesTable).values(imageRows);
         }
       }

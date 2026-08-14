@@ -48,6 +48,7 @@ export const imagesTable = pgTable(
     index("images_product_id_idx").on(t.productId),
     index("images_url_hash_idx").on(t.urlHash),
     index("images_image_type_idx").on(t.imageType),
+    index("images_is_classified_idx").on(t.isClassified),
   ],
 );
 
