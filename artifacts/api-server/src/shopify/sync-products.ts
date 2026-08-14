@@ -53,13 +53,17 @@ const BULK_PRODUCTS_QUERY = `
               position
               price
               compareAtPrice
-              weight
-              weightUnit
-              requiresShipping
               taxable
               availableForSale
               inventoryItem {
                 id
+                requiresShipping
+                measurement {
+                  weight {
+                    value
+                    unit
+                  }
+                }
               }
               metafields(namespace: "feed") {
                 edges {
@@ -116,12 +120,13 @@ export const SINGLE_PRODUCT_QUERY = `
             position
             price
             compareAtPrice
-            weight
-            weightUnit
-            requiresShipping
             taxable
             availableForSale
-            inventoryItem { id }
+            inventoryItem {
+              id
+              requiresShipping
+              measurement { weight { value unit } }
+            }
             metafields(namespace: "feed", first: 30) {
               edges {
                 node { id namespace key value type }
@@ -311,9 +316,11 @@ function buildVariantRow(
     gtin: node.barcode ?? null,
     mpn: meta.mpn ?? null,
     position: node.position ?? 1,
-    weight: node.weight != null ? String(node.weight) : null,
-    weightUnit: node.weightUnit ?? null,
-    requiresShipping: node.requiresShipping ?? true,
+    weight: node.inventoryItem?.measurement?.weight?.value != null
+      ? String(node.inventoryItem.measurement.weight.value)
+      : null,
+    weightUnit: node.inventoryItem?.measurement?.weight?.unit ?? null,
+    requiresShipping: node.inventoryItem?.requiresShipping ?? true,
     taxable: node.taxable ?? true,
     available: node.availableForSale ?? false,
     inventoryItemId,
@@ -608,12 +615,13 @@ interface SingleProductResponse {
           position: number;
           price: string;
           compareAtPrice: string | null;
-          weight: number | null;
-          weightUnit: string | null;
-          requiresShipping: boolean;
           taxable: boolean;
           availableForSale: boolean;
-          inventoryItem: { id: string } | null;
+          inventoryItem: {
+            id: string;
+            requiresShipping: boolean;
+            measurement: { weight: { value: number; unit: string } | null } | null;
+          } | null;
           metafields: { edges: Array<{ node: { id: string; namespace: string; key: string; value: string; type: string } }> };
         };
       }>;
@@ -668,9 +676,6 @@ export async function syncSingleProduct(
     position: v.position,
     price: v.price,
     compareAtPrice: v.compareAtPrice,
-    weight: v.weight,
-    weightUnit: v.weightUnit,
-    requiresShipping: v.requiresShipping,
     taxable: v.taxable,
     availableForSale: v.availableForSale,
     inventoryItem: v.inventoryItem,

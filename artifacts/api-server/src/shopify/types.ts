@@ -93,12 +93,17 @@ export interface BulkVariantNode extends BulkNode {
   position: number;
   price: string;
   compareAtPrice: string | null;
-  weight: number | null;
-  weightUnit: string | null;
-  requiresShipping: boolean;
   taxable: boolean;
   availableForSale: boolean;
-  inventoryItem: { id: string } | null;
+  /**
+   * Shopify API 2025-01: weight, weightUnit, requiresShipping moved from
+   * ProductVariant to inventoryItem.measurement / inventoryItem.requiresShipping.
+   */
+  inventoryItem: {
+    id: string;
+    requiresShipping: boolean;
+    measurement: { weight: { value: number; unit: string } | null } | null;
+  } | null;
 }
 
 export interface BulkMetafieldNode extends BulkNode {
