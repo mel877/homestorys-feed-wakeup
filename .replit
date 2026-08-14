@@ -23,6 +23,8 @@ timeoutMs = 20000
 
 [userenv.shared]
 SHOPIFY_SHOP_DOMAIN = "villaromana01.myshopify.com"
+GOOGLE_DRY_RUN = "false"
+META_DRY_RUN = "false"
 
 [nix]
 channel = "stable-25_05"
