@@ -41,6 +41,11 @@ export interface GoogleFeedRow {
   color: string;
   material: string;
   size: string;
+  gender: string;
+  age_group: string;
+  size_system: string;
+  size_type: string;
+  unit_pricing_base_measure: string;
   shipping_weight: string;
   custom_label_0: string;
   custom_label_1: string;
@@ -76,6 +81,11 @@ export const GOOGLE_TSV_HEADERS: (keyof GoogleFeedRow)[] = [
   "color",
   "material",
   "size",
+  "gender",
+  "age_group",
+  "size_system",
+  "size_type",
+  "unit_pricing_base_measure",
   "shipping_weight",
   "custom_label_0",
   "custom_label_1",
@@ -123,6 +133,36 @@ export interface GoogleProductResource {
   targetCountry: string;
   contentLanguage: string;
   channel: "online";
+}
+
+// ── Description helper ────────────────────────────────────────────────────────
+
+/**
+ * Brand suffix appended when the localised description is shorter than 500
+ * characters (rule 3.3 — "Beschreibung zu kurz", Channable rule set v1.0).
+ */
+const HOMESTORYS_BRAND_SUFFIX =
+  " Avec Homestorys partez dans un voyage passionnant avec nos 9 Homestorys pour découvrir les meilleures idées d'aménagement et de style de vie à la Belge sur les thèmes suivants : le plaisir, famille et traditions, loisirs et voyages, expériences dans la nature et paradis du jardin, design et une nouvelle forme de luxe.";
+
+function buildDescription(canonical: CanonicalProduct): string {
+  const raw = canonical.description || canonical.title;
+  const padded = raw.length < 500 ? raw + HOMESTORYS_BRAND_SUFFIX : raw;
+  return padded.slice(0, 5000);
+}
+
+// ── Condition helper ──────────────────────────────────────────────────────────
+
+/**
+ * Rules 3.11/3.12 (Channable rule set v1.0):
+ *  - outlet tag or isOutlet metafield → "used"
+ *  - everything else → "new"
+ */
+function resolveCondition(canonical: CanonicalProduct): string {
+  // isOutlet metafield OR the lifecycle custom label set to "outlet"
+  if (canonical.isOutlet || canonical.customLabels.custom_label_0 === "outlet") {
+    return "used";
+  }
+  return "new";
 }
 
 // ── Availability mapping ──────────────────────────────────────────────────────
@@ -281,7 +321,7 @@ export function mapToGoogleResource(
     // Do NOT use buildGoogleRestProductId here — that would double the prefix.
     offerId: canonical.variantId,
     title: canonical.title.slice(0, 150),
-    description: canonical.description.slice(0, 5000) || canonical.title,
+    description: buildDescription(canonical),
     link: canonical.productUrl,
     imageLink: canonical.primaryImage.url,
     additionalImageLinks,
@@ -293,7 +333,8 @@ export function mapToGoogleResource(
     },
     brand: canonical.brand.slice(0, 70),
     identifierExists: canonical.identifierExists,
-    condition: "new",
+    // Rules 3.11/3.12 — outlet → "used", otherwise "new"
+    condition: resolveCondition(canonical),
     googleProductCategory: canonical.googleProductCategory ?? "",
     productTypes: canonical.productType ? [canonical.productType] : [],
     itemGroupId: canonical.itemGroupId,
@@ -373,13 +414,18 @@ export function mapToGoogleRow(
     gtin: resource.gtin ?? "",
     mpn: resource.mpn ?? "",
     identifier_exists: resource.identifierExists ? "yes" : "no",
-    condition: "new",
+    condition: resolveCondition(canonical),
     google_product_category: resource.googleProductCategory,
     product_type: canonical.productType ?? "",
     item_group_id: resource.itemGroupId,
     color: resource.color ?? "",
     material: resource.material ?? "",
     size: "",
+    gender: "Unisex",           // rule 3.1
+    age_group: "Adult",         // rule 3.2
+    size_system: "EU",          // rule 3.4
+    size_type: "Normal",        // rule 3.5
+    unit_pricing_base_measure: "1 item", // rule 3.8
     shipping_weight: formatShippingWeight(canonical.weight, canonical.weightUnit),
     custom_label_0: canonical.customLabels.custom_label_0,
     custom_label_1: canonical.customLabels.custom_label_1,

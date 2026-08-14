@@ -418,7 +418,8 @@ export function selectGoogleImages(
     lifestyle = valid.find((i) => i.imageType === "lifestyle" && i !== primary) ?? null;
   }
 
-  const additional = valid.filter((i) => i !== primary && i !== lifestyle);
+  // Rule 2.1 — cap additional images at 10 (Channable rule set v1.0)
+  const additional = valid.filter((i) => i !== primary && i !== lifestyle).slice(0, 10);
 
   return { primary, lifestyle, additional };
 }
@@ -482,7 +483,8 @@ function isExcludedFeedImage(img: ClassifiedImage): boolean {
     url.includes("blueprint") ||
     url.includes("schematic") ||
     url.includes("line-draw") ||
-    url.includes("line_draw")
+    url.includes("line_draw") ||
+    url.includes("textures")         // rule 2.2 — "TEXTURES" fabric variants
   ) {
     return true;
   }

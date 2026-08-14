@@ -105,6 +105,23 @@ export function buildCanonical(
   // ── Resolve content ────────────────────────────────────────────────────────
   const content = resolveContent(market.language, product.handle, translations);
 
+  // ── Policy exclusions — handle / product type (Channable rule set v1.0) ───
+  // Rule 1.2 — handle contains "calendrier" (advent calendars, seasonal items)
+  // Rule 2.4 — product_type contains "produits de soins" (beauty/care products)
+  if (
+    product.handle.includes("calendrier") ||
+    product.productType?.toLowerCase().includes("produits de soins")
+  ) return null;
+
+  // Rules 2.5, 2.6, 2.8, 3.15 — title-based content exclusions
+  const titleLower = (content.title ?? "").toLowerCase();
+  if (
+    titleLower.includes("calendrier") ||  // rules 1.2, 2.5 — advent calendars
+    titleLower.includes("expo") ||        // rule 2.6 — showroom / expo products
+    titleLower.includes("livre") ||       // rule 2.8 — books
+    titleLower.includes("langify")        // rule 3.15 — Langify translation artefacts
+  ) return null;
+
   // ── Brand normalisation ───────────────────────────────────────────────────
   const brand = normaliseBrand(product.vendor) || "Homestorys";
 
@@ -137,6 +154,9 @@ export function buildCanonical(
     // Return null = exclude this market from feed
     return null;
   }
+
+  // Rule 2.7 — exclude products priced above 10,000 € (Channable rule set v1.0)
+  if (parseFloat(pricing.priceAmount ?? "0") > 10_000) return null;
 
   const price = buildMoney(pricing.priceAmount, pricing.priceCurrency)!;
   const compareAtPrice = buildMoney(pricing.compareAtPriceAmount, pricing.priceCurrency);

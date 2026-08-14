@@ -27,6 +27,7 @@ import Images from "@/pages/images";
 import Inventory from "@/pages/inventory";
 import DataQuality from "@/pages/data-quality";
 import Feeds from "@/pages/feeds";
+import Rules from "@/pages/rules";
 
 const queryClient = new QueryClient();
 
@@ -69,6 +70,9 @@ function Router() {
         </Route>
         <Route path="/feeds">
           <ProtectedRoute><DashboardLayout><Feeds /></DashboardLayout></ProtectedRoute>
+        </Route>
+        <Route path="/rules">
+          <ProtectedRoute><DashboardLayout><Rules /></DashboardLayout></ProtectedRoute>
         </Route>
         
         <Route component={NotFound} />

@@ -10,7 +10,8 @@ import {
   Database,
   Globe2,
   Rss,
-  TrendingUp
+  TrendingUp,
+  ScrollText,
 } from "lucide-react";
 import { useDashboardLogout, getGetDashboardAuthMeQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { href: "/google", label: "Google", icon: Globe2 },
   { href: "/meta", label: "Meta", icon: Rss },
   { href: "/feeds", label: "Feeds", icon: Database },
+  { href: "/rules", label: "Channel Rules", icon: ScrollText },
 ];
 
 export function DashboardLayout({ children }: { children: ReactNode }) {
