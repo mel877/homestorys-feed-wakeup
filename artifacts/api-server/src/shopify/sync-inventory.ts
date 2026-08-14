@@ -315,8 +315,10 @@ export async function syncSingleInventoryItem(
   }
 
   // Update availability in market_variants
+  // NOTE: node.available does not exist in 2025-01+; use quantities array.
   const totalAvailable = item.inventoryLevels.edges.reduce(
-    (sum, { node }) => sum + node.available,
+    (sum, { node }) =>
+      sum + (node.quantities.find((q) => q.name === "available")?.quantity ?? 0),
     0,
   );
   const availability = totalAvailable > 0 ? "in_stock" : "out_of_stock";

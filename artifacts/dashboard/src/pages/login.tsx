@@ -7,10 +7,9 @@ import { useDashboardLogin, getGetDashboardAuthMeQueryKey } from "@workspace/api
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
+import { TrendingUp } from "lucide-react";
 
 const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
@@ -44,44 +43,43 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/30 p-4">
-      <Card className="w-full max-w-md shadow-lg border-border/50">
-        <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto w-12 h-12 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-bold text-xl mb-2">
-            H
+    <div className="min-h-[100dvh] flex items-center justify-center bg-background p-6 font-sans">
+      <div className="w-full max-w-[360px] bg-card p-8 rounded-[20px] shadow-card border border-border">
+        <div className="text-center mb-8 flex flex-col items-center">
+          <div className="w-12 h-12 rounded-[14px] bg-[#0a0a0a] flex items-center justify-center mb-6">
+            <TrendingUp className="w-6 h-6 text-white" />
           </div>
-          <CardTitle className="text-2xl font-bold tracking-tight">Homestorys Ops</CardTitle>
-          <CardDescription>Enter your password to access the dashboard</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <Label htmlFor="password">Password</Label>
-                    <FormControl>
-                      <Input
-                        id="password"
-                        type="password"
-                        placeholder="••••••••"
-                        className="font-mono"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <Button type="submit" className="w-full" disabled={login.isPending}>
-                {login.isPending ? "Authenticating..." : "Sign In"}
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
+          <div className="text-[11px] uppercase tracking-widest text-muted-foreground font-semibold mb-1">AI</div>
+          <h1 className="text-[24px] font-bold tracking-tight text-foreground">Feed Engine</h1>
+          <p className="text-[14px] text-muted-foreground mt-2">Log in to operations console</p>
+        </div>
+        
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <FormField
+              control={form.control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <FormControl>
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="Enter Access Key"
+                      className="text-center h-11 rounded-[18px] text-[14px] border-border shadow-xs focus-visible:ring-1 focus-visible:ring-ring"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage className="text-center text-[12px]" />
+                </FormItem>
+              )}
+            />
+            <Button type="submit" className="w-full h-11" disabled={login.isPending}>
+              {login.isPending ? "Authenticating..." : "Access Console"}
+            </Button>
+          </form>
+        </Form>
+      </div>
     </div>
   );
 }

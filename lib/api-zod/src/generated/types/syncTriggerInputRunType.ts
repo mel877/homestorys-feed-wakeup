@@ -14,4 +14,5 @@ export const SyncTriggerInputRunType = {
   inventory: 'inventory',
   prices: 'prices',
   recommendations: 'recommendations',
+  export: 'export',
 } as const;

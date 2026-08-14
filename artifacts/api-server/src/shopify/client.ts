@@ -263,11 +263,10 @@ export class ShopifyClient {
         );
 
         if (throttled && attempt < maxRetries) {
-          const waitMs = await this.rateLimiter.waitIfNeeded(500);
-          const backoff = Math.max(
-            typeof waitMs === "number" ? waitMs : 0,
-            Math.min(2000 * 2 ** attempt + jitter(), 60_000),
-          );
+          // waitIfNeeded returns void — it already sleeps internally.
+          // Add exponential backoff on top for safety.
+          await this.rateLimiter.waitIfNeeded(500);
+          const backoff = Math.min(2000 * 2 ** attempt + jitter(), 60_000);
           logger.warn({ attempt, backoff }, "GraphQL throttled — retrying");
           await sleep(backoff);
           attempt++;

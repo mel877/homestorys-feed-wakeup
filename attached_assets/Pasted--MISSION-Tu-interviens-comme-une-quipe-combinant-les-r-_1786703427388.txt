@@ -1,0 +1,1984 @@
+# MISSION
+
+Tu interviens comme une équipe combinant les rôles suivants :
+
+* Senior Product Manager SaaS spécialisé e-commerce / feed management
+* Expert Channable / Lengow / DataFeedWatch / Google Merchant Center
+* Senior Full-Stack Engineer
+* Software Architect
+* QA Engineer / Test Automation Engineer
+* Product Designer Senior
+* UX Researcher
+* UI Designer SaaS B2B
+* Expert accessibilité
+* Expert performance
+* Expert sécurité applicative
+* Expert infrastructure / déploiement Replit
+
+Le projet existant est une application hébergée sur **Replit** visant à devenir une véritable plateforme professionnelle de **gestion de flux produits inspirée fonctionnellement de Channable**.
+
+L'objectif n'est PAS de simplement produire un rapport.
+
+Ta mission est de :
+
+1. comprendre entièrement l'application existante ;
+2. inventorier ce qui est réellement implémenté ;
+3. tester chaque fonctionnalité ;
+4. identifier les fonctionnalités cassées, partielles, simulées ou absentes ;
+5. comparer la logique métier à celle attendue d'un véritable feed manager ;
+6. auditer entièrement les parcours UX ;
+7. auditer l'interface UI dans ses moindres détails ;
+8. identifier les problèmes d'architecture ou de modèle de données ;
+9. corriger les problèmes détectés ;
+10. implémenter les éléments indispensables manquants lorsque cela est raisonnablement nécessaire au fonctionnement du produit ;
+11. automatiser les tests ;
+12. refaire tous les tests après correction ;
+13. laisser l'application dans un état propre, cohérent, stable et exploitable.
+
+---
+
+# RÈGLE ABSOLUE
+
+Ne considère JAMAIS qu'une fonctionnalité fonctionne simplement parce que :
+
+* du code existe ;
+* un composant React existe ;
+* une route API existe ;
+* un bouton existe ;
+* une table SQL existe ;
+* une interface est affichée ;
+* un message "success" apparaît.
+
+Une fonctionnalité est considérée comme fonctionnelle UNIQUEMENT si tu peux démontrer que :
+
+**UI → API → logique métier → DB → transformation éventuelle → résultat final**
+
+fonctionne réellement.
+
+Teste les fonctionnalités.
+
+Clique réellement sur les boutons.
+
+Crée réellement des données.
+
+Modifie-les.
+
+Supprime-les.
+
+Recharge la page.
+
+Teste les erreurs.
+
+Teste les cas limites.
+
+Teste les dépendances entre fonctionnalités.
+
+Vérifie les données persistées en base.
+
+---
+
+# AUTONOMIE
+
+Travaille de manière totalement autonome.
+
+Ne me demande pas de :
+
+* tester quelque chose ;
+* cliquer sur quelque chose ;
+* vérifier une page ;
+* exécuter une migration ;
+* inspecter une erreur ;
+* choisir entre deux implémentations évidentes ;
+* intervenir entre deux étapes.
+
+Inspecte d'abord le projet avant de modifier quoi que ce soit.
+
+Lorsque plusieurs solutions techniques sont possibles, choisis celle :
+
+* la plus robuste ;
+* la plus maintenable ;
+* la plus simple ;
+* la plus cohérente avec l'architecture existante.
+
+Ne réécris pas inutilement l'application.
+
+Préserve ce qui fonctionne.
+
+Corrige ce qui doit l'être.
+
+---
+
+# PRINCIPE PRODUIT
+
+L'application doit être pensée comme un véritable SaaS de Feed Management.
+
+Le modèle conceptuel principal doit être approximativement :
+
+**Workspace / Account**
+↓
+**Projects**
+↓
+**Imports / Data Sources**
+↓
+**Canonical Product Data**
+↓
+**Transformations / Rules**
+↓
+**Channels / Feeds**
+↓
+**Channel Mapping**
+↓
+**Validation / Quality**
+↓
+**Generated Feed**
+↓
+**Delivery / Feed URL / API / Export**
+↓
+**Execution History / Monitoring**
+
+Vérifie si le projet suit effectivement cette séparation des responsabilités.
+
+Si ce n'est pas le cas, identifie les problèmes structurels.
+
+---
+
+# PHASE 1 — CARTOGRAPHIE COMPLÈTE DU PROJET
+
+Commence par analyser tout le repository.
+
+Inspecte :
+
+* architecture ;
+* frontend ;
+* backend ;
+* API ;
+* routes ;
+* services ;
+* hooks ;
+* state management ;
+* modèles ;
+* schémas DB ;
+* migrations ;
+* workers ;
+* cron jobs ;
+* scripts ;
+* configuration ;
+* variables d'environnement ;
+* authentification ;
+* gestion des permissions ;
+* système de logs ;
+* tests existants ;
+* documentation ;
+* données seed ;
+* types TypeScript ;
+* gestion des erreurs ;
+* système de stockage ;
+* traitement des imports ;
+* génération des exports.
+
+Produis une carte fonctionnelle interne.
+
+Identifie toutes les pages et routes de l'application.
+
+Pour CHAQUE écran, détermine :
+
+* son objectif ;
+* ses données ;
+* les API appelées ;
+* les actions disponibles ;
+* les permissions éventuelles ;
+* l'état vide ;
+* l'état loading ;
+* l'état error ;
+* l'état success.
+
+Cherche explicitement :
+
+* TODO
+* FIXME
+* MOCK
+* placeholder
+* hardcoded
+* fake
+* temporary
+* demo
+* simulated
+* coming soon
+* disabled
+* console.log
+* données statiques utilisées à la place de vraies données.
+
+---
+
+# PHASE 2 — AUDIT DU MODÈLE DE DONNÉES
+
+Analyse la DB comme si elle devait gérer demain plusieurs dizaines de clients et des centaines de milliers de produits.
+
+Vérifie la présence et la cohérence des entités nécessaires.
+
+Notamment :
+
+* users ;
+* organizations/workspaces ;
+* projects ;
+* imports ;
+* import runs ;
+* fields ;
+* product records ;
+* feed/channel configurations ;
+* mappings ;
+* categories ;
+* rules ;
+* rule groups ;
+* exports ;
+* export runs ;
+* validation errors ;
+* logs ;
+* schedules ;
+* credentials/secrets.
+
+Vérifie :
+
+* relations ;
+* foreign keys ;
+* cascade delete ;
+* unicité ;
+* index ;
+* timestamp ;
+* auditabilité ;
+* isolation des projets ;
+* isolation des utilisateurs ;
+* gestion correcte des suppressions.
+
+Teste particulièrement qu'un élément du projet A ne puisse jamais contaminer un projet B.
+
+---
+
+# PHASE 3 — IMPORTS / DATA SOURCES
+
+Audit extrêmement poussé.
+
+Une plateforme de feed management doit être capable d'ingérer des catalogues de manière fiable.
+
+Teste toutes les sources actuellement annoncées par l'application.
+
+Pour chaque source :
+
+1. créer un import ;
+2. renseigner la configuration ;
+3. sauvegarder ;
+4. lancer l'import ;
+5. vérifier le téléchargement ;
+6. parser les données ;
+7. identifier les champs ;
+8. compter les produits ;
+9. stocker les produits ;
+10. afficher les produits ;
+11. relancer l'import ;
+12. vérifier la mise à jour des produits existants ;
+13. vérifier l'ajout des nouveaux produits ;
+14. vérifier le comportement des produits disparus.
+
+Tester au minimum lorsque la fonctionnalité existe :
+
+* XML ;
+* CSV ;
+* JSON ;
+* URL distante ;
+* upload de fichier ;
+* Shopify ;
+* autres connecteurs déjà implémentés.
+
+Vérifie :
+
+* séparateurs CSV ;
+* encodage UTF-8 ;
+* accents ;
+* HTML ;
+* entités XML ;
+* CDATA ;
+* structures XML imbriquées ;
+* JSON imbriqué ;
+* champs vides ;
+* NULL ;
+* tableaux ;
+* images multiples ;
+* variantes ;
+* produits parents/enfants ;
+* prix avec décimales ;
+* devise ;
+* stock ;
+* booléens ;
+* dates ;
+* URLs.
+
+Tester des catalogues incorrects :
+
+* XML invalide ;
+* JSON invalide ;
+* CSV mal formé ;
+* URL inaccessible ;
+* timeout ;
+* HTTP 404 ;
+* HTTP 500 ;
+* fichier vide ;
+* produits sans ID ;
+* ID dupliqués.
+
+Les erreurs doivent être compréhensibles.
+
+Jamais de crash silencieux.
+
+---
+
+# PHASE 4 — IDENTIFICATION DU PRODUIT
+
+C'est un point critique.
+
+Vérifie comment l'application identifie un produit entre deux imports.
+
+Il doit exister une vraie notion de clé unique.
+
+Par exemple :
+
+* id ;
+* sku ;
+* offer_id ;
+* autre champ configuré.
+
+Tester :
+
+IMPORT 1 :
+
+A
+B
+C
+
+IMPORT 2 :
+
+A modifié
+B identique
+C disparu
+D nouveau
+
+Le système doit être capable de déterminer correctement :
+
+* ajouté ;
+* mis à jour ;
+* inchangé ;
+* supprimé / disparu.
+
+Vérifie également les variantes.
+
+---
+
+# PHASE 5 — MAPPING D'IMPORT
+
+Le mapping est l'une des fonctionnalités les plus importantes du produit.
+
+L'utilisateur doit pouvoir transformer des champs sources en champs internes/canoniques.
+
+Audit complet.
+
+Exemple :
+
+source :
+
+product_name
+
+→
+
+title
+
+source :
+
+product_price
+
+→
+
+price
+
+Tester :
+
+* mapping manuel ;
+* auto-mapping éventuel ;
+* modification ;
+* suppression ;
+* champs non mappés ;
+* création de champ ;
+* renommage ;
+* types ;
+* mapping après modification de l'import.
+
+Types à vérifier :
+
+* string ;
+* integer ;
+* decimal ;
+* boolean ;
+* URL ;
+* image ;
+* date/datetime ;
+* list/array.
+
+Ajouter une preview claire :
+
+SOURCE VALUE
+→
+MAPPED VALUE
+
+si elle n'existe pas.
+
+L'utilisateur doit pouvoir comprendre immédiatement ce que devient sa donnée.
+
+Tester la persistance du mapping après reload.
+
+Tester le mapping après nouvel import.
+
+---
+
+# PHASE 6 — CATALOGUE / PRODUCT EXPLORER
+
+Le catalogue doit devenir un véritable outil d'inspection.
+
+Audit :
+
+* liste produits ;
+* pagination ;
+* recherche ;
+* filtres ;
+* tri ;
+* colonnes ;
+* nombre total de produits ;
+* consultation produit ;
+* affichage de tous les fields ;
+* image produit ;
+* variants ;
+* valeurs vides.
+
+Pouvoir idéalement distinguer :
+
+RAW DATA
+
+et
+
+PROCESSED DATA.
+
+Tester des catalogues importants.
+
+Ne pas charger 50 000 produits d'un coup dans le DOM.
+
+---
+
+# PHASE 7 — RULE ENGINE
+
+C'est probablement la partie la plus critique de tout le produit.
+
+Audite le moteur de règles comme un moteur de transformation de données professionnel.
+
+Une règle doit suivre une logique :
+
+**IF conditions
+THEN actions
+ELSE optional actions**
+
+---
+
+## Conditions
+
+Tester notamment les opérateurs disponibles.
+
+Selon les types de champs, vérifier la pertinence de :
+
+Text :
+
+* equals ;
+* not equals ;
+* contains ;
+* not contains ;
+* starts with ;
+* ends with ;
+* regex ;
+* is empty ;
+* is not empty.
+
+Numbers :
+
+* equals ;
+* > ;
+* > = ;
+* < ;
+* <= ;
+* between.
+
+Boolean :
+
+* true ;
+* false.
+
+Lists :
+
+* contains ;
+* does not contain.
+
+Conditions multiples :
+
+* AND ;
+* OR.
+
+---
+
+# PHASE 8 — ACTIONS DES RÈGLES
+
+Vérifier toutes les actions présentes.
+
+Une vraie solution de feed management devrait notamment pouvoir gérer des opérations comme :
+
+* set value ;
+* clear value ;
+* copy field ;
+* rename / assign field ;
+* replace text ;
+* find/replace ;
+* prepend ;
+* append ;
+* uppercase ;
+* lowercase ;
+* trim ;
+* calculation ;
+* multiplication ;
+* division ;
+* percentage ;
+* rounding ;
+* filter/exclude product ;
+* include product ;
+* set category ;
+* derive value.
+
+Ne crée pas nécessairement chaque fonction imaginable.
+
+Mais vérifie que les fonctionnalités actuellement annoncées sont réellement opérationnelles et que le moteur est extensible.
+
+---
+
+# PHASE 9 — ORDRE D'EXÉCUTION DES RÈGLES
+
+CRITIQUE.
+
+Tester :
+
+Rule 1 :
+
+price × 1.20
+
+Rule 2 :
+
+si price > 100 alors custom_label = "premium"
+
+Vérifier que Rule 2 utilise correctement le résultat de Rule 1 si telle est la logique définie.
+
+Tester :
+
+* changement d'ordre ;
+* drag & drop éventuel ;
+* activation ;
+* désactivation ;
+* suppression ;
+* duplication.
+
+L'ordre doit être déterministe.
+
+---
+
+# PHASE 10 — DEBUG DES RÈGLES
+
+Une plateforme professionnelle doit permettre à l'utilisateur de comprendre l'effet d'une règle.
+
+Pour chaque règle, évaluer la possibilité d'afficher :
+
+* produits avant règle ;
+* produits après règle ;
+* nombre de produits concernés ;
+* produits exclus ;
+* fields modifiés.
+
+Exemple :
+
+**1 234 produits**
+↓ règle "Remove products without stock"
+**987 produits**
+
+Cette visibilité est extrêmement importante.
+
+Si elle n'existe pas et est techniquement raisonnable, implémente-la.
+
+---
+
+# PHASE 11 — SHARED / MASTER RULES
+
+Audite l'architecture permettant de réutiliser une transformation.
+
+Cas :
+
+"Exclure stock = 0"
+
+Cette logique ne devrait pas forcément devoir être recréée pour :
+
+* Google ;
+* Meta ;
+* Bing ;
+* custom feeds.
+
+Vérifie si des règles peuvent être :
+
+* dupliquées ;
+* réutilisées ;
+* groupées ;
+* partagées.
+
+Au minimum, l'architecture ne doit pas empêcher cette évolution.
+
+---
+
+# PHASE 12 — CHANNELS / FEEDS
+
+Audit complet des feeds.
+
+Un Feed/Channel doit avoir :
+
+* nom ;
+* type ;
+* statut ;
+* source/project ;
+* règles ;
+* mapping ;
+* configuration ;
+* validation ;
+* export ;
+* URL ;
+* historique ;
+* dernière exécution ;
+* prochain refresh éventuellement.
+
+Tester tous les channels réellement disponibles dans l'application.
+
+---
+
+# PHASE 13 — CHANNEL TEMPLATES
+
+Il ne faut surtout pas hardcoder toute la logique de Google ou Meta directement dans l'UI.
+
+Vérifie l'existence d'une abstraction de type :
+
+ChannelTemplate.
+
+Conceptuellement :
+
+channel
+requiredFields
+optionalFields
+fieldTypes
+allowedValues
+validationRules
+exportFormat
+fieldNames
+
+Exemple conceptuel :
+
+Google Shopping
+
+required:
+
+id
+title
+description
+link
+image_link
+availability
+price
+
+Meta peut avoir une configuration différente.
+
+L'objectif est qu'ajouter demain un nouveau channel ne nécessite pas de réécrire l'application.
+
+---
+
+# PHASE 14 — MAPPING PAR CHANNEL
+
+IMPORTANT :
+
+Ne pas confondre :
+
+**Import Mapping**
+
+et
+
+**Channel Mapping**.
+
+Exemple :
+
+champ interne :
+
+product_title
+
+Google :
+
+title ← product_title
+
+Meta :
+
+title ← product_title
+
+Autre canal :
+
+name ← product_title
+
+Vérifie que cette séparation existe réellement.
+
+---
+
+# PHASE 15 — CATÉGORISATION
+
+Audit du mapping catégorie.
+
+Exemple :
+
+internal_category = "Chaussures > Running"
+
+→
+
+Google Product Category
+
+ou taxonomie spécifique au canal.
+
+Tester :
+
+* association ;
+* modification ;
+* suppression ;
+* fallback ;
+* produits sans catégorie ;
+* nombre de produits concernés.
+
+Si la catégorisation n'est pas implémentée, son absence doit apparaître clairement dans le gap analysis.
+
+---
+
+# PHASE 16 — QUALITY CHECK
+
+Créer ou auditer un vrai système de validation.
+
+Les erreurs doivent être classées.
+
+Par exemple :
+
+### ERRORS
+
+Problèmes bloquants.
+
+### WARNINGS
+
+Problèmes non bloquants mais importants.
+
+### RECOMMENDATIONS
+
+Optimisations possibles.
+
+Pour chaque problème afficher idéalement :
+
+* field ;
+* type ;
+* message ;
+* nombre de produits concernés ;
+* exemples ;
+* possibilité de voir les produits concernés.
+
+Exemples :
+
+Missing title — 17 products
+Invalid price — 3 products
+Missing GTIN — 82 products
+Invalid URL — 4 products
+
+Cliquer sur le problème doit permettre d'inspecter les produits concernés.
+
+---
+
+# PHASE 17 — PREVIEW
+
+L'utilisateur doit pouvoir voir le résultat FINAL avant publication.
+
+Tester :
+
+* preview produit ;
+* preview fields ;
+* données transformées ;
+* données après toutes les règles ;
+* mapping final.
+
+Idéalement proposer :
+
+RAW
+→
+PROCESSED
+→
+CHANNEL OUTPUT
+
+Ne montre jamais uniquement les données sources comme "Preview Feed".
+
+---
+
+# PHASE 18 — EXPORT
+
+Tester réellement les formats implémentés.
+
+Potentiellement :
+
+* XML ;
+* CSV ;
+* JSON ;
+* TXT/TSV si présent.
+
+Vérifier :
+
+* MIME type ;
+* encoding ;
+* escaping ;
+* XML valide ;
+* JSON valide ;
+* headers CSV ;
+* decimal formatting ;
+* devise ;
+* caractères spéciaux ;
+* HTML ;
+* URLs ;
+* images multiples.
+
+Télécharger réellement le feed et parser de nouveau le fichier pour vérifier sa validité.
+
+---
+
+# PHASE 19 — PUBLIC FEED URL
+
+Tester les URLs de feed.
+
+Elles doivent :
+
+* fonctionner sans login lorsqu'elles sont destinées à une plateforme externe ;
+* rester stables ;
+* retourner le bon MIME type ;
+* contenir les dernières données ;
+* ne pas révéler de données d'autres projets ;
+* gérer les erreurs proprement.
+
+Teste un appel HTTP réel vers chaque feed créé.
+
+---
+
+# PHASE 20 — SCHEDULING / REFRESH
+
+Audite les mises à jour automatiques.
+
+Pipeline attendu :
+
+IMPORT
+↓
+PARSE
+↓
+MAPPING
+↓
+RULES
+↓
+CHANNEL TRANSFORMATION
+↓
+VALIDATION
+↓
+GENERATE FEED
+
+Tester :
+
+* exécution manuelle ;
+* exécution programmée si présente ;
+* double exécution ;
+* erreur pendant pipeline ;
+* retry ;
+* statut ;
+* timestamps ;
+* logs.
+
+Attention aux contraintes propres à Replit.
+
+Ne construis pas un système dépendant d'un processus local fragile qui disparaît lorsque l'instance redémarre.
+
+---
+
+# PHASE 21 — EXECUTION HISTORY
+
+Chaque import/feed devrait idéalement avoir un historique.
+
+Exemple :
+
+Last run
+14 Aug 10:32
+Success
+12,481 products
+Duration 8.4 sec
+
+Précédent :
+
+14 Aug 09:32
+Failed
+HTTP timeout
+
+Audit :
+
+* timestamps ;
+* statut ;
+* durée ;
+* produits processed ;
+* produits excluded ;
+* erreurs ;
+* logs exploitables.
+
+---
+
+# PHASE 22 — DATA LINEAGE
+
+Vérifie s'il est possible de comprendre :
+
+**d'où vient une valeur et pourquoi elle vaut cela.**
+
+Exemple :
+
+Final title:
+
+"Nike Air Max | Livraison offerte"
+
+Source :
+
+"Nike Air Max"
+
+Rule 3:
+
+Append " | Livraison offerte"
+
+Cette fonctionnalité peut être simplifiée, mais l'architecture de transformation ne doit pas rendre le debugging impossible.
+
+---
+
+# PHASE 23 — TEST DATASET
+
+Crée un jeu de données de QA temporaire.
+
+Minimum 30 produits.
+
+Inclure :
+
+* produit normal ;
+* prix decimal ;
+* prix 0 ;
+* prix négatif ;
+* stock 0 ;
+* stock positif ;
+* champ manquant ;
+* title vide ;
+* description HTML ;
+* caractères français ;
+* caractères néerlandais ;
+* apostrophe ;
+* & ;
+* emojis ;
+* URL avec query parameters ;
+* image manquante ;
+* plusieurs images ;
+* GTIN ;
+* GTIN absent ;
+* SKU dupliqué ;
+* catégories ;
+* sous-catégories ;
+* variantes ;
+* produit parent ;
+* produit enfant ;
+* promotion ;
+* devise ;
+* valeur null ;
+* très long title ;
+* très longue description.
+
+Utilise ce catalogue pour tester le pipeline entier.
+
+---
+
+# PHASE 24 — END-TO-END TEST
+
+Créer un scénario complètement automatisé :
+
+1. créer projet ;
+2. ajouter import ;
+3. importer catalogue ;
+4. mapper fields ;
+5. vérifier produits ;
+6. créer feed Google-like ;
+7. créer règle ;
+8. transformer title ;
+9. exclure stock 0 ;
+10. mapper fields ;
+11. exécuter Quality Check ;
+12. générer feed ;
+13. ouvrir preview ;
+14. récupérer feed URL ;
+15. télécharger feed ;
+16. parser feed ;
+17. comparer résultat attendu ;
+18. modifier règle ;
+19. régénérer ;
+20. vérifier modification ;
+21. reload UI ;
+22. vérifier persistance.
+
+Ce scénario constitue le **Golden Path Test**.
+
+Il doit passer.
+
+---
+
+# PHASE 25 — TESTS DE NON-RÉGRESSION
+
+Mettre en place ou compléter les tests.
+
+Privilégier :
+
+* unit tests pour transformations ;
+* integration tests API/services ;
+* tests DB ;
+* tests parser ;
+* tests rule engine ;
+* tests mapping ;
+* tests export ;
+* E2E via Playwright ou équivalent pour les parcours critiques.
+
+Ne crée pas des tests artificiels qui mockent tellement l'application qu'ils ne prouvent rien.
+
+---
+
+# PHASE 26 — AUDIT UX "PRO MAX"
+
+Passe maintenant du rôle d'ingénieur au rôle de **Senior Product Designer SaaS**.
+
+Le benchmark attendu est celui d'applications B2B modernes à forte densité d'information.
+
+L'utilisateur doit pouvoir comprendre naturellement :
+
+Project
+→ Import
+→ Products
+→ Rules
+→ Channels
+→ Quality
+→ Export.
+
+Audit de CHAQUE écran.
+
+---
+
+# PHASE 27 — INFORMATION ARCHITECTURE
+
+Analyse :
+
+* navigation ;
+* sidebar ;
+* breadcrumbs ;
+* hiérarchie ;
+* organisation des projets ;
+* retour en arrière ;
+* changement de project ;
+* compréhension du contexte.
+
+À tout moment, l'utilisateur doit savoir :
+
+* où il est ;
+* dans quel projet ;
+* dans quel feed ;
+* quelle étape il configure ;
+* ce qu'il doit faire ensuite.
+
+---
+
+# PHASE 28 — ONBOARDING
+
+Teste le premier parcours utilisateur.
+
+Nouvel utilisateur.
+
+Aucun project.
+
+Que voit-il ?
+
+Le système doit guider naturellement vers :
+
+Create project
+→ Add import
+→ Map fields
+→ Inspect products
+→ Create feed
+→ Configure
+→ Validate
+→ Activate.
+
+Audit des empty states.
+
+Un écran vide avec uniquement :
+
+"No data"
+
+est insuffisant.
+
+Un bon empty state explique :
+
+* ce que représente l'écran ;
+* pourquoi il est vide ;
+* quelle est la prochaine action.
+
+---
+
+# PHASE 29 — UX DU RULE BUILDER
+
+Le Rule Builder doit être particulièrement travaillé.
+
+L'utilisateur doit pouvoir comprendre une règle sans être développeur.
+
+Structure visuelle :
+
+IF
+
+[field selector]
+
+[operator selector]
+
+[value]
+
+AND / OR
+
+THEN
+
+[action]
+
+[field]
+
+[value]
+
+La hiérarchie doit être évidente.
+
+Tester :
+
+* création ;
+* modification ;
+* suppression condition ;
+* plusieurs conditions ;
+* actions multiples ;
+* reorder ;
+* save ;
+* cancel ;
+* errors ;
+* preview.
+
+Éviter les formulaires énormes et illisibles.
+
+---
+
+# PHASE 30 — DENSITÉ D'INFORMATION
+
+Un outil de feed management est une application métier.
+
+Ne transforme pas l'interface en landing page marketing.
+
+Favoriser :
+
+* tables ;
+* filtres ;
+* panels ;
+* drawers ;
+* tabs ;
+* badges ;
+* status ;
+* inline information ;
+* tooltips utiles.
+
+L'interface peut être dense mais doit rester extrêmement lisible.
+
+---
+
+# PHASE 31 — DESIGN SYSTEM
+
+Audit complet des composants.
+
+Vérifier la cohérence :
+
+Buttons
+Inputs
+Select
+Dropdown
+Checkbox
+Radio
+Tabs
+Cards
+Tables
+Modals
+Drawers
+Tooltip
+Toast
+Alert
+Badge
+Pagination
+Search
+Filters
+Breadcrumb
+Stepper.
+
+Vérifier :
+
+* même border radius ;
+* mêmes hauteurs ;
+* même spacing ;
+* même typography ;
+* mêmes conventions de couleur ;
+* même traitement des états ;
+* même comportement hover/focus.
+
+Supprimer les incohérences.
+
+---
+
+# PHASE 32 — HIÉRARCHIE VISUELLE
+
+Pour chaque écran :
+
+identifier clairement :
+
+H1
+description
+primary action
+secondary actions
+content
+status
+contextual information.
+
+Il ne doit jamais y avoir 4 boutons visuellement "primaires" concurrents.
+
+---
+
+# PHASE 33 — TABLES
+
+Audit particulièrement poussé.
+
+Les tables sont centrales.
+
+Vérifier :
+
+* headers ;
+* alignement ;
+* nombres alignés correctement ;
+* truncation ;
+* tooltip ;
+* sticky header si pertinent ;
+* search ;
+* filter ;
+* sorting ;
+* pagination ;
+* empty state ;
+* loading ;
+* actions ;
+* row click ;
+* responsive behavior.
+
+---
+
+# PHASE 34 — STATES
+
+CHAQUE écran async doit avoir :
+
+Loading
+Empty
+Success
+Error.
+
+Éviter :
+
+page blanche.
+
+Éviter :
+
+spinner infini.
+
+Éviter :
+
+console error sans feedback utilisateur.
+
+Utiliser si pertinent :
+
+* skeleton ;
+* inline error ;
+* toast ;
+* retry action.
+
+---
+
+# PHASE 35 — FEEDBACK UTILISATEUR
+
+Tester toutes les actions.
+
+Create
+Update
+Delete
+Import
+Generate
+Activate
+Deactivate.
+
+L'utilisateur doit comprendre ce qui s'est produit.
+
+Exemple :
+
+"Rule saved"
+
+plutôt qu'une disparition silencieuse du modal.
+
+Pour les opérations longues :
+
+"Importing 12,481 products…"
+
+puis résultat.
+
+---
+
+# PHASE 36 — CONFIRMATION DES ACTIONS DANGEREUSES
+
+Tester :
+
+* delete project ;
+* delete import ;
+* delete feed ;
+* delete rules ;
+* replace mapping.
+
+Utiliser confirmation lorsque nécessaire.
+
+Ne jamais permettre une suppression catastrophique par un clic accidentel.
+
+---
+
+# PHASE 37 — RESPONSIVE
+
+Desktop = priorité principale.
+
+Mais tester également :
+
+* 1440px ;
+* 1280px ;
+* 1024px ;
+* tablette ;
+* mobile raisonnablement.
+
+Tables et rule builders ne doivent pas exploser.
+
+---
+
+# PHASE 38 — ACCESSIBILITÉ
+
+Vérifier au minimum :
+
+* contrastes ;
+* focus states ;
+* keyboard navigation ;
+* labels ;
+* aria ;
+* modals ;
+* buttons icon-only ;
+* erreurs de formulaire ;
+* tailles de zones cliquables.
+
+---
+
+# PHASE 39 — UX COPY
+
+Audit de tous les labels.
+
+Supprimer les termes ambigus.
+
+Exemple :
+
+"Source Mapping"
+
+"Import Mapping"
+
+"Channel Mapping"
+
+doivent être distinguables.
+
+Éviter les boutons génériques comme :
+
+"Do it"
+
+"Go"
+
+"Process"
+
+Privilégier :
+
+"Run import"
+
+"Generate feed"
+
+"Create rule"
+
+"Save mapping".
+
+---
+
+# PHASE 40 — PERFORMANCE
+
+Tester :
+
+* catalogue 10 produits ;
+* 1 000 produits ;
+* si possible 10 000+ produits.
+
+Observer :
+
+* import ;
+* transformation ;
+* génération feed ;
+* requêtes DB ;
+* mémoire ;
+* frontend ;
+* pagination.
+
+Chercher les N+1 queries.
+
+Chercher les recalculs inutiles.
+
+Ne pas charger un catalogue complet simplement pour afficher les 20 premières lignes.
+
+---
+
+# PHASE 41 — CONCURRENCY
+
+Tester plusieurs actions simultanées.
+
+Par exemple :
+
+* deux imports ;
+* regeneration feed pendant import ;
+* plusieurs users/projects si possible.
+
+Éviter :
+
+race conditions
+duplicates
+corrupted output.
+
+---
+
+# PHASE 42 — SECURITY
+
+Audit :
+
+* auth ;
+* session ;
+* authorization ;
+* isolation workspaces ;
+* secrets ;
+* credentials ;
+* SSRF via import URL ;
+* file upload ;
+* XSS via descriptions produits ;
+* injection ;
+* path traversal ;
+* exposition des stack traces ;
+* rate limiting pertinent ;
+* public feed URLs.
+
+IMPORTANT :
+
+Une description produit contenant :
+
+<script>
+
+ne doit jamais permettre du XSS dans l'administration.
+
+---
+
+# PHASE 43 — REPLIT
+
+Audit spécifique au déploiement.
+
+Vérifier :
+
+- build ;
+- start ;
+- health ;
+- DB ;
+- migrations ;
+- secrets ;
+- environment ;
+- domain ;
+- public URLs ;
+- process management ;
+- jobs ;
+- restart recovery.
+
+Exécuter un build production réel.
+
+L'application doit démarrer sans intervention manuelle.
+
+---
+
+# PHASE 44 — AUDIT DES ERREURS
+
+Cherche également dans :
+
+- browser console ;
+- network ;
+- backend logs ;
+- DB logs ;
+- build output.
+
+Corrige :
+
+- warnings significatifs ;
+- unhandled promises ;
+- 404 API ;
+- 500 ;
+- hydration issues ;
+- React key problems ;
+- dead links ;
+- erreurs de type.
+
+---
+
+# PHASE 45 — AUDIT DES FAUSSES FONCTIONNALITÉS
+
+Point TRÈS IMPORTANT.
+
+Pour chaque élément visuel :
+
+button  
+menu  
+dropdown  
+checkbox  
+filter  
+search  
+pagination  
+tabs  
+toggle  
+drag & drop  
+modal  
+bulk action
+
+CLIQUE-LE.
+
+Vérifie qu'il fait réellement quelque chose.
+
+Aucun élément factice ne doit subsister dans une application présentée comme fonctionnelle.
+
+---
+
+# PHASE 46 — PARITY MATRIX
+
+Crée :
+
+`CHANNABLE_PARITY_MATRIX.md`
+
+Avec les niveaux :
+
+✅ Functional  
+🟡 Partial  
+🔴 Missing  
+⚫ Not relevant / Out of scope
+
+Catégories :
+
+- Projects
+- Imports
+- Import mapping
+- Fields
+- Products
+- Rules
+- Rule groups
+- Categories
+- Channels
+- Channel templates
+- Channel mapping
+- Quality check
+- Preview
+- Export
+- Public feeds
+- Scheduling
+- History
+- Monitoring
+- Permissions
+- UX
+- Performance
+
+ATTENTION :
+
+Le but n'est pas de déclarer que nous devons reproduire 100 % des fonctionnalités de Channable.
+
+Utilise Channable comme **benchmark de maturité produit**.
+
+Identifie :
+
+P0 = indispensable  
+P1 = important  
+P2 = amélioration  
+P3 = advanced / future.
+
+---
+
+# PHASE 47 — FIX PRIORITIZATION
+
+Utilise :
+
+### P0 — BLOCKER
+
+Le produit ne fonctionne pas correctement.
+
+### P1 — CRITICAL
+
+Fonction centrale cassée ou fortement problématique.
+
+### P2 — IMPORTANT
+
+Problème important mais contournable.
+
+### P3 — POLISH
+
+Amélioration UX/UI ou technique.
+
+Commence par corriger P0 puis P1.
+
+Corrige ensuite autant de P2/P3 que raisonnablement possible.
+
+---
+
+# PHASE 48 — NE PAS MASQUER LES PROBLÈMES
+
+Interdiction de "résoudre" un problème en :
+
+- cachant le bouton ;
+- supprimant la fonctionnalité ;
+- retournant toujours success ;
+- injectant des données mockées ;
+- bypassant une validation ;
+- désactivant un test.
+
+Corrige la cause.
+
+---
+
+# PHASE 49 — UX/UI REMEDIATION
+
+Après audit UX/UI :
+
+corrige réellement l'interface.
+
+Tu es autorisé à :
+
+- réorganiser une page ;
+- améliorer la navigation ;
+- changer les spacing ;
+- améliorer les formulaires ;
+- améliorer les tables ;
+- ajouter des tooltips ;
+- ajouter des empty states ;
+- ajouter des skeletons ;
+- améliorer les erreurs ;
+- améliorer les badges ;
+- ajouter un stepper ;
+- améliorer le rule builder ;
+- simplifier des interactions.
+
+Mais :
+
+ne fais pas un redesign décoratif massif sans bénéfice UX.
+
+Préserve l'identité graphique existante lorsqu'elle est cohérente.
+
+---
+
+# PHASE 50 — WORKFLOW CHANNEL IDÉAL
+
+Vérifie qu'un feed puisse suivre un workflow clair de type :
+
+### 1. Configure
+
+Nom  
+Channel  
+Country  
+Language
+
+### 2. Categories
+
+Catégorisation
+
+### 3. Rules
+
+Transformation / filtering
+
+### 4. Mapping
+
+Internal fields → Channel fields
+
+### 5. Quality
+
+Errors / warnings
+
+### 6. Preview
+
+Résultat final
+
+### 7. Activate / Export
+
+URL / status.
+
+Il n'est pas obligatoire d'utiliser exactement ces noms si une meilleure architecture existe.
+
+Mais l'expérience doit être aussi compréhensible.
+
+---
+
+# PHASE 51 — DASHBOARD
+
+Audit du dashboard.
+
+Un vrai dashboard ne doit pas afficher des chiffres décoratifs.
+
+Afficher uniquement des métriques calculées à partir de vraies données.
+
+Idées pertinentes :
+
+Products  
+Active feeds  
+Imports  
+Feeds with errors  
+Products with errors  
+Last synchronization  
+Failed runs.
+
+Chaque KPI devrait idéalement permettre d'atteindre les éléments concernés.
+
+---
+
+# PHASE 52 — OBSERVABILITY
+
+Vérifier que lorsqu'un feed échoue, on puisse répondre à :
+
+- lequel ?
+- quand ?
+- pourquoi ?
+- quelle étape ?
+- quels produits ?
+- quelle erreur ?
+- quelle tentative ?
+- est-ce toujours cassé ?
+
+Une erreur générique :
+
+"Feed failed"
+
+est insuffisante.
+
+---
+
+# PHASE 53 — DOCUMENTATION GÉNÉRÉE
+
+À la fin créer :
+
+`AUDIT_FUNCTIONAL.md`
+
+`AUDIT_UX_UI.md`
+
+`CHANNABLE_PARITY_MATRIX.md`
+
+`FIXES_IMPLEMENTED.md`
+
+`TEST_RESULTS.md`
+
+---
+
+# AUDIT_FUNCTIONAL.md
+
+Pour chaque problème :
+
+ID  
+Severity  
+Area  
+Problem  
+Expected behavior  
+Actual behavior  
+Root cause  
+Fix  
+Status  
+Test performed.
+
+---
+
+# AUDIT_UX_UI.md
+
+Pour chaque problème :
+
+Page  
+Component  
+Severity  
+Problem  
+Impact  
+Recommendation  
+Implemented yes/no.
+
+Inclure une évaluation globale :
+
+Navigation /10  
+Onboarding /10  
+Clarity /10  
+Rule Builder /10  
+Mapping UX /10  
+Feed configuration /10  
+Tables /10  
+Visual consistency /10  
+Error handling /10  
+Professional SaaS feeling /10.
+
+---
+
+# FIXES_IMPLEMENTED.md
+
+Lister précisément :
+
+- files modified ;
+- migrations ;
+- architecture changes ;
+- bugs fixed ;
+- UX changes ;
+- tests added.
+
+---
+
+# TEST_RESULTS.md
+
+Inclure :
+
+Tests executed  
+Passed  
+Failed  
+Skipped
+
+et le détail des parcours E2E.
+
+---
+
+# PHASE 54 — ACCEPTANCE TEST FINAL
+
+Avant de terminer, repartir de zéro avec un nouveau projet de QA.
+
+Exécuter :
+
+Create project
+
+→ Add product source
+
+→ Import
+
+→ Mapping
+
+→ Products
+
+→ Create rules
+
+→ Preview rule effects
+
+→ Create Google-like channel
+
+→ Categories
+
+→ Channel mapping
+
+→ Quality check
+
+→ Generate feed
+
+→ Download feed
+
+→ Validate file
+
+→ Open public feed URL
+
+→ Modify product/rule
+
+→ Run pipeline again
+
+→ Confirm updated output.
+
+Aucune étape critique ne doit nécessiter une manipulation de la DB ou du code.
+
+Tout doit fonctionner depuis l'application.
+
+---
+
+# PHASE 55 — DEFINITION OF DONE
+
+Le projet n'est considéré comme terminé que si :
+
+- application démarre ;
+- build production passe ;
+- DB migrations passent ;
+- imports fonctionnent ;
+- produits sont réellement persistés ;
+- mapping fonctionne ;
+- règles fonctionnent ;
+- ordre des règles fonctionne ;
+- channels fonctionnent ;
+- channel mapping fonctionne ;
+- validation fonctionne ;
+- preview représente le résultat réel ;
+- export fonctionne ;
+- feed URL fonctionne ;
+- données persistent après reload ;
+- erreurs sont gérées ;
+- parcours E2E passe ;
+- aucun P0 connu ne subsiste ;
+- aucun bouton critique factice ne subsiste ;
+- console ne contient pas d'erreur critique ;
+- UX principale est cohérente ;
+- UI ressemble à un SaaS professionnel réellement exploitable.
+
+---
+
+# QUESTION FINALE À LAQUELLE TON TRAVAIL DOIT RÉPONDRE
+
+À l'issue de ce travail, je dois pouvoir répondre objectivement à :
+
+> "Puis-je donner aujourd'hui cette plateforme à un client qui utilise habituellement un outil comme Channable pour gérer ses flux Google, Meta et autres feeds, sans devoir intervenir moi-même derrière pour réparer le système ?"
+
+Si la réponse est non, continue à traiter les éléments bloquants.
+
+---
+
+# PRINCIPE FINAL
+
+**DO NOT TRUST THE UI.  
+DO NOT TRUST THE CODE.  
+TRUST VERIFIED BEHAVIOR.**
+
+Inspect.
+
+Run.
+
+Test.
+
+Break.
+
+Fix.
+
+Retest.
+
+Only then mark something as functional.

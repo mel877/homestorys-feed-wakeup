@@ -14,8 +14,15 @@ const router: IRouter = Router();
  *   market - market code (default: BE_FR)
  *   limit  - max results per category (default: 8)
  */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.get("/:productId", async (req, res) => {
   const { productId } = req.params as { productId: string };
+  if (!UUID_RE.test(productId)) {
+    res.status(400).json({ error: "Invalid product ID" });
+    return;
+  }
   const market = (req.query["market"] as string) ?? "BE_FR";
   const limit = Math.min(
     parseInt((req.query["limit"] as string) ?? "8", 10),

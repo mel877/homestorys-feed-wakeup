@@ -22,7 +22,7 @@
  */
 
 import { db, syncRunsTable } from "@workspace/db";
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, sql } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config/loader";
 import type { SyncRunType } from "../shopify/sync-run-tracker";
@@ -234,6 +234,29 @@ export async function startScheduler(): Promise<void> {
   }
   started = true;
 
+  // Reap orphaned runs: any sync_run still "running" at process start was
+  // killed by a restart/crash and can never finish — mark it failed so the
+  // dashboard and lock logic never see a ghost "running" run.
+  try {
+    const reaped = await db
+      .update(syncRunsTable)
+      .set({
+        status: "failed",
+        finishedAt: new Date(),
+        metadata: sql`COALESCE(${syncRunsTable.metadata}, '{}'::jsonb) || '{"failureReason":"orphaned: process restarted while run was in progress"}'::jsonb`,
+      })
+      .where(eq(syncRunsTable.status, "running"))
+      .returning({ id: syncRunsTable.id });
+    if (reaped.length > 0) {
+      logger.warn(
+        { runIds: reaped.map((r) => r.id) },
+        "Scheduler: reaped orphaned running sync runs from previous process",
+      );
+    }
+  } catch (err) {
+    logger.error({ err }, "Scheduler: failed to reap orphaned sync runs");
+  }
+
   // Load configuration — schedules are derived from feedPolicy.sync_schedule
   // (cron expressions in UTC) so ops can adjust cadence via config without code changes.
   let scheduleConfig: {
@@ -270,12 +293,18 @@ export async function startScheduler(): Promise<void> {
       requiresShopify: true,
       run: async () => {
         const runId = await runFullSync();
-        // Downstream re-export after full sync
-        await runGoogleExport({ syncRunId: runId }).catch((err) =>
-          logger.error({ err }, "Google re-export failed after full sync"),
-        );
-        await runMetaExport({ syncRunId: runId }).catch((err) =>
-          logger.error({ err }, "Meta re-export failed after full sync"),
+        // Downstream re-export after full sync — serialized behind the shared
+        // feed-export lock so it can never overlap a standalone export.
+        const { withExportLock } = await import("../exporters/export-lock");
+        await withExportLock(async () => {
+          await runGoogleExport({ syncRunId: runId }).catch((err) =>
+            logger.error({ err }, "Google re-export failed after full sync"),
+          );
+          await runMetaExport({ syncRunId: runId }).catch((err) =>
+            logger.error({ err }, "Meta re-export failed after full sync"),
+          );
+        }).catch((err) =>
+          logger.error({ err }, "Feed export lock not acquired after full sync"),
         );
         // Reconcile Merchant Center diagnostics after Google export
         // (snapshot replacement: marks prior issues resolved, inserts fresh state)

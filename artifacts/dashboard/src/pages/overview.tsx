@@ -21,7 +21,6 @@ export default function Overview() {
     { query: { queryKey: getGetDashboardOverviewQueryKey(), refetchInterval: isPolling ? 4000 : false } },
   );
 
-  // Stop polling when a running sync appears in the recent runs list.
   useEffect(() => {
     if (!isPolling) return;
     const hasRunning = overview?.recentRuns?.some((r: { status: string }) => r.status === "running");
@@ -47,146 +46,156 @@ export default function Overview() {
   };
 
   if (isLoading || !overview) {
-    return <div className="p-8">Loading overview...</div>;
+    return <div className="p-8 text-[14px] text-muted-foreground">Loading overview...</div>;
   }
 
   return (
-    <div className="p-8 space-y-8 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between">
+    <div className="space-y-[32px] pt-8">
+      <section className="flex flex-col md:flex-row md:items-center justify-between gap-8">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
-          <p className="text-muted-foreground mt-1">System health and metrics</p>
+          <h1 className="text-[28px] font-bold tracking-tight text-foreground">Control Center</h1>
+          <p className="text-[14px] text-muted-foreground mt-2">
+            Monitor sync operations, inventory health, and channel distribution.
+          </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => handleManualSync('inventory')} disabled={triggerSync.isPending}>
-            <RefreshCw className="w-4 h-4 mr-2" /> Sync Inventory
+        <div className="flex gap-3 shrink-0">
+          <Button variant="outline" onClick={() => handleManualSync('inventory')} disabled={triggerSync.isPending}>
+            Sync Inventory
           </Button>
-          <Button variant="default" size="sm" onClick={() => handleManualSync('full')} disabled={triggerSync.isPending}>
-            <RefreshCw className="w-4 h-4 mr-2" /> Full Sync
+          <Button variant="default" onClick={() => handleManualSync('full')} disabled={triggerSync.isPending}>
+            Full Sync
           </Button>
         </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Products</CardTitle>
-            <Package className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold font-mono">{overview.totalProducts.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Across {overview.totalVariants.toLocaleString()} variants
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Eligible Variants</CardTitle>
-            <Percent className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold font-mono">{overview.eligibleVariants.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {Math.round((overview.eligibleVariants / overview.totalVariants) * 100)}% of total catalog
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Avg Quality Score</CardTitle>
-            <Activity className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold font-mono text-primary">
-              {overview.feedHealth.avgDataQualityScore?.toFixed(1) || '--'}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {overview.feedHealth.variantsBelow70.toLocaleString()} variants below 70
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {overview.activeAlerts.length > 0 && (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold tracking-tight">Active Alerts</h2>
-          <div className="grid grid-cols-1 gap-4">
-            {overview.activeAlerts.map((alert, i) => (
-              <div key={i} className={`p-4 rounded-lg border flex gap-3 items-start ${
-                alert.severity === 'high' ? 'bg-destructive/10 border-destructive/20 text-destructive-foreground' : 'bg-warning/10 border-warning/20'
-              }`}>
-                <AlertCircle className={`w-5 h-5 ${alert.severity === 'high' ? 'text-destructive' : 'text-yellow-600'}`} />
-                <div>
-                  <h4 className="font-semibold text-sm">{alert.type}</h4>
-                  <p className="text-sm mt-1">{alert.message} {alert.count && `(${alert.count} instances)`}</p>
-                </div>
+      <section>
+        <h2 className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase mb-4">System Health</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="rounded-[24px]">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 p-5">
+              <CardTitle className="text-[11px] font-semibold tracking-tight uppercase text-muted-foreground">Total Products</CardTitle>
+              <div className="w-8 h-8 rounded-[10px] bg-[#f5f5f5] flex items-center justify-center">
+                <Package className="w-4 h-4 text-foreground" />
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </CardHeader>
+            <CardContent className="p-5 pt-0">
+              <div className="text-[28px] font-semibold tracking-tight leading-none text-foreground">
+                {overview.totalProducts.toLocaleString()}
+              </div>
+              <p className="text-[13px] text-muted-foreground mt-2 font-medium">
+                Across {overview.totalVariants.toLocaleString()} variants
+              </p>
+            </CardContent>
+          </Card>
+          
+          <Card className="rounded-[24px]">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 p-5">
+              <CardTitle className="text-[11px] font-semibold tracking-tight uppercase text-muted-foreground">Eligible</CardTitle>
+              <div className="w-8 h-8 rounded-[10px] bg-[#f5f5f5] flex items-center justify-center">
+                <Percent className="w-4 h-4 text-foreground" />
+              </div>
+            </CardHeader>
+            <CardContent className="p-5 pt-0">
+              <div className="text-[28px] font-semibold tracking-tight leading-none text-foreground">
+                {Math.round((overview.eligibleVariants / Math.max(overview.totalVariants, 1)) * 100)}%
+              </div>
+              <p className="text-[13px] text-muted-foreground mt-2 font-medium">
+                {overview.eligibleVariants.toLocaleString()} ready for channels
+              </p>
+            </CardContent>
+          </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>By Market</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {overview.byMarket.map(m => (
-                <div key={m.marketCode} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-medium px-2 py-1 bg-secondary rounded">{m.marketCode}</span>
-                  </div>
-                  <div className="text-sm text-right">
-                    <div className="font-mono">{m.eligibleVariants.toLocaleString()} / {m.totalVariants.toLocaleString()}</div>
-                    <div className="text-muted-foreground text-xs">eligible</div>
-                  </div>
+          <Card className="rounded-[24px]">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 p-5">
+              <CardTitle className="text-[11px] font-semibold tracking-tight uppercase text-muted-foreground">System Status</CardTitle>
+              <div className="w-8 h-8 rounded-[10px] bg-[#f5f5f5] flex items-center justify-center">
+                <Activity className="w-4 h-4 text-foreground" />
+              </div>
+            </CardHeader>
+            <CardContent className="p-5 pt-0">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2 mt-1">
+                  <div className={`w-2 h-2 rounded-full ${overview.activeAlerts.length === 0 ? 'bg-[hsl(142,71%,45%)]' : 'bg-[#e7000b]'}`} />
+                  <span className="text-[28px] font-semibold tracking-tight leading-none text-foreground">
+                    {overview.activeAlerts.length === 0 ? "Healthy" : "Degraded"}
+                  </span>
                 </div>
+                {overview.activeAlerts.length > 0 && (
+                  <div className="text-[13px] text-[#e7000b] flex items-center gap-1.5 font-medium">
+                    <AlertCircle className="w-3.5 h-3.5" /> {overview.activeAlerts.length} active alerts
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      <section>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Markets</h2>
+            </div>
+            <div className="grid gap-3">
+              {overview.byMarket.map((m) => (
+                <Card key={m.marketCode} className="p-5 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-[12px] bg-[#f5f5f5] flex items-center justify-center text-[12px] font-semibold tracking-widest uppercase text-foreground">
+                      {m.marketCode.substring(0, 2)}
+                    </div>
+                    <div>
+                      <div className="text-[16px] font-medium text-foreground">{m.marketCode}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[20px] font-semibold tracking-tight leading-none text-foreground mb-1">{m.eligibleVariants.toLocaleString()}</div>
+                    <div className="text-muted-foreground text-[12px]">eligible of {m.totalVariants.toLocaleString()}</div>
+                  </div>
+                </Card>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Recent Sync Runs</CardTitle>
-            <Link href="/runs" className="text-sm text-primary flex items-center hover:underline">
-              View all <ArrowRight className="w-4 h-4 ml-1" />
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {overview.recentRuns.slice(0, 5).map(run => (
-                <Link key={run.id} href={`/runs/${run.id}`} className="flex items-center justify-between group p-2 hover:bg-muted/50 rounded-md transition-colors -mx-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm capitalize">{run.runType}</span>
-                      <StatusBadge status={run.status} />
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Recent Syncs</h2>
+              <Link href="/runs" className="text-[13px] text-foreground font-medium hover:underline underline-offset-4">
+                View all history
+              </Link>
+            </div>
+            <div className="grid gap-3">
+              {overview.recentRuns.slice(0, 4).map(run => (
+                <Link key={run.id} href={`/runs/${run.id}`} className="block group">
+                  <Card className="p-5 flex items-center justify-between group-hover:border-[#0a0a0a] transition-colors cursor-pointer">
+                    <div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[16px] font-medium text-foreground capitalize">{run.runType}</span>
+                        <StatusBadge status={run.status} />
+                      </div>
+                      <div className="text-[13px] text-muted-foreground mt-1">
+                        {format(new Date(run.startedAt), "MMM d, HH:mm")}
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {format(new Date(run.startedAt), "MMM d, HH:mm")}
+                    <div className="text-right">
+                      <div className="text-[20px] font-semibold tracking-tight leading-none text-foreground mb-1">{run.recordsChanged}</div>
+                      <div className="text-[12px] text-muted-foreground">records</div>
                     </div>
-                  </div>
-                  <div className="text-right text-sm">
-                    <div className="font-mono text-muted-foreground">{run.recordsChanged} changed</div>
-                    {run.errors ? <div className="text-destructive font-medium">{run.errors} errors</div> : null}
-                  </div>
+                  </Card>
                 </Link>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
+      </section>
       
-      <div className="text-xs text-muted-foreground font-mono bg-muted p-4 rounded-lg flex flex-wrap gap-4">
-        <div>Last Full Sync: {overview.feedHealth.lastFullSync ? format(new Date(overview.feedHealth.lastFullSync), "yyyy-MM-dd HH:mm:ss") : 'Never'}</div>
-        <div>Last Google Push: {overview.feedHealth.lastGooglePush ? format(new Date(overview.feedHealth.lastGooglePush), "yyyy-MM-dd HH:mm:ss") : 'Never'}</div>
-        <div>Last Meta Push: {overview.feedHealth.lastMetaPush ? format(new Date(overview.feedHealth.lastMetaPush), "yyyy-MM-dd HH:mm:ss") : 'Never'}</div>
-      </div>
+      <section className="border-t border-border pt-6 pb-8">
+        <div className="flex flex-wrap gap-8 text-[11px] font-semibold tracking-widest uppercase text-muted-foreground">
+          <div>LAST FULL SYNC: <span className="text-foreground">{overview.feedHealth.lastFullSync ? format(new Date(overview.feedHealth.lastFullSync), "yyyy-MM-dd HH:mm") : 'NEVER'}</span></div>
+          <div>LAST GOOGLE PUSH: <span className="text-foreground">{overview.feedHealth.lastGooglePush ? format(new Date(overview.feedHealth.lastGooglePush), "yyyy-MM-dd HH:mm") : 'NEVER'}</span></div>
+          <div>LAST META PUSH: <span className="text-foreground">{overview.feedHealth.lastMetaPush ? format(new Date(overview.feedHealth.lastMetaPush), "yyyy-MM-dd HH:mm") : 'NEVER'}</span></div>
+        </div>
+      </section>
     </div>
   );
 }

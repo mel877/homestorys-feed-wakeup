@@ -60,12 +60,19 @@ router.post("/sync/full", (req, res) => {
         const { runGoogleExport } = await import("../exporters/google/runner");
         const { runMetaExport } = await import("../exporters/meta/generator");
         const { fetchAndStoreDiagnostics } = await import("../exporters/google/diagnostics");
+        const { withExportLock } = await import("../exporters/export-lock");
         const runId = await runFullSync();
-        await runGoogleExport({ syncRunId: runId }).catch((err) =>
-          logger.error({ err }, "Google re-export failed after full sync"),
-        );
-        await runMetaExport({ syncRunId: runId }).catch((err) =>
-          logger.error({ err }, "Meta re-export failed after full sync"),
+        // Serialized behind the shared feed-export lock (never overlaps a
+        // standalone export publish).
+        await withExportLock(async () => {
+          await runGoogleExport({ syncRunId: runId }).catch((err) =>
+            logger.error({ err }, "Google re-export failed after full sync"),
+          );
+          await runMetaExport({ syncRunId: runId }).catch((err) =>
+            logger.error({ err }, "Meta re-export failed after full sync"),
+          );
+        }).catch((err) =>
+          logger.error({ err }, "Feed export lock not acquired after full sync"),
         );
         // Reconcile Merchant Center diagnostics after Google export
         // (identical to the scheduler path — all trigger paths must behave the same)

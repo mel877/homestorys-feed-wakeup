@@ -226,7 +226,11 @@ function isMetafieldNode(n: BulkNode): boolean {
 function isImageNode(n: BulkNode): boolean {
   return (
     !!n.__parentId &&
-    (n.id.includes("/MediaImage/") || n.id.includes("/Image/"))
+    // Shopify bulk op emits product images as gid://shopify/ProductImage/...
+    // (not /Image/ or /MediaImage/ which were older patterns).
+    (n.id.includes("/ProductImage/") ||
+      n.id.includes("/MediaImage/") ||
+      n.id.includes("/Image/"))
   );
 }
 

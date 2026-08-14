@@ -27,7 +27,8 @@ export type SyncRunType =
   | "prices"
   | "recommendations"
   | "webhook"
-  | "product";
+  | "product"
+  | "export";
 
 export class SyncRunTracker {
   private runId: string | null = null;

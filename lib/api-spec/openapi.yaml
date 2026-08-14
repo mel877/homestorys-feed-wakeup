@@ -639,7 +639,7 @@ components:
       properties:
         runType:
           type: string
-          enum: [full, inventory, prices, recommendations]
+          enum: [full, inventory, prices, recommendations, export]
 
     SyncTriggerResult:
       type: object

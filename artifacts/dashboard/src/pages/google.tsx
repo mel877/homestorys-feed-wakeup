@@ -15,86 +15,87 @@ export default function Google() {
   const { lastPushAt, diagnosticsSummary, byMarket, recentDiagnostics } = status;
 
   return (
-    <div className="p-8 space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between">
+    <div className="space-y-[100px]">
+      <section className="flex flex-col md:flex-row md:items-center justify-between gap-8 pt-8">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Globe2 className="w-8 h-8 text-primary" /> Google Merchant Center
-          </h1>
-          <p className="text-muted-foreground mt-1">Status of feeds pushed via Content API</p>
+          <h1 className="text-[72px] font-normal leading-[1.1] tracking-[-2.16px] text-primary">Google Channel</h1>
+          <p className="text-[18px] text-muted-foreground mt-4 max-w-2xl">
+            Merchant Center sync status, market distribution, and diagnostics.
+          </p>
         </div>
-        <div className="text-right">
-          <div className="text-sm font-medium">Last Push</div>
-          <div className="text-sm font-mono text-muted-foreground">
+        <div className="text-right shrink-0 bg-white p-4 rounded-[14px] shadow-shade-inset border border-border">
+          <div className="mono-label text-muted-foreground uppercase mb-1">Last API Push</div>
+          <div className="text-[20px] font-mono text-primary tracking-[-0.2px]">
             {lastPushAt ? format(new Date(lastPushAt), "yyyy-MM-dd HH:mm:ss") : 'Never'}
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Total Issues</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold font-mono">{diagnosticsSummary.total.toLocaleString()}</div>
-          </CardContent>
-        </Card>
-        
-        <Card className="md:col-span-2">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">By Severity</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-6">
-              {diagnosticsSummary.bySeverity.map(sev => {
-                let color = "text-blue-600";
-                let Icon = Info;
-                if (sev.severity === "error") { color = "text-destructive"; Icon = AlertTriangle; }
-                if (sev.severity === "warning") { color = "text-yellow-600"; Icon = Clock; }
-                
-                return (
-                  <div key={sev.severity} className="flex items-center gap-2">
-                    <Icon className={`w-5 h-5 ${color}`} />
-                    <div>
-                      <div className="text-2xl font-bold font-mono">{sev.count.toLocaleString()}</div>
-                      <div className="text-xs text-muted-foreground capitalize">{sev.severity}</div>
+      <section>
+        <h2 className="mono-label text-muted-foreground mb-6 uppercase">Health Overview</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-[10px]">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="mono-label text-muted-foreground uppercase text-sm">Total Issues</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-primary">
+                {diagnosticsSummary.total.toLocaleString()}
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card className="md:col-span-2">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="mono-label text-muted-foreground uppercase text-sm">By Severity</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-12 mt-2">
+                {diagnosticsSummary.bySeverity.map(sev => {
+                  let color = "text-primary";
+                  if (sev.severity === "error") color = "text-destructive";
+                  if (sev.severity === "warning") color = "text-yellow-600";
+                  
+                  return (
+                    <div key={sev.severity}>
+                      <div className={`text-[32px] tracking-[-0.96px] ${color}`}>
+                        {sev.count.toLocaleString()}
+                      </div>
+                      <div className="text-[14px] text-muted-foreground uppercase mono-label mt-1">{sev.severity}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      <section>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-[100px]">
+          <div className="md:col-span-1">
+            <h2 className="mono-label text-muted-foreground mb-6 uppercase">By Market</h2>
+            <div className="grid gap-[10px]">
+              {byMarket.map(m => (
+                <Card key={m.marketCode} className="p-4 flex items-center justify-between bg-white border border-border shadow-none rounded-[14px]">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-[9px] bg-bone flex items-center justify-center font-mono text-[14px] text-primary">
+                      {m.marketCode}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="md:col-span-1">
-          <CardHeader>
-            <CardTitle>By Market</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {byMarket.map(m => (
-                <div key={m.marketCode} className="flex justify-between items-center border-b pb-2 last:border-0">
-                  <div className="font-mono font-medium px-2 py-1 bg-secondary rounded text-sm">{m.marketCode}</div>
                   <div className="text-right">
-                    <div className="text-sm font-mono">{m.totalItems.toLocaleString()} items</div>
-                    <div className={`text-xs ${m.activeIssues > 0 ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+                    <div className="text-[20px] tracking-[-0.2px]">{m.totalItems.toLocaleString()}</div>
+                    <div className={`text-[12px] font-mono mt-1 ${m.activeIssues > 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
                       {m.activeIssues} issues
                     </div>
                   </div>
-                </div>
+                </Card>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle>Top Diagnostics</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
+          <div className="md:col-span-2">
+            <h2 className="mono-label text-muted-foreground mb-6 uppercase">Top Diagnostics</h2>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -109,14 +110,14 @@ export default function Google() {
                   <TableRow key={diag.id}>
                     <TableCell>
                       {diag.severity === 'error' ? (
-                        <span className="px-2 py-0.5 bg-destructive/10 text-destructive text-xs rounded uppercase font-medium">Error</span>
+                        <span className="px-2 py-1 bg-red-50 border border-red-200 text-red-700 text-[12px] font-mono rounded-[2px] uppercase">Error</span>
                       ) : (
-                        <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded uppercase font-medium">Warning</span>
+                        <span className="px-2 py-1 bg-yellow-50 border border-yellow-200 text-yellow-700 text-[12px] font-mono rounded-[2px] uppercase">Warning</span>
                       )}
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{diag.issueType}</TableCell>
-                    <TableCell className="text-sm max-w-sm truncate" title={diag.message}>{diag.message}</TableCell>
-                    <TableCell className="font-mono text-xs">{diag.marketCode || '--'}</TableCell>
+                    <TableCell className="font-mono text-[12px]">{diag.issueType}</TableCell>
+                    <TableCell className="text-[14px] max-w-[300px] truncate" title={diag.message}>{diag.message}</TableCell>
+                    <TableCell className="font-mono text-[14px]">{diag.marketCode || '--'}</TableCell>
                   </TableRow>
                 ))}
                 {recentDiagnostics.length === 0 && (
@@ -126,9 +127,9 @@ export default function Google() {
                 )}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

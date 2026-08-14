@@ -379,6 +379,12 @@ export async function syncMarketPricing(
   const BATCH_SIZE = 200;
   const rows: (typeof marketVariantsTable.$inferInsert)[] = [];
 
+  // Build a code → marketEntry lookup once (avoids O(n) search inside the hot loop).
+  const marketEntryByCode = new Map<string, { code: string; market: ShopifyMarket }>();
+  for (const entry of marketMapping.values()) {
+    marketEntryByCode.set(entry.code, entry);
+  }
+
   for (const [variantGid, base] of basePrices) {
     const variantDbId = variantDbIdMap.get(variantGid);
     if (!variantDbId) continue; // Not yet synced
@@ -386,7 +392,7 @@ export async function syncMarketPricing(
     tracker.bumpRead();
 
     for (const marketCode of marketCodes) {
-      const marketEntry = [...marketMapping.values()].find((m) => m.code === marketCode);
+      const marketEntry = marketEntryByCode.get(marketCode);
       const override = priceListOverrides.get(marketCode)?.get(variantGid);
 
       const finalPrice = override?.price ?? base.price;
@@ -447,8 +453,13 @@ async function flushMarketVariantBatch(
         updatedAt: new Date(),
       },
     })
+    .then(() => {
+      // Batch succeeded — count once here.
+      tracker.bumpChanged(rows.length);
+    })
     .catch(async () => {
-      // Fallback: upsert one-by-one if batch fails
+      // Fallback: upsert one-by-one if batch fails.
+      // Only bumpChanged per successful row — do NOT call bumpChanged(rows.length) again.
       for (const row of rows) {
         try {
           await db
@@ -471,6 +482,4 @@ async function flushMarketVariantBatch(
         }
       }
     });
-
-  tracker.bumpChanged(rows.length);
 }

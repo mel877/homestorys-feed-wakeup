@@ -15,124 +15,122 @@ export default function Inventory() {
   const { byLocation, byAvailability, showroomStock, totalVariants, inStockVariants, outOfStockVariants } = data;
 
   return (
-    <div className="p-8 space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between">
+    <div className="space-y-[100px]">
+      <section className="flex flex-col md:flex-row md:items-center justify-between gap-8 pt-8">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Boxes className="w-8 h-8 text-primary" /> Inventory Network
-          </h1>
-          <p className="text-muted-foreground mt-1">Stock distribution across fulfillment locations</p>
+          <h1 className="text-[72px] font-normal leading-[1.1] tracking-[-2.16px] text-primary">Inventory</h1>
+          <p className="text-[18px] text-muted-foreground mt-4 max-w-2xl">
+            Stock distribution across fulfillment locations.
+          </p>
         </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm text-muted-foreground">Tracked Variants</CardTitle>
-            <Package className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold font-mono">{totalVariants?.toLocaleString() || '--'}</div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm text-muted-foreground">In Stock</CardTitle>
-            <CheckCircle2 className="w-4 h-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold font-mono text-green-600">{inStockVariants?.toLocaleString() || '--'}</div>
-            <p className="text-xs text-muted-foreground mt-1">Variants with {'>'}0 qty</p>
-          </CardContent>
-        </Card>
+      <section>
+        <h2 className="mono-label text-muted-foreground mb-6 uppercase">Network Health</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-[10px]">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="mono-label text-muted-foreground uppercase text-sm">Tracked Variants</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-primary">
+                {totalVariants?.toLocaleString() || '--'}
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="mono-label text-muted-foreground uppercase text-sm">In Stock</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-green-600">
+                {inStockVariants?.toLocaleString() || '--'}
+              </div>
+              <p className="text-[14px] text-muted-foreground mt-2">Variants with {'>'}0 qty</p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm text-muted-foreground">Out of Stock</CardTitle>
-            <XCircle className="w-4 h-4 text-destructive" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold font-mono text-destructive">{outOfStockVariants?.toLocaleString() || '--'}</div>
-            <p className="text-xs text-muted-foreground mt-1">Variants with 0 qty</p>
-          </CardContent>
-        </Card>
-      </div>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="mono-label text-muted-foreground uppercase text-sm">Out of Stock</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-destructive">
+                {outOfStockVariants?.toLocaleString() || '--'}
+              </div>
+              <p className="text-[14px] text-muted-foreground mt-2">Variants with 0 qty</p>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>By Location</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
+      <section>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-[100px]">
+          <div className="lg:col-span-2">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="mono-label text-muted-foreground uppercase">By Location</h2>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Location</TableHead>
                   <TableHead>ID</TableHead>
-                  <TableHead className="text-right">Variants Stored</TableHead>
+                  <TableHead className="text-right">Variants</TableHead>
                   <TableHead className="text-right">Total Units</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {byLocation.map(loc => (
                   <TableRow key={loc.shopifyLocationId}>
-                    <TableCell className="font-medium flex items-center gap-2">
-                      <MapPin className="w-4 h-4 text-muted-foreground" />
-                      {loc.locationName}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{loc.shopifyLocationId}</TableCell>
-                    <TableCell className="text-right font-mono">{loc.variantCount.toLocaleString()}</TableCell>
-                    <TableCell className="text-right font-mono font-medium">{loc.totalUnits.toLocaleString()}</TableCell>
+                    <TableCell className="text-[14px]">{loc.locationName}</TableCell>
+                    <TableCell className="font-mono text-[12px] text-muted-foreground">{loc.shopifyLocationId.substring(loc.shopifyLocationId.length - 12)}</TableCell>
+                    <TableCell className="text-right font-mono text-[14px]">{loc.variantCount.toLocaleString()}</TableCell>
+                    <TableCell className="text-right font-mono font-medium text-[14px]">{loc.totalUnits.toLocaleString()}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
+          </div>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>By Status</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
+          <div className="space-y-[100px]">
+            <div>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="mono-label text-muted-foreground uppercase">By Status</h2>
+              </div>
+              <div className="grid gap-[10px]">
                 {byAvailability.map(avail => (
-                  <div key={avail.availability} className="flex justify-between items-center border-b border-border/50 pb-3 last:border-0 last:pb-0">
+                  <Card key={avail.availability} className="p-4 flex items-center justify-between bg-white border border-border shadow-none rounded-[14px]">
                     <StatusBadge status={avail.availability} />
-                    <div className="font-mono font-medium">{avail.count.toLocaleString()}</div>
-                  </div>
+                    <div className="font-mono text-[20px] tracking-[-0.2px] text-primary">{avail.count.toLocaleString()}</div>
+                  </Card>
                 ))}
               </div>
-            </CardContent>
-          </Card>
+            </div>
 
-          {showroomStock && (
-            <Card className="bg-primary/5 border-primary/20">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-primary">
-                  <MapPin className="w-5 h-5" />
-                  Showroom Highlight
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-lg font-medium mb-1">{showroomStock.locationName}</div>
-                <div className="grid grid-cols-2 gap-4 mt-4">
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Variants</div>
-                    <div className="font-mono text-xl">{showroomStock.variantCount.toLocaleString()}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-1">Total Units</div>
-                    <div className="font-mono text-xl">{showroomStock.totalUnits.toLocaleString()}</div>
-                  </div>
+            {showroomStock && (
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="mono-label text-muted-foreground uppercase text-primary">Showroom Highlight</h2>
                 </div>
-              </CardContent>
-            </Card>
-          )}
+                <Card className="bg-bone border-transparent shadow-none p-6">
+                  <div className="text-[24px] tracking-[-0.24px] text-primary mb-6">{showroomStock.locationName}</div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="mono-label text-muted-foreground mb-1 uppercase">Variants</div>
+                      <div className="font-mono text-[24px] tracking-[-0.24px] text-primary">{showroomStock.variantCount.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="mono-label text-muted-foreground mb-1 uppercase">Total Units</div>
+                      <div className="font-mono text-[24px] tracking-[-0.24px] text-primary">{showroomStock.totalUnits.toLocaleString()}</div>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

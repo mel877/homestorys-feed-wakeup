@@ -16,8 +16,6 @@ export default function Runs() {
   const [pollingUntil, setPollingUntil] = useState<number | null>(null);
   const limit = 20;
 
-  // Poll every 3s for up to 45s after a sync is dispatched so the launched run
-  // becomes visible without requiring a manual refresh.
   const isPolling = pollingUntil !== null && Date.now() < pollingUntil;
   const pollingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -27,7 +25,6 @@ export default function Runs() {
     { query: { queryKey: getListSyncRunsQueryKey(queryParams), refetchInterval: isPolling ? 3000 : false } },
   );
 
-  // Stop polling once a running row is visible or the deadline passes.
   useEffect(() => {
     if (!isPolling) return;
     const hasRunning = runsData?.items.some(r => r.status === "running");
@@ -41,7 +38,6 @@ export default function Runs() {
     triggerSync.mutate({ data: { runType: type } }, {
       onSuccess: () => {
         toast({ title: "Sync Dispatched", description: `${type} sync is running in the background.` });
-        // Poll the runs list for 45s so the new run appears automatically.
         setPollingUntil(Date.now() + 45_000);
         if (pollingTimerRef.current) clearTimeout(pollingTimerRef.current);
         pollingTimerRef.current = setTimeout(() => setPollingUntil(null), 45_000);
@@ -54,50 +50,48 @@ export default function Runs() {
   };
 
   return (
-    <div className="p-8 space-y-6 max-w-7xl mx-auto">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="space-y-[100px]">
+      <section className="flex flex-col md:flex-row md:items-center justify-between gap-8 pt-8">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Sync Runs</h1>
-          <p className="text-muted-foreground mt-1">History of data ingestion and processing</p>
+          <h1 className="text-[72px] font-normal leading-[1.1] tracking-[-2.16px] text-primary">Sync Runs</h1>
+          <p className="text-[18px] text-muted-foreground mt-4 max-w-2xl">
+            Pipeline history, ingestion logs, and processing tasks.
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => handleManualSync('prices')} disabled={triggerSync.isPending}>
-            <Play className="w-4 h-4 mr-2" /> Prices
+        <div className="flex flex-wrap items-center gap-4 shrink-0">
+          <Button variant="outline" size="sm" onClick={() => handleManualSync('inventory')} disabled={triggerSync.isPending}>
+            Inventory
           </Button>
-          <Button variant="outline" onClick={() => handleManualSync('inventory')} disabled={triggerSync.isPending}>
-            <Play className="w-4 h-4 mr-2" /> Inventory
+          <Button variant="outline" size="sm" onClick={() => handleManualSync('prices')} disabled={triggerSync.isPending}>
+            Prices
           </Button>
-          <Button variant="default" onClick={() => handleManualSync('full')} disabled={triggerSync.isPending}>
-            <Play className="w-4 h-4 mr-2" /> Full Sync
+          <Button variant="default" size="sm" onClick={() => handleManualSync('full')} disabled={triggerSync.isPending}>
+            Full Sync
           </Button>
         </div>
-      </div>
+      </section>
 
-      <Card className="p-4 border-b-0 rounded-b-none">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">Type:</span>
-            <Select value={runType} onValueChange={(v) => { setRunType(v); setPage(0); }}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All types</SelectItem>
-                <SelectItem value="full">Full</SelectItem>
-                <SelectItem value="inventory">Inventory</SelectItem>
-                <SelectItem value="prices">Prices</SelectItem>
-                <SelectItem value="recommendations">Recommendations</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+      <section className="space-y-6">
+        <div className="flex flex-wrap gap-4 items-center bg-white p-6 rounded-[14px] shadow-shade-inset border border-border">
+          <div className="mono-label text-muted-foreground uppercase mr-4">Filter by</div>
+          <Select value={runType} onValueChange={(v) => { setRunType(v); setPage(0); }}>
+            <SelectTrigger className="w-[180px] h-10 bg-bone border-transparent shadow-none rounded-[9px]">
+              <SelectValue placeholder="Run Type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="full">Full Sync</SelectItem>
+              <SelectItem value="inventory">Inventory Only</SelectItem>
+              <SelectItem value="prices">Prices Only</SelectItem>
+              <SelectItem value="recommendations">Recommendations</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-      </Card>
 
-      <div className="border rounded-t-none rounded-b-lg overflow-hidden bg-card">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Run ID</TableHead>
+              <TableHead>ID</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Started</TableHead>
@@ -105,7 +99,7 @@ export default function Runs() {
               <TableHead className="text-right">Read</TableHead>
               <TableHead className="text-right">Changed</TableHead>
               <TableHead className="text-right">Errors</TableHead>
-              <TableHead></TableHead>
+              <TableHead className="text-right">Details</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -119,22 +113,22 @@ export default function Runs() {
               </TableRow>
             ) : (
               runsData?.items.map(run => (
-                <TableRow key={run.id} className="hover:bg-muted/50">
-                  <TableCell className="font-mono text-xs">{run.id.substring(0, 8)}</TableCell>
-                  <TableCell className="capitalize">{run.runType}</TableCell>
+                <TableRow key={run.id} className="cursor-pointer" onClick={() => document.getElementById(`link-${run.id}`)?.click()}>
+                  <TableCell className="font-mono text-[12px]">{run.id.substring(0, 8)}</TableCell>
+                  <TableCell className="capitalize text-[14px]">{run.runType}</TableCell>
                   <TableCell><StatusBadge status={run.status} /></TableCell>
-                  <TableCell className="text-sm">{format(new Date(run.startedAt), "MMM d, HH:mm:ss")}</TableCell>
-                  <TableCell className="font-mono text-sm">
+                  <TableCell className="text-[14px] text-muted-foreground">{format(new Date(run.startedAt), "MMM d, HH:mm:ss")}</TableCell>
+                  <TableCell className="font-mono text-[14px]">
                     {run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : '--'}
                   </TableCell>
-                  <TableCell className="text-right font-mono">{run.recordsRead?.toLocaleString() || 0}</TableCell>
-                  <TableCell className="text-right font-mono">{run.recordsChanged?.toLocaleString() || 0}</TableCell>
-                  <TableCell className="text-right font-mono">
+                  <TableCell className="text-right font-mono text-[14px]">{run.recordsRead?.toLocaleString() || 0}</TableCell>
+                  <TableCell className="text-right font-mono text-[14px]">{run.recordsChanged?.toLocaleString() || 0}</TableCell>
+                  <TableCell className="text-right font-mono text-[14px]">
                     {run.errors ? <span className="text-destructive font-medium">{run.errors}</span> : <span className="text-muted-foreground">0</span>}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Link href={`/runs/${run.id}`} className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 w-8">
-                      <Eye className="w-4 h-4" />
+                    <Link id={`link-${run.id}`} href={`/runs/${run.id}`} className="inline-flex items-center justify-center text-muted-foreground hover:text-primary transition-colors h-8 w-8" onClick={e => e.stopPropagation()}>
+                      <Eye className="w-5 h-5" />
                     </Link>
                   </TableCell>
                 </TableRow>
@@ -142,21 +136,21 @@ export default function Runs() {
             )}
           </TableBody>
         </Table>
-      </div>
 
-      <div className="flex items-center justify-between mt-4 text-sm text-muted-foreground">
-        <div>
-          Showing {page * limit + 1} to Math.min((page + 1) * limit, runsData?.total || 0) of {runsData?.total || 0}
+        <div className="flex items-center justify-between text-sm text-muted-foreground mono-label pt-4 border-t border-hairline">
+          <div>
+            SHOWING {page * limit + 1} TO {Math.min((page + 1) * limit, runsData?.total || 0)} OF {runsData?.total || 0}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" className="mono-label !h-8 !px-3" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
+               Prev
+            </Button>
+            <Button variant="ghost" size="sm" className="mono-label !h-8 !px-3" onClick={() => setPage(p => p + 1)} disabled={!runsData || (page + 1) * limit >= runsData.total}>
+              Next 
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
-            <ChevronLeft className="w-4 h-4 mr-1" /> Prev
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setPage(p => p + 1)} disabled={!runsData || (page + 1) * limit >= runsData.total}>
-            Next <ChevronRight className="w-4 h-4 ml-1" />
-          </Button>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }

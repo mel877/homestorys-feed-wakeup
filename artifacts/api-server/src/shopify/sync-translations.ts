@@ -166,7 +166,9 @@ async function syncLocale(
             productTranslationsTable.language,
           ],
           set: {
-            title: title ?? "",
+            // Only overwrite the existing title when a translated title
+            // exists; never wipe a previously-synced title with "".
+            ...(title !== null ? { title } : {}),
             description,
             handle,
             updatedAt: new Date(),
@@ -258,7 +260,9 @@ export async function syncProductTranslations(
           productTranslationsTable.language,
         ],
         set: {
-          title: title ?? "",
+          // Only overwrite the existing title when a translated title exists;
+          // never wipe a previously-synced title with an empty string.
+          ...(title !== null ? { title } : {}),
           description,
           handle,
           updatedAt: new Date(),

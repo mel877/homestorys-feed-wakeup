@@ -13,6 +13,9 @@ const JOB_MAP: Record<string, { jobName: string; runType: SyncRunType }> = {
   inventory: { jobName: "inventory-sync", runType: "inventory" },
   prices: { jobName: "price-sync", runType: "prices" },
   recommendations: { jobName: "recommendations-sync", runType: "recommendations" },
+  // Feed export only (Google + Meta) — regenerates channel feeds from the
+  // already-synced canonical data without re-running the full Shopify sync.
+  export: { jobName: "feed-export", runType: "export" },
 };
 
 const router: IRouter = Router();
@@ -146,13 +149,21 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
           const { runGoogleExport } = await import("../../exporters/google/runner");
           const { runMetaExport } = await import("../../exporters/meta/generator");
           const { fetchAndStoreDiagnostics } = await import("../../exporters/google/diagnostics");
+          const { withExportLock } = await import("../../exporters/export-lock");
           // Complete full-sync pipeline, matching the scheduler exactly.
           runId = await runFullSync();
-          await runGoogleExport({ syncRunId: runId }).catch((err: unknown) =>
-            logger.error({ err, runId }, "Dashboard trigger: Google export failed"),
-          );
-          await runMetaExport({ syncRunId: runId }).catch((err: unknown) =>
-            logger.error({ err, runId }, "Dashboard trigger: Meta export failed"),
+          // Serialized behind the shared feed-export lock (never overlaps a
+          // standalone export publish).
+          const capturedFullRunId = runId;
+          await withExportLock(async () => {
+            await runGoogleExport({ syncRunId: capturedFullRunId }).catch((err: unknown) =>
+              logger.error({ err, runId: capturedFullRunId }, "Dashboard trigger: Google export failed"),
+            );
+            await runMetaExport({ syncRunId: capturedFullRunId }).catch((err: unknown) =>
+              logger.error({ err, runId: capturedFullRunId }, "Dashboard trigger: Meta export failed"),
+            );
+          }).catch((err: unknown) =>
+            logger.error({ err, runId }, "Dashboard trigger: feed export lock not acquired"),
           );
           await fetchAndStoreDiagnostics().catch((err: unknown) =>
             logger.error({ err, runId }, "Dashboard trigger: Google diagnostics reconciliation failed"),
@@ -166,6 +177,35 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
         } else if (runType === "recommendations") {
           const { runRecommendationsSync } = await import("../../jobs/sync-recommendations");
           runId = await runRecommendationsSync();
+        } else if (runType === "export") {
+          const { runGoogleExport } = await import("../../exporters/google/runner");
+          const { runMetaExport } = await import("../../exporters/meta/generator");
+          const { SyncRunTracker } = await import("../../shopify/sync-run-tracker");
+          const tracker = new SyncRunTracker();
+          runId = await tracker.start("export", { trigger: "dashboard" });
+          try {
+            await runGoogleExport({ syncRunId: runId });
+          } catch (err: unknown) {
+            await tracker.logError({
+              errorType: "export_failed",
+              entityType: "channel",
+              entityId: "google",
+              message: err instanceof Error ? err.message : String(err),
+            });
+            logger.error({ err, runId }, "Dashboard trigger: Google export failed");
+          }
+          try {
+            await runMetaExport({ syncRunId: runId });
+          } catch (err: unknown) {
+            await tracker.logError({
+              errorType: "export_failed",
+              entityType: "channel",
+              entityId: "meta",
+              message: err instanceof Error ? err.message : String(err),
+            });
+            logger.error({ err, runId }, "Dashboard trigger: Meta export failed");
+          }
+          await tracker.complete();
         }
 
         logger.info({ job: job.jobName, runId }, "Dashboard trigger: job completed");
