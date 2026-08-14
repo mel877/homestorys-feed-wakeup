@@ -19,7 +19,7 @@ import { requireInternalAuth } from "../middlewares/internal-auth";
 import { requireDashboardAuth } from "./dashboard/auth";
 import { db, feedSnapshotsTable } from "@workspace/db";
 import { ListFeedSnapshotsQueryParams } from "@workspace/api-zod";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and } from "drizzle-orm";
 
 const logger = rootLogger.child({ module: "feed-routes" });
 
@@ -95,6 +95,41 @@ router.get("/feeds/meta/:file", async (req: Request, res: Response) => {
   // Normalise: strip leading "meta-" if provided directly in path
   const storageName = file.startsWith("meta-") ? file : `meta-${file}`;
   await serveFeedFile(`feeds/meta/${storageName}`, "text/csv; charset=utf-8", res);
+});
+
+// ── Google feed routes (public — for GMC file-fetch) ─────────────────────────
+
+/**
+ * GET /feeds/google/market/:market.tsv
+ *
+ * Public, no auth. Google Merchant Center fetches this URL on a schedule.
+ * Returns the current published TSV for the given market (e.g. AT, BE_FR, DE).
+ * Resolves the actual storage path from the feed_snapshots table so the public
+ * URL is stable even if internal storage paths change.
+ */
+router.get("/feeds/google/market/:market", async (req: Request, res: Response): Promise<void> => {
+  const raw = req.params["market"];
+  const market = (Array.isArray(raw) ? raw[0] : raw)?.replace(/\.tsv$/, "").toUpperCase();
+  if (!market || !/^[A-Z0-9_]{2,10}$/.test(market)) {
+    res.status(400).json({ error: "Invalid market code" });
+    return;
+  }
+  const snapshot = await db
+    .select({ storagePath: feedSnapshotsTable.storagePath })
+    .from(feedSnapshotsTable)
+    .where(
+      and(
+        eq(feedSnapshotsTable.channel, "google"),
+        eq(feedSnapshotsTable.marketCode, market),
+        eq(feedSnapshotsTable.isCurrent, true),
+      ),
+    )
+    .limit(1);
+  if (!snapshot[0]) {
+    res.status(404).json({ error: "No current Google feed for this market. Run an export first.", market });
+    return;
+  }
+  await serveFeedFile(snapshot[0].storagePath, "text/tab-separated-values; charset=utf-8", res);
 });
 
 // ── Google debug routes (internal-only) ───────────────────────────────────────

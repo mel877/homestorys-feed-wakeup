@@ -307,33 +307,19 @@ export const GetDashboardProductResponse = zod.object({
  * @summary Google Merchant Center status and diagnostics
  */
 export const GetGoogleStatusResponse = zod.object({
-  "lastPushAt": zod.string().nullable(),
-  "diagnosticsSummary": zod.object({
-  "total": zod.number(),
-  "bySeverity": zod.array(zod.object({
-  "severity": zod.string(),
-  "count": zod.number()
+  "lastGeneratedAt": zod.string().nullable(),
+  "snapshots": zod.array(zod.object({
+  "marketCode": zod.string().nullish(),
+  "language": zod.string().nullish(),
+  "publicUrl": zod.string(),
+  "itemCount": zod.number(),
+  "sha256": zod.string().nullish(),
+  "generatedAt": zod.string()
 })),
-  "byIssueType": zod.array(zod.object({
-  "issueType": zod.string(),
-  "count": zod.number()
-}))
-}),
   "byMarket": zod.array(zod.object({
   "marketCode": zod.string(),
   "totalItems": zod.number(),
-  "activeIssues": zod.number()
-})),
-  "recentDiagnostics": zod.array(zod.object({
-  "id": zod.string(),
-  "channel": zod.string(),
-  "marketCode": zod.string().nullish(),
-  "productIdExternal": zod.string().nullish(),
-  "issueType": zod.string(),
-  "severity": zod.string(),
-  "message": zod.string(),
-  "fetchedAt": zod.string(),
-  "resolvedAt": zod.string().nullish()
+  "eligibleItems": zod.number()
 }))
 })
 

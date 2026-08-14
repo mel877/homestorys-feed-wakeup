@@ -48,9 +48,7 @@ async function main() {
       const icon = stats.published ? "✔" : "⚠";
       console.log(
         `   ${icon} ${market} (${stats.language}/${stats.country}): ${stats.rows} rows` +
-          (stats.published ? ` → ${stats.storagePath}` : " [NOT published]") +
-          (stats.upserted > 0 ? ` | ${stats.upserted} upserted` : "") +
-          (stats.failed > 0 ? ` | ⚠ ${stats.failed} failed` : ""),
+          (stats.published ? ` → ${stats.storagePath} | ${stats.publicUrl}` : " [NOT published]"),
       );
     }
 

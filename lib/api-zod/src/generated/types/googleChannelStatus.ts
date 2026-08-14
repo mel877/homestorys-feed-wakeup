@@ -5,14 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { ChannelDiagnostic } from './channelDiagnostic';
-import type { DiagnosticSummary } from './diagnosticSummary';
-import type { MarketDiagnosticCount } from './marketDiagnosticCount';
+import type { GoogleFeedSnapshot } from './googleFeedSnapshot';
+import type { GoogleMarketStat } from './googleMarketStat';
 
 export interface GoogleChannelStatus {
   /** @nullable */
-  lastPushAt: string | null;
-  diagnosticsSummary: DiagnosticSummary;
-  byMarket: MarketDiagnosticCount[];
-  recentDiagnostics: ChannelDiagnostic[];
+  lastGeneratedAt: string | null;
+  snapshots: GoogleFeedSnapshot[];
+  byMarket: GoogleMarketStat[];
 }

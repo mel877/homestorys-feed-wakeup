@@ -1,88 +1,61 @@
 import { Router, type IRouter } from "express";
-import { db, channelDiagnosticsTable, feedItemsTable, feedSnapshotsTable } from "@workspace/db";
+import { db, feedItemsTable, feedSnapshotsTable } from "@workspace/db";
 import { requireDashboardAuth } from "./auth";
-import { isNull, eq, sql, desc } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 
 const router: IRouter = Router();
 
+/**
+ * GET /dashboard/google/status
+ *
+ * Returns current Google feed file snapshots and per-market feed item counts.
+ * Google Merchant Center fetches these files via public URLs (file-fetch mode) —
+ * no Content API push is performed by the tool.
+ */
 router.get("/dashboard/google/status", requireDashboardAuth, async (_req, res): Promise<void> => {
-  const [lastPush, diagnostics, bySeverity, byType, byMarket, recentDiagnostics] = await Promise.all([
-    // Last Google snapshot
-    db.select({ generatedAt: feedSnapshotsTable.generatedAt })
+  const [snapshots, byMarket] = await Promise.all([
+    // Current published feed files per market
+    db.select()
       .from(feedSnapshotsTable)
-      .where(eq(feedSnapshotsTable.channel, "google"))
-      .orderBy(desc(feedSnapshotsTable.generatedAt))
-      .limit(1),
-    // Total active diagnostics
-    db.select({ count: sql<number>`count(*)::int` })
-      .from(channelDiagnosticsTable)
-      .where(sql`${channelDiagnosticsTable.channel} = 'google' and ${channelDiagnosticsTable.resolvedAt} is null`),
-    // By severity
-    db.select({
-      severity: channelDiagnosticsTable.severity,
-      count: sql<number>`count(*)::int`,
-    }).from(channelDiagnosticsTable)
-      .where(sql`${channelDiagnosticsTable.channel} = 'google' and ${channelDiagnosticsTable.resolvedAt} is null`)
-      .groupBy(channelDiagnosticsTable.severity),
-    // By issue type
-    db.select({
-      issueType: channelDiagnosticsTable.issueType,
-      count: sql<number>`count(*)::int`,
-    }).from(channelDiagnosticsTable)
-      .where(sql`${channelDiagnosticsTable.channel} = 'google' and ${channelDiagnosticsTable.resolvedAt} is null`)
-      .groupBy(channelDiagnosticsTable.issueType)
-      .orderBy(desc(sql`count(*)`)),
-    // By market — item counts from feed items
+      .where(
+        and(
+          eq(feedSnapshotsTable.channel, "google"),
+          eq(feedSnapshotsTable.isCurrent, true),
+        ),
+      )
+      .orderBy(feedSnapshotsTable.marketCode),
+    // Feed item counts per market
     db.select({
       marketCode: feedItemsTable.marketCode,
       totalItems: sql<number>`count(*)::int`,
-      activeIssues: sql<number>`0::int`,
-    }).from(feedItemsTable)
+      eligibleItems: sql<number>`count(*) filter (where ${feedItemsTable.isEligible} = true)::int`,
+    })
+      .from(feedItemsTable)
       .where(eq(feedItemsTable.channel, "google"))
       .groupBy(feedItemsTable.marketCode)
       .orderBy(feedItemsTable.marketCode),
-    // Recent unresolved diagnostics
-    db.select().from(channelDiagnosticsTable)
-      .where(sql`${channelDiagnosticsTable.channel} = 'google' and ${channelDiagnosticsTable.resolvedAt} is null`)
-      .orderBy(desc(channelDiagnosticsTable.fetchedAt))
-      .limit(50),
   ]);
 
-  // Enrich byMarket with active issue counts
-  const issueCountByMarket = new Map<string, number>();
-  const activeByMarket = await db.select({
-    marketCode: channelDiagnosticsTable.marketCode,
-    count: sql<number>`count(*)::int`,
-  }).from(channelDiagnosticsTable)
-    .where(sql`${channelDiagnosticsTable.channel} = 'google' and ${channelDiagnosticsTable.resolvedAt} is null and ${channelDiagnosticsTable.marketCode} is not null`)
-    .groupBy(channelDiagnosticsTable.marketCode);
-
-  for (const row of activeByMarket) {
-    if (row.marketCode) issueCountByMarket.set(row.marketCode, row.count);
-  }
+  const lastGeneratedAt = snapshots.reduce<Date | null>((latest, s) => {
+    if (!s.generatedAt) return latest;
+    if (!latest) return s.generatedAt;
+    return s.generatedAt > latest ? s.generatedAt : latest;
+  }, null);
 
   res.json({
-    lastPushAt: lastPush[0]?.generatedAt?.toISOString() ?? null,
-    diagnosticsSummary: {
-      total: diagnostics[0]?.count ?? 0,
-      bySeverity,
-      byIssueType: byType,
-    },
+    lastGeneratedAt: lastGeneratedAt?.toISOString() ?? null,
+    snapshots: snapshots.map((s) => ({
+      marketCode: s.marketCode ?? null,
+      language: s.language ?? null,
+      publicUrl: `/api/feeds/google/market/${s.marketCode ?? ""}.tsv`,
+      itemCount: s.itemCount ?? 0,
+      sha256: s.sha256 ?? null,
+      generatedAt: s.generatedAt?.toISOString() ?? "",
+    })),
     byMarket: byMarket.map((m) => ({
       marketCode: m.marketCode,
       totalItems: m.totalItems,
-      activeIssues: issueCountByMarket.get(m.marketCode) ?? 0,
-    })),
-    recentDiagnostics: recentDiagnostics.map((d) => ({
-      id: d.id,
-      channel: d.channel,
-      marketCode: d.marketCode ?? null,
-      productIdExternal: d.productIdExternal ?? null,
-      issueType: d.issueType,
-      severity: d.severity,
-      message: d.message,
-      fetchedAt: d.fetchedAt?.toISOString() ?? "",
-      resolvedAt: d.resolvedAt?.toISOString() ?? null,
+      eligibleItems: m.eligibleItems,
     })),
   });
 });

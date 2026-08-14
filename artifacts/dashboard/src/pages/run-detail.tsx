@@ -23,7 +23,7 @@ export default function RunDetail() {
   const { run, errors } = runDetail;
 
   return (
-    <div className="space-y-[100px]">
+    <div className="space-y-8">
       <section className="pt-8">
         <Link href="/runs" className="mono-label text-muted-foreground hover:text-primary inline-flex items-center uppercase mb-6">
           <ArrowLeft className="w-4 h-4 mr-2" /> Back to runs
@@ -31,7 +31,7 @@ export default function RunDetail() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
           <div>
             <div className="flex items-center gap-4">
-              <h1 className="text-[72px] font-normal leading-[1.1] tracking-[-2.16px] text-primary capitalize">{run.runType} Sync</h1>
+              <h1 className="text-[28px] font-bold tracking-tight text-foreground capitalize">{run.runType} Sync</h1>
             </div>
             <p className="mono-label text-muted-foreground mt-4">
               RUN ID: {run.id} <span className="mx-2">•</span> <StatusBadge status={run.status} className="ml-2" />
@@ -125,12 +125,12 @@ export default function RunDetail() {
                     {err.entityType} {err.entityId && <span className="text-muted-foreground font-mono text-[12px] block mt-1">{err.entityId}</span>}
                   </TableCell>
                   <TableCell>
-                    {err.marketCode ? <span className="px-2 py-1 bg-bone text-primary rounded-[2px] text-[12px] font-mono">{err.marketCode}</span> : '--'}
+                    {err.marketCode ? <span className="px-2 py-1 bg-muted text-primary rounded-[2px] text-[12px] font-mono">{err.marketCode}</span> : '--'}
                   </TableCell>
                   <TableCell className="max-w-[400px]">
                     <div className="truncate text-[14px]" title={err.message}>{err.message}</div>
                     {err.details && (
-                      <pre className="text-[12px] mt-2 text-muted-foreground bg-bone p-3 rounded-[9px] overflow-x-auto font-mono">
+                      <pre className="text-[12px] mt-2 text-muted-foreground bg-muted p-3 rounded-[9px] overflow-x-auto font-mono">
                         {JSON.stringify(err.details, null, 2)}
                       </pre>
                     )}

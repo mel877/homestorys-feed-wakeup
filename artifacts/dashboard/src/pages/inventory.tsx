@@ -15,10 +15,10 @@ export default function Inventory() {
   const { byLocation, byAvailability, showroomStock, totalVariants, inStockVariants, outOfStockVariants } = data;
 
   return (
-    <div className="space-y-[100px]">
+    <div className="space-y-8">
       <section className="flex flex-col md:flex-row md:items-center justify-between gap-8 pt-8">
         <div>
-          <h1 className="text-[72px] font-normal leading-[1.1] tracking-[-2.16px] text-primary">Inventory</h1>
+          <h1 className="text-[28px] font-bold tracking-tight text-foreground">Inventory</h1>
           <p className="text-[18px] text-muted-foreground mt-4 max-w-2xl">
             Stock distribution across fulfillment locations.
           </p>
@@ -33,7 +33,7 @@ export default function Inventory() {
               <CardTitle className="mono-label text-muted-foreground uppercase text-sm">Tracked Variants</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-primary">
+              <div className="text-[28px] font-semibold tracking-tight leading-none text-foreground">
                 {totalVariants?.toLocaleString() || '--'}
               </div>
             </CardContent>
@@ -44,7 +44,7 @@ export default function Inventory() {
               <CardTitle className="mono-label text-muted-foreground uppercase text-sm">In Stock</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-green-600">
+              <div className="text-[28px] font-semibold tracking-tight leading-none text-green-600">
                 {inStockVariants?.toLocaleString() || '--'}
               </div>
               <p className="text-[14px] text-muted-foreground mt-2">Variants with {'>'}0 qty</p>
@@ -56,7 +56,7 @@ export default function Inventory() {
               <CardTitle className="mono-label text-muted-foreground uppercase text-sm">Out of Stock</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-destructive">
+              <div className="text-[28px] font-semibold tracking-tight leading-none text-destructive">
                 {outOfStockVariants?.toLocaleString() || '--'}
               </div>
               <p className="text-[14px] text-muted-foreground mt-2">Variants with 0 qty</p>
@@ -66,7 +66,7 @@ export default function Inventory() {
       </section>
 
       <section>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-[100px]">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
             <div className="flex items-center justify-between mb-6">
               <h2 className="mono-label text-muted-foreground uppercase">By Location</h2>
@@ -93,14 +93,14 @@ export default function Inventory() {
             </Table>
           </div>
 
-          <div className="space-y-[100px]">
+          <div className="space-y-8">
             <div>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="mono-label text-muted-foreground uppercase">By Status</h2>
               </div>
               <div className="grid gap-[10px]">
                 {byAvailability.map(avail => (
-                  <Card key={avail.availability} className="p-4 flex items-center justify-between bg-white border border-border shadow-none rounded-[14px]">
+                  <Card key={avail.availability} className="p-4 flex items-center justify-between bg-white border border-border shadow-none rounded-[20px]">
                     <StatusBadge status={avail.availability} />
                     <div className="font-mono text-[20px] tracking-[-0.2px] text-primary">{avail.count.toLocaleString()}</div>
                   </Card>
@@ -113,7 +113,7 @@ export default function Inventory() {
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="mono-label text-muted-foreground uppercase text-primary">Showroom Highlight</h2>
                 </div>
-                <Card className="bg-bone border-transparent shadow-none p-6">
+                <Card className="bg-muted border-transparent shadow-none p-6">
                   <div className="text-[24px] tracking-[-0.24px] text-primary mb-6">{showroomStock.locationName}</div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>

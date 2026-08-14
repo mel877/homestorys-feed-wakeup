@@ -1,100 +1,172 @@
-import React from "react";
+import React, { useState } from "react";
 import { useGetMetaStatus } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Rss, CheckCircle2, Clock, Download } from "lucide-react";
+import { Rss, Copy, Check, ExternalLink, Clock } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { StatusBadge } from "@/components/ui/status-badge";
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        });
+      }}
+      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[6px] border border-border bg-background hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+      title="Copy URL"
+    >
+      {copied ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+/** Derive the public (unauthenticated) feed URL from snapshot fields. */
+function getPublicUrl(language: string, marketCode: string | null | undefined): string {
+  if (marketCode) {
+    return `/api/feeds/meta/country/${marketCode}.csv`;
+  }
+  if (language && language !== "base") {
+    return `/api/feeds/meta/lang/${language}.csv`;
+  }
+  return `/api/feeds/meta/base.csv`;
+}
 
 export default function Meta() {
   const { data: status, isLoading } = useGetMetaStatus();
 
   if (isLoading || !status) {
-    return <div className="p-8">Loading Meta status...</div>;
+    return <div className="p-8 text-muted-foreground text-[14px]">Loading Meta status…</div>;
   }
 
   const { lastPushAt, feeds } = status;
+  const baseUrl = typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.host}`
+    : "";
 
   return (
-    <div className="space-y-[100px]">
-      <section className="flex flex-col md:flex-row md:items-center justify-between gap-8 pt-8">
+    <div className="space-y-8">
+      {/* Page header */}
+      <div className="flex items-start justify-between gap-6">
         <div>
-          <h1 className="text-[72px] font-normal leading-[1.1] tracking-[-2.16px] text-primary">Meta Catalogs</h1>
-          <p className="text-[18px] text-muted-foreground mt-4 max-w-2xl">
-            Language-specific XML feed generation and distribution.
+          <h1 className="text-[24px] font-bold tracking-tight text-foreground">Meta Catalogs</h1>
+          <p className="text-[14px] text-muted-foreground mt-1">
+            Feed files hébergés par l'outil — Meta fetche ces URLs sur un planning.
           </p>
         </div>
-        <div className="text-right shrink-0 bg-white p-4 rounded-[14px] shadow-shade-inset border border-border">
-          <div className="mono-label text-muted-foreground uppercase mb-1">Last Global Sync</div>
-          <div className="text-[20px] font-mono text-primary tracking-[-0.2px]">
-            {lastPushAt ? format(new Date(lastPushAt), "yyyy-MM-dd HH:mm:ss") : 'Never'}
+        <div className="text-right shrink-0">
+          <div className="text-[11px] font-semibold tracking-wider uppercase text-muted-foreground mb-0.5">Dernier export</div>
+          <div className="text-[14px] font-medium text-foreground">
+            {lastPushAt ? format(new Date(lastPushAt), "dd/MM/yyyy HH:mm") : "—"}
           </div>
         </div>
-      </section>
+      </div>
 
-      <section>
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="mono-label text-muted-foreground uppercase">Active Feeds</h2>
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Language / Market</TableHead>
-              <TableHead className="text-right">Items</TableHead>
-              <TableHead>Generated At</TableHead>
-              <TableHead>Freshness</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Link</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {feeds.map((feed, i) => {
-              const generatedDate = new Date(feed.generatedAt);
-              const isStale = Date.now() - generatedDate.getTime() > 24 * 60 * 60 * 1000;
-              
-              return (
-                <TableRow key={i}>
-                  <TableCell className="font-mono text-[14px]">
-                    <span className="font-bold">{feed.language}</span>
-                    {feed.marketCode && <span className="text-muted-foreground"> / {feed.marketCode}</span>}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-[14px] font-medium">
-                    {feed.itemCount.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-[14px] text-muted-foreground">
-                    {format(generatedDate, "MMM d, HH:mm")}
-                  </TableCell>
-                  <TableCell className="text-[14px]">
-                    <span className={isStale ? "text-yellow-600 font-medium flex items-center" : "text-muted-foreground"}>
-                      {isStale && <Clock className="w-3 h-3 mr-1"/>}
-                      {formatDistanceToNow(generatedDate, { addSuffix: true })}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {feed.isCurrent ? (
-                      <StatusBadge status="active" label="Current" />
-                    ) : (
-                      <StatusBadge status="inactive" label="Archived" />
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {feed.downloadUrl && (
-                      <a href={feed.downloadUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-[9px] text-[14px] transition-colors hover:bg-bone hover:text-primary h-8 w-8 text-muted-foreground border border-transparent hover:border-border">
-                        <Download className="w-4 h-4" />
-                      </a>
-                    )}
-                  </TableCell>
+      {/* Setup instructions */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-[13px] font-semibold tracking-tight flex items-center gap-2">
+            <Rss className="w-4 h-4 text-muted-foreground" />
+            Configuration Meta Commerce Manager
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-[13px] text-muted-foreground space-y-2">
+          <p>
+            Dans Commerce Manager, configure chaque catalogue en mode <strong className="text-foreground">URL planifiée</strong>.
+            Copie l'URL publique du flux correspondant et colle-la dans le champ "URL du fichier de données".
+          </p>
+          <p className="text-[12px]">
+            Les fichiers sont mis à jour à chaque export. Planifie le fetch Meta après 03h00 UTC pour avoir les données du sync nocturne.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Feed files table */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-[13px] font-semibold tracking-tight">Fichiers de flux actifs</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {feeds.length === 0 ? (
+            <div className="px-6 py-10 text-center text-[13px] text-muted-foreground">
+              Aucun flux généré. Lance un export depuis la page <strong>Feeds</strong>.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Flux</TableHead>
+                  <TableHead className="text-right">Produits</TableHead>
+                  <TableHead>Généré</TableHead>
+                  <TableHead>Fraîcheur</TableHead>
+                  <TableHead>Statut</TableHead>
+                  <TableHead>URL publique</TableHead>
                 </TableRow>
-              );
-            })}
-            {feeds.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">No active feeds found</TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </section>
+              </TableHeader>
+              <TableBody>
+                {feeds.map((feed, i) => {
+                  const generatedDate = new Date(feed.generatedAt);
+                  const isStale = Date.now() - generatedDate.getTime() > 24 * 60 * 60 * 1000;
+                  const publicPath = getPublicUrl(feed.language, feed.marketCode);
+                  const fullUrl = `${baseUrl}${publicPath}`;
+
+                  return (
+                    <TableRow key={i}>
+                      <TableCell>
+                        <span className="font-mono font-semibold text-[13px]">{feed.language}</span>
+                        {feed.marketCode && (
+                          <span className="text-muted-foreground font-mono text-[13px]"> / {feed.marketCode}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-[13px] font-medium">
+                        {feed.itemCount.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-[13px] text-muted-foreground whitespace-nowrap">
+                        {format(generatedDate, "dd/MM HH:mm")}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`text-[13px] flex items-center gap-1 ${isStale ? "text-amber-600 font-medium" : "text-muted-foreground"}`}>
+                          {isStale && <Clock className="w-3 h-3" />}
+                          {formatDistanceToNow(generatedDate, { addSuffix: true })}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {feed.isCurrent ? (
+                          <StatusBadge status="active" label="Current" />
+                        ) : (
+                          <StatusBadge status="inactive" label="Archived" />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[11px] text-muted-foreground hidden lg:block max-w-[180px] truncate" title={publicPath}>
+                            {publicPath}
+                          </span>
+                          <CopyButton value={fullUrl} />
+                          <a
+                            href={publicPath}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[6px] border border-border bg-background hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                            title="Télécharger le fichier CSV"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            CSV
+                          </a>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

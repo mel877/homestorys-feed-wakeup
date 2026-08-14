@@ -6,8 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface MarketDiagnosticCount {
+export interface GoogleMarketStat {
   marketCode: string;
   totalItems: number;
-  activeIssues: number;
+  eligibleItems: number;
 }

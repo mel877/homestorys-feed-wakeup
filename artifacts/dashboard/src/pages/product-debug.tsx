@@ -46,7 +46,7 @@ export default function ProductDebug() {
               ))}
             </div>
           </div>
-          <div className="text-right text-[12px] text-muted-foreground font-mono bg-card p-4 rounded-[14px] border border-border shrink-0 shadow-sm">
+          <div className="text-right text-[12px] text-muted-foreground font-mono bg-card p-4 rounded-[20px] border border-border shrink-0 shadow-sm">
             <div className="mb-1 text-foreground">ID: {product.id}</div>
             <div className="mb-1">GID: {product.shopifyGid}</div>
             <div>CREATED: {product.createdAt ? format(new Date(product.createdAt), "yyyy-MM-dd HH:mm") : '--'}</div>
@@ -151,7 +151,7 @@ export default function ProductDebug() {
             <TabsContent value="images" className="mt-0">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                 {images.map((img, i) => (
-                  <Card key={img.id || i} className="overflow-hidden border-border bg-card shadow-sm p-0 rounded-[14px]">
+                  <Card key={img.id || i} className="overflow-hidden border-border bg-card shadow-sm p-0 rounded-[20px]">
                     <div className="aspect-square bg-muted flex items-center justify-center relative group p-4">
                       {img.url ? (
                         <img src={img.url} alt={`Product ${i}`} className="max-w-full max-h-full object-contain mix-blend-multiply" loading="lazy" />

@@ -953,90 +953,48 @@ components:
     GoogleChannelStatus:
       type: object
       required:
-        - lastPushAt
-        - diagnosticsSummary
+        - lastGeneratedAt
+        - snapshots
         - byMarket
-        - recentDiagnostics
       properties:
-        lastPushAt:
+        lastGeneratedAt:
           type: ["string", "null"]
-        diagnosticsSummary:
-          $ref: "#/components/schemas/DiagnosticSummary"
+        snapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/GoogleFeedSnapshot"
         byMarket:
           type: array
           items:
-            $ref: "#/components/schemas/MarketDiagnosticCount"
-        recentDiagnostics:
-          type: array
-          items:
-            $ref: "#/components/schemas/ChannelDiagnostic"
+            $ref: "#/components/schemas/GoogleMarketStat"
 
-    DiagnosticSummary:
+    GoogleFeedSnapshot:
       type: object
-      required: [total, bySeverity, byIssueType]
+      required: [publicUrl, itemCount, generatedAt]
       properties:
-        total:
-          type: number
-        bySeverity:
-          type: array
-          items:
-            $ref: "#/components/schemas/DiagnosticSeverityCount"
-        byIssueType:
-          type: array
-          items:
-            $ref: "#/components/schemas/DiagnosticTypeCount"
-
-    DiagnosticSeverityCount:
-      type: object
-      required: [severity, count]
-      properties:
-        severity:
+        marketCode:
+          type: ["string", "null"]
+        language:
+          type: ["string", "null"]
+        publicUrl:
           type: string
-        count:
+        itemCount:
           type: number
-
-    DiagnosticTypeCount:
-      type: object
-      required: [issueType, count]
-      properties:
-        issueType:
+        sha256:
+          type: ["string", "null"]
+        generatedAt:
           type: string
-        count:
-          type: number
 
-    MarketDiagnosticCount:
+    GoogleMarketStat:
       type: object
-      required: [marketCode, totalItems, activeIssues]
+      required: [marketCode, totalItems, eligibleItems]
       properties:
         marketCode:
           type: string
         totalItems:
           type: number
-        activeIssues:
+        eligibleItems:
           type: number
-
-    ChannelDiagnostic:
-      type: object
-      required: [id, channel, issueType, severity, message, fetchedAt]
-      properties:
-        id:
-          type: string
-        channel:
-          type: string
-        marketCode:
-          type: ["string", "null"]
-        productIdExternal:
-          type: ["string", "null"]
-        issueType:
-          type: string
-        severity:
-          type: string
-        message:
-          type: string
-        fetchedAt:
-          type: string
-        resolvedAt:
-          type: ["string", "null"]
 
     # ── Meta ───────────────────────────────────────────────────────────────────
     MetaChannelStatus:

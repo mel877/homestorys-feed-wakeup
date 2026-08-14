@@ -131,4 +131,14 @@
     color: var(--muted-foreground);
     pointer-events: none;
   }
+
+  /* Budget Pro AI — section / field label style */
+  .mono-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    font-family: var(--font-sans);
+    color: var(--muted-foreground);
+  }
 }

@@ -317,49 +317,29 @@ export interface ProductDebug {
   recommendations: RecommendationDetail[];
 }
 
-export interface DiagnosticSeverityCount {
-  severity: string;
-  count: number;
-}
-
-export interface DiagnosticTypeCount {
-  issueType: string;
-  count: number;
-}
-
-export interface DiagnosticSummary {
-  total: number;
-  bySeverity: DiagnosticSeverityCount[];
-  byIssueType: DiagnosticTypeCount[];
-}
-
-export interface MarketDiagnosticCount {
-  marketCode: string;
-  totalItems: number;
-  activeIssues: number;
-}
-
-export interface ChannelDiagnostic {
-  id: string;
-  channel: string;
+export interface GoogleFeedSnapshot {
   /** @nullable */
   marketCode?: string | null;
   /** @nullable */
-  productIdExternal?: string | null;
-  issueType: string;
-  severity: string;
-  message: string;
-  fetchedAt: string;
+  language?: string | null;
+  publicUrl: string;
+  itemCount: number;
   /** @nullable */
-  resolvedAt?: string | null;
+  sha256?: string | null;
+  generatedAt: string;
+}
+
+export interface GoogleMarketStat {
+  marketCode: string;
+  totalItems: number;
+  eligibleItems: number;
 }
 
 export interface GoogleChannelStatus {
   /** @nullable */
-  lastPushAt: string | null;
-  diagnosticsSummary: DiagnosticSummary;
-  byMarket: MarketDiagnosticCount[];
-  recentDiagnostics: ChannelDiagnostic[];
+  lastGeneratedAt: string | null;
+  snapshots: GoogleFeedSnapshot[];
+  byMarket: GoogleMarketStat[];
 }
 
 export interface MetaFeedStatus {

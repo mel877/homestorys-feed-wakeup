@@ -18,10 +18,10 @@ export default function DataQuality() {
   });
 
   return (
-    <div className="space-y-[100px]">
+    <div className="space-y-8">
       <section className="flex flex-col md:flex-row md:items-center justify-between gap-8 pt-8">
         <div>
-          <h1 className="text-[72px] font-normal leading-[1.1] tracking-[-2.16px] text-primary">Data Quality</h1>
+          <h1 className="text-[28px] font-bold tracking-tight text-foreground">Data Quality</h1>
           <p className="text-[18px] text-muted-foreground mt-4 max-w-2xl">
             Algorithmic scoring of product content and imagery.
           </p>
@@ -29,10 +29,10 @@ export default function DataQuality() {
       </section>
 
       <section className="space-y-6">
-        <div className="flex flex-wrap gap-4 items-center bg-white p-6 rounded-[14px] shadow-shade-inset border border-border">
+        <div className="flex flex-wrap gap-4 items-center bg-white p-6 rounded-[20px]  border border-border">
           <div className="mono-label text-muted-foreground uppercase mr-4">Filter by</div>
           <Select value={market} onValueChange={setMarket}>
-            <SelectTrigger className="w-[180px] h-10 bg-bone border-transparent shadow-none rounded-[9px]">
+            <SelectTrigger className="w-[180px] h-10 bg-muted border-transparent shadow-none rounded-[9px]">
               <SelectValue placeholder="Market" />
             </SelectTrigger>
             <SelectContent>
@@ -44,7 +44,7 @@ export default function DataQuality() {
             </SelectContent>
           </Select>
           <Select value={threshold} onValueChange={setThreshold}>
-            <SelectTrigger className="w-[180px] h-10 bg-bone border-transparent shadow-none rounded-[9px]">
+            <SelectTrigger className="w-[180px] h-10 bg-muted border-transparent shadow-none rounded-[9px]">
               <SelectValue placeholder="Threshold" />
             </SelectTrigger>
             <SelectContent>
@@ -66,7 +66,7 @@ export default function DataQuality() {
                   <CardTitle className="mono-label text-muted-foreground uppercase text-sm">Average Score</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-primary">
+                  <div className="text-[28px] font-semibold tracking-tight leading-none text-foreground">
                     {data.avgScore !== null ? data.avgScore.toFixed(1) : '--'}
                   </div>
                 </CardContent>
@@ -77,7 +77,7 @@ export default function DataQuality() {
                   <CardTitle className="mono-label text-muted-foreground uppercase text-sm">Scored Variants</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-primary">
+                  <div className="text-[28px] font-semibold tracking-tight leading-none text-foreground">
                     {data.totalVariants.toLocaleString()}
                   </div>
                 </CardContent>
@@ -90,7 +90,7 @@ export default function DataQuality() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-[48px] leading-[1.15] tracking-[-1.44px] text-destructive">
+                  <div className="text-[28px] font-semibold tracking-tight leading-none text-destructive">
                     {data.variantsBelowThreshold.toLocaleString()}
                   </div>
                   <p className="text-[14px] text-muted-foreground mt-2">Needs attention</p>
@@ -98,7 +98,7 @@ export default function DataQuality() {
               </Card>
             </div>
 
-            <Card className="bg-bone border-transparent shadow-none p-8">
+            <Card className="bg-muted border-transparent shadow-none p-8">
               <CardHeader className="px-0 pt-0">
                 <CardTitle className="mono-label text-muted-foreground uppercase">Score Distribution</CardTitle>
               </CardHeader>

@@ -390,7 +390,7 @@ export function selectGoogleImages(
   primaryOverrideUrl?: string | null,
   lifestyleOverrideUrl?: string | null,
 ): { primary: ClassifiedImage | null; lifestyle: ClassifiedImage | null; additional: ClassifiedImage[] } {
-  const valid = images.filter((i) => i.imageType !== "invalid");
+  const valid = images.filter((i) => i.imageType !== "invalid" && !isFabricImage(i));
 
   // Primary override
   let primary: ClassifiedImage | null = null;
@@ -423,6 +423,44 @@ export function selectGoogleImages(
   return { primary, lifestyle, additional };
 }
 
+// ── Fabric / swatch image guard ───────────────────────────────────────────────
+
+/**
+ * Returns true when an image is a fabric or material swatch — never a product
+ * photo suitable for channel feeds.
+ *
+ * Detection strategy (any match → fabric):
+ *   • URL contains fabric-related path segments or keywords.
+ *   • Alt text matches the Shopify fabric-swatch naming convention used by
+ *     manufacturers: "C{digits} · NAME" or "CF{digits} · NAME"
+ *     (e.g. "C148 · TENDER EARTH", "CF171 · SOFT GREY").
+ */
+function isFabricImage(img: ClassifiedImage): boolean {
+  const url = img.url.toLowerCase();
+  const alt = img.altText ?? "";
+
+  // URL-based signals
+  if (
+    url.includes("/fabric/") ||
+    url.includes("fabric-") ||
+    url.includes("-fabric") ||
+    url.includes("_fabric") ||
+    url.includes("/stof/") ||   // Dutch
+    url.includes("/tissu/") ||  // French
+    url.includes("/stoff/") ||  // German
+    url.includes("swatch") ||
+    url.includes("kleurstaal") ||
+    url.includes("farbmuster")
+  ) {
+    return true;
+  }
+
+  // Alt text: swatch code pattern — "C148 · NAME", "CF171 · NAME", "C049-GRAPHITE", etc.
+  if (/^CF?\d+[\s·\-–]/i.test(alt)) return true;
+
+  return false;
+}
+
 /**
  * Select primary and lifestyle images for Meta channel.
  *
@@ -437,7 +475,7 @@ export function selectMetaImages(
   primaryOverrideUrl?: string | null,
   lifestyleOverrideUrl?: string | null,
 ): { primary: ClassifiedImage | null; lifestyle: ClassifiedImage | null; additional: ClassifiedImage[] } {
-  const valid = images.filter((i) => i.imageType !== "invalid");
+  const valid = images.filter((i) => i.imageType !== "invalid" && !isFabricImage(i));
 
   let lifestyle: ClassifiedImage | null = null;
   if (lifestyleOverrideUrl) {

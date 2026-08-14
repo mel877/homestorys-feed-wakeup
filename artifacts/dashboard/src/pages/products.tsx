@@ -28,10 +28,10 @@ export default function Products() {
   });
 
   return (
-    <div className="space-y-[100px]">
+    <div className="space-y-8">
       <section className="flex flex-col md:flex-row md:items-center justify-between gap-8 pt-8">
         <div>
-          <h1 className="text-[72px] font-normal leading-[1.1] tracking-[-2.16px] text-primary">Master Catalog</h1>
+          <h1 className="text-[28px] font-bold tracking-tight text-foreground">Master Catalog</h1>
           <p className="text-[18px] text-muted-foreground mt-4 max-w-2xl">
             Search, filter, and inspect products passing through the pipeline.
           </p>
@@ -39,19 +39,19 @@ export default function Products() {
       </section>
 
       <section className="space-y-6">
-        <div className="flex flex-wrap gap-4 items-center bg-white p-6 rounded-[14px] shadow-shade-inset border border-border">
+        <div className="flex flex-wrap gap-4 items-center bg-white p-6 rounded-[20px]  border border-border">
           <div className="relative flex-1 min-w-[300px]">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input 
               placeholder="Search handle, SKU, title..." 
-              className="pl-10 h-10 bg-bone border-transparent shadow-none"
+              className="pl-10 h-10 bg-muted border-transparent shadow-none"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
             />
           </div>
           
           <Select value={market} onValueChange={(v) => { setMarket(v); setPage(0); }}>
-            <SelectTrigger className="w-[180px] h-10 bg-bone border-transparent shadow-none rounded-[9px]">
+            <SelectTrigger className="w-[180px] h-10 bg-muted border-transparent shadow-none rounded-[9px]">
               <SelectValue placeholder="Market" />
             </SelectTrigger>
             <SelectContent>
@@ -64,7 +64,7 @@ export default function Products() {
           </Select>
 
           <Select value={availability} onValueChange={(v) => { setAvailability(v); setPage(0); }}>
-            <SelectTrigger className="w-[180px] h-10 bg-bone border-transparent shadow-none rounded-[9px]">
+            <SelectTrigger className="w-[180px] h-10 bg-muted border-transparent shadow-none rounded-[9px]">
               <SelectValue placeholder="Availability" />
             </SelectTrigger>
             <SelectContent>
@@ -79,7 +79,7 @@ export default function Products() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Handle / Title</TableHead>
+              <TableHead>Title / Handle</TableHead>
               <TableHead>Vendor</TableHead>
               <TableHead className="text-right">Variants</TableHead>
               <TableHead>Availability</TableHead>
@@ -100,11 +100,11 @@ export default function Products() {
               productsData?.items.map(product => (
                 <TableRow key={product.id} className="cursor-pointer" onClick={() => navigate(`/products/${product.id}`)}>
                   <TableCell>
-                    <Link href={`/products/${product.id}`} className="text-[16px] text-primary hover:underline underline-offset-4" onClick={e => e.stopPropagation()}>
-                      {product.handle}
+                    <Link href={`/products/${product.id}`} className="text-[14px] font-medium text-foreground hover:underline underline-offset-4 block truncate max-w-[320px]" title={product.title || product.handle} onClick={e => e.stopPropagation()}>
+                      {product.title || product.handle}
                     </Link>
-                    <div className="text-[14px] text-muted-foreground truncate max-w-[300px] mt-1" title={product.title || ''}>
-                      {product.title || '--'}
+                    <div className="text-[12px] text-muted-foreground font-mono truncate max-w-[320px] mt-0.5">
+                      {product.handle}
                     </div>
                   </TableCell>
                   <TableCell className="text-[14px]">{product.vendor || '--'}</TableCell>
@@ -117,7 +117,7 @@ export default function Products() {
                   <TableCell>
                     <div className="flex gap-2 flex-wrap">
                       {product.markets.map(m => (
-                        <span key={m} className="px-2 py-1 bg-bone text-[12px] rounded-[2px] font-mono text-primary">
+                        <span key={m} className="px-2 py-1 bg-muted text-[12px] rounded-[2px] font-mono text-primary">
                           {m}
                         </span>
                       ))}
@@ -132,7 +132,7 @@ export default function Products() {
           </TableBody>
         </Table>
 
-        <div className="flex items-center justify-between text-sm text-muted-foreground mono-label pt-4 border-t border-hairline">
+        <div className="flex items-center justify-between text-sm text-muted-foreground mono-label pt-4 border-t border-border">
           <div>
             SHOWING {page * limit + 1} TO {Math.min((page + 1) * limit, productsData?.total || 0)} OF {productsData?.total || 0}
           </div>

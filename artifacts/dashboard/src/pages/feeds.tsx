@@ -42,10 +42,10 @@ export default function Feeds() {
   };
 
   return (
-    <div className="space-y-[100px]">
+    <div className="space-y-8">
       <section className="flex flex-col md:flex-row md:items-center justify-between gap-8 pt-8">
         <div>
-          <h1 className="text-[72px] font-normal leading-[1.1] tracking-[-2.16px] text-primary">Feeds</h1>
+          <h1 className="text-[28px] font-bold tracking-tight text-foreground">Feeds</h1>
           <p className="text-[18px] text-muted-foreground mt-4 max-w-2xl">
             Raw XML/CSV files hosted in Cloud Storage.
           </p>
@@ -53,11 +53,11 @@ export default function Feeds() {
       </section>
 
       <section className="space-y-6">
-        <div className="flex flex-wrap gap-4 items-center justify-between bg-white p-6 rounded-[14px] shadow-shade-inset border border-border">
+        <div className="flex flex-wrap gap-4 items-center justify-between bg-white p-6 rounded-[20px]  border border-border">
           <div className="flex items-center gap-4">
             <div className="mono-label text-muted-foreground uppercase mr-2">Filter by</div>
             <Select value={channel} onValueChange={setChannel}>
-              <SelectTrigger className="w-[180px] h-10 bg-bone border-transparent shadow-none rounded-[9px]">
+              <SelectTrigger className="w-[180px] h-10 bg-muted border-transparent shadow-none rounded-[9px]">
                 <SelectValue placeholder="Channel" />
               </SelectTrigger>
               <SelectContent>
@@ -95,7 +95,7 @@ export default function Feeds() {
               </TableRow>
             ) : (
               feeds?.map((feed) => (
-                <TableRow key={feed.id} className={!feed.isCurrent ? 'opacity-70 bg-bone/30' : ''}>
+                <TableRow key={feed.id} className={!feed.isCurrent ? 'opacity-70 bg-muted/30' : ''}>
                   <TableCell className="font-medium capitalize text-[14px]">{feed.channel}</TableCell>
                   <TableCell className="font-mono text-[14px]">
                     {feed.language}{feed.marketCode ? `-${feed.marketCode}` : ''}
@@ -117,7 +117,7 @@ export default function Feeds() {
                   </TableCell>
                   <TableCell className="text-right">
                     {feed.downloadUrl ? (
-                      <a href={feed.downloadUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-[9px] text-[14px] transition-colors hover:bg-bone hover:text-primary h-8 w-8 text-muted-foreground border border-transparent hover:border-border">
+                      <a href={feed.downloadUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-[9px] text-[14px] transition-colors hover:bg-muted hover:text-primary h-8 w-8 text-muted-foreground border border-transparent hover:border-border">
                         <Download className="w-4 h-4" />
                       </a>
                     ) : (

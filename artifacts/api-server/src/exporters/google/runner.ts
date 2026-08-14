@@ -31,11 +31,10 @@ import {
 import { readAllCanonicals } from "../canonical-reader";
 import {
   mapToGoogleRow,
-  mapToGoogleResource,
   buildGoogleTsv,
   type GoogleFeedRow,
 } from "./mapper";
-import { batchUpsertProducts, isDryRun } from "./client";
+import { isDryRun } from "./client";
 import { syncLocalInventory } from "./local-inventory";
 import { validateGoogleFeed } from "../../validation/feed-validator";
 import type { CanonicalProduct } from "../../canonical/types";
@@ -55,8 +54,7 @@ export interface GoogleRunResult {
       rows: number;
       storagePath: string;
       published: boolean;
-      upserted: number;
-      failed: number;
+      publicUrl: string;
     }
   >;
   localInventory: { submitted: number; failed: number };
@@ -148,12 +146,9 @@ export async function runGoogleExport(options: {
 
     // Map to rows (skip products with no image)
     const rows: GoogleFeedRow[] = [];
-    const resources = [];
     for (const canonical of marketCanonicals) {
       const row = mapToGoogleRow(canonical, config);
       if (row) rows.push(row);
-      const resource = mapToGoogleResource(canonical, config);
-      if (resource) resources.push(resource);
     }
 
     const currentPath = googleFeedPath(language, marketCode);
@@ -207,16 +202,6 @@ export async function runGoogleExport(options: {
         })
       : false;
 
-    // ── 6. Upsert to Merchant API ───────────────────────────────────────────
-    let upserted = 0;
-    let failed = 0;
-
-    if (published || dryRun) {
-      const { succeeded, failed: f } = await batchUpsertProducts(resources);
-      upserted = succeeded;
-      failed = f;
-    }
-
     // ── 7. Record feed snapshot ─────────────────────────────────────────────
     if (published) {
       // Mark all previous snapshots for this market/language as not current
@@ -250,12 +235,11 @@ export async function runGoogleExport(options: {
       rows: rows.length,
       storagePath: published ? currentPath : versioned,
       published,
-      upserted,
-      failed,
+      publicUrl: `/api/feeds/google/market/${marketCode}.tsv`,
     };
 
     logger.info(
-      { marketCode, rows: rows.length, published, upserted, failed },
+      { marketCode, rows: rows.length, published },
       "Market feed complete",
     );
   }
