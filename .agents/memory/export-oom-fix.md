@@ -40,10 +40,15 @@ After the loop, both Map.clear() AND `arr.splice(0)` on the raw DB result arrays
 collects objects when all references are gone; the `const` binding kept the arrays alive even after
 Map.clear(). splice(0) removes array elements so row objects become GC-eligible.
 
-### 5. Heap limit: 12 GB
-Changed `--max-old-space-size` from 8192 to 12288 in package.json `start` and `sync:meta` scripts.
-The bulk data + accumulator maps naturally reach ~8 GB during a full-catalog export (134k base rows
-× 5 KB + 35k images × 3 KB, etc.). 12 GB gives V8 enough headroom to GC and complete.
+### 5. Streamed base CSV (2026-08-17)
+The base file was the last big accumulator: 134k MetaBaseRow objects in a Map, serialized all at
+once. Since dedup only needs the ids and first occurrence wins, base rows are now streamed
+row-by-row through a `csv-stringify` Transform into a GCS write stream
+(`createFeedFileWriteStream` in lib/storage.ts) during the market loop; only a `Set<string>` of
+seen ids stays in memory. Gate/manifest/DB logic runs afterward via `finalizeFeed` on the
+already-uploaded versioned file. Heap limit reduced back to `--max-old-space-size=4096`.
+Peak heap ≈ bulk data + one language group + one country buffer, well under 4 GB.
+Rule: never rebuild a rows array for the base file — any new base-layer logic must stream.
 
 ## Verified (2026-08-14)
 - All 7 Meta CSV files generated in a single run (no OOM):

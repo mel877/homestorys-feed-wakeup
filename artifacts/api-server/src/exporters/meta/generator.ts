@@ -14,7 +14,9 @@
  *   Bulk DB data is loaded ONCE (products, variants, images, inventory) and
  *   reused across all 5 market iterations. Country and language feed files are
  *   published and freed from memory as soon as their contributing markets are
- *   processed. Peak heap ≈ bulk data (~1GB) + baseRows (~750MB) instead of 8GB+.
+ *   processed. The base file is streamed row-by-row to App Storage during the
+ *   market loop (only a Set of seen ids stays in memory), so peak heap ≈ bulk
+ *   data (~1GB) + one language/country buffer — well under 4 GB.
  *
  * Each file goes through:
  *   1. Generated to versioned path
@@ -28,6 +30,8 @@
  */
 
 import { stringify } from "csv-stringify/sync";
+import { stringify as stringifyStream } from "csv-stringify";
+import { once } from "events";
 import {
   db,
   feedSnapshotsTable,
@@ -45,6 +49,7 @@ import { loadConfig } from "../../config/loader";
 import { logger as rootLogger } from "../../lib/logger";
 import {
   uploadFeedFile,
+  createFeedFileWriteStream,
   uploadManifest,
   atomicPublish,
   downloadManifest,
@@ -167,7 +172,11 @@ export async function runMetaExport(options: {
   // ── Output accumulator ───────────────────────────────────────────────────────
   const feedResults: MetaRunResult["files"] = {} as MetaRunResult["files"];
 
-  // ── publishFeed helper ────────────────────────────────────────────────────────
+  // ── publishFeed helpers ───────────────────────────────────────────────────────
+  //
+  // publishFeed: serializes rows in memory and uploads (small files).
+  // finalizeFeed: gate + manifest + DB record for content already uploaded to
+  //   the versioned path (used by the streamed base file).
   async function publishFeed(
     key: MetaFeedKey,
     filename: string,
@@ -181,11 +190,22 @@ export async function runMetaExport(options: {
 
     const csv = toCsv(headers as never[], rows as never[]);
     const sha256 = await uploadFeedFile(versioned, csv, "text/csv");
+    await finalizeFeed(key, currentPath, versioned, rows.length, sha256, feedLanguage, feedCountry);
+  }
 
+  async function finalizeFeed(
+    key: MetaFeedKey,
+    currentPath: string,
+    versioned: string,
+    itemCount: number,
+    sha256: string,
+    feedLanguage: string | null,
+    feedCountry: string | null,
+  ): Promise<void> {
     const manifest: FeedManifest = {
       version: versionTs,
       generatedAt: new Date().toISOString(),
-      itemCount: rows.length,
+      itemCount,
       sha256,
       sourceRunId: options.syncRunId ?? null,
       channel: "meta",
@@ -210,7 +230,7 @@ export async function runMetaExport(options: {
             channel: "meta",
             marketOrFile: key,
             previousItemCount: null,
-            newItemCount: rows.length,
+            newItemCount: itemCount,
             dropPct: null,
             reason: "schema_error",
             syncRunId: options.syncRunId ?? null,
@@ -239,7 +259,7 @@ export async function runMetaExport(options: {
         });
 
     if (dryRun) {
-      logger.info({ key, rows: rows.length, versioned, dryRun: true }, "DRY RUN: feed generated (not published)");
+      logger.info({ key, rows: itemCount, versioned, dryRun: true }, "DRY RUN: feed generated (not published)");
     }
 
     // DB snapshot record
@@ -259,7 +279,7 @@ export async function runMetaExport(options: {
         language: feedLanguage,
         marketCode: feedCountry,
         storagePath: currentPath,
-        itemCount: rows.length,
+        itemCount,
         sha256,
         isCurrent: true,
         syncRunId: options.syncRunId ?? null,
@@ -268,13 +288,13 @@ export async function runMetaExport(options: {
     }
 
     feedResults[key] = {
-      itemCount: rows.length,
+      itemCount,
       storagePath: published ? currentPath : versioned,
       published: published || dryRun,
       sha256,
     };
 
-    logger.info({ key, rows: rows.length, published }, "Meta feed file complete");
+    logger.info({ key, rows: itemCount, published }, "Meta feed file complete");
   }
 
   // ── 1. ONE-TIME bulk loading ──────────────────────────────────────────────────
@@ -402,7 +422,36 @@ export async function runMetaExport(options: {
   //
   // Peak heap ≈ bulk data (once) + base rows + ONE language group + one country
   // buffer ≈ ~2–3 GB instead of the previous 8 GB.
-  const baseRows = new Map<string, MetaBaseRow>();
+  // Base rows are deduplicated by id across markets, but only the FIRST
+  // occurrence is kept — so we never need the row content again after writing
+  // it. Instead of accumulating 134k MetaBaseRow objects in a Map (~GBs of
+  // strings) and serializing them all at once, we stream each row straight
+  // through a csv-stringify Transform into an App Storage write stream and keep
+  // only a Set of seen ids in memory.
+  const seenBaseIds = new Set<string>();
+  const baseCurrentPath = metaFeedPath(META_FEED_FILES["base"]);
+  const baseVersionedPath = versionedPath(baseCurrentPath, versionTs);
+
+  // Partial runs never publish the base layer, so skip the upload entirely.
+  const baseUpload = isPartialRun
+    ? null
+    : createFeedFileWriteStream(baseVersionedPath, "text/csv");
+  const baseStringifier = baseUpload ? stringifyStream() : null;
+  if (baseStringifier && baseUpload) {
+    baseStringifier.pipe(baseUpload.stream);
+    baseStringifier.write(META_BASE_HEADERS.map((h) => String(h)));
+  }
+
+  async function writeBaseRow(row: MetaBaseRow): Promise<void> {
+    if (!baseStringifier) return;
+    const record = META_BASE_HEADERS.map(
+      (h) => String((row as unknown as Record<string, unknown>)[h as string] ?? ""),
+    );
+    if (!baseStringifier.write(record)) {
+      await once(baseStringifier, "drain");
+    }
+  }
+
   // Language rows keyed by language code, published and freed per language group
   const pendingLangRows = new Map<string, Map<string, MetaLanguageRow>>();
   const pendingCountryRows = new Map<string, Map<string, MetaCountryRow>>();
@@ -540,8 +589,13 @@ export async function runMetaExport(options: {
 
         const { id, language, country: c, base, language_row, country_row } = mapped;
 
-        // Base: deduplicated by id (same across markets for same variant×market)
-        if (!baseRows.has(id)) baseRows.set(id, base);
+        // Base: deduplicated by id (same across markets for same variant×market).
+        // First occurrence is streamed straight to App Storage; only the id stays
+        // in memory.
+        if (!seenBaseIds.has(id)) {
+          seenBaseIds.add(id);
+          await writeBaseRow(base);
+        }
 
         // Language rows: buffered per language group, published and freed when the
         // last market for that language is processed.
@@ -560,7 +614,16 @@ export async function runMetaExport(options: {
     totalIneligible += marketIneligible;
     totalExcluded += marketExcluded;
 
-    logger.info({ marketCode, eligible: marketEligible, ineligible: marketIneligible, excluded: marketExcluded }, "Market processed");
+    logger.info(
+      {
+        marketCode,
+        eligible: marketEligible,
+        ineligible: marketIneligible,
+        excluded: marketExcluded,
+        heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      },
+      "Market processed",
+    );
 
     // If all markets that contribute to this country have been processed,
     // publish the country file immediately and free the buffer.
@@ -610,13 +673,13 @@ export async function runMetaExport(options: {
     "All markets processed",
   );
 
-  // ── Release bulk data from scope before base CSV serialization ──────────────
+  // ── Release bulk data from scope ─────────────────────────────────────────────
   //
   // Clearing the lookup Maps removes the Map-level references, but the raw DB
   // result arrays (variants, images, etc.) still hold the row objects via their
   // `const` binding. splice(0) removes all array elements so the row objects
-  // become GC-eligible. Combined with a raised heap limit (12 GB) this gives V8
-  // enough headroom to compact the old generation before the base CSV is built.
+  // become GC-eligible. The base CSV has already been streamed to App Storage
+  // row-by-row during the market loop, so no large serialization remains.
   variantsByProduct.clear();
   marketVariantsByVariant.clear();
   translationsByProduct.clear();
@@ -644,7 +707,7 @@ export async function runMetaExport(options: {
       { reason: "partial-market run" },
       "Skipping base + language shared layers — not safe to publish partial catalog",
     );
-    feedResults["base"] = { itemCount: baseRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["base"]), versionTs), published: false, sha256: "" };
+    feedResults["base"] = { itemCount: seenBaseIds.size, storagePath: baseVersionedPath, published: false, sha256: "" };
     // Language placeholders: if inline publishing didn't run (isPartialRun=true),
     // set empty placeholders for any language not yet in feedResults.
     for (const lang of ["fr", "de"]) {
@@ -655,8 +718,15 @@ export async function runMetaExport(options: {
       }
     }
   } else {
-    // Language files were published inline; only base remains.
-    await publishFeed("base", META_FEED_FILES["base"], META_BASE_HEADERS, [...baseRows.values()], null, null);
+    // Base file was streamed row-by-row during the market loop; finish the
+    // upload and run the normal gate/manifest/DB flow on the uploaded file.
+    baseStringifier!.end();
+    const { sha256: baseSha256, bytes: baseBytes } = await baseUpload!.done;
+    logger.info(
+      { rows: seenBaseIds.size, bytes: baseBytes, heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) },
+      "Base CSV streamed to storage",
+    );
+    await finalizeFeed("base", baseCurrentPath, baseVersionedPath, seenBaseIds.size, baseSha256, null, null);
   }
 
   // Fill placeholder results for country files skipped in partial runs

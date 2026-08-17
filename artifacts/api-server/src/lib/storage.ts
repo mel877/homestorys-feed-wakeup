@@ -17,6 +17,7 @@
 
 import { Storage } from "@google-cloud/storage";
 import { createHash } from "crypto";
+import { Transform } from "stream";
 import { logger as rootLogger } from "./logger";
 import { sendFeedBlockAlert, resolveAlertWebhookUrl } from "./alerting";
 
@@ -86,6 +87,48 @@ export async function uploadFeedFile(
 
   logger.debug({ storagePath, bytes: buf.length, sha256 }, "Feed file uploaded");
   return sha256;
+}
+
+/**
+ * Create a write stream for uploading a feed file to App Storage incrementally.
+ *
+ * Used by large exports (Meta base CSV) to avoid materializing the whole file
+ * in memory. Content piped into `stream` is hashed on the fly; await `done`
+ * after ending the stream to get the sha256 and byte count.
+ */
+export function createFeedFileWriteStream(
+  storagePath: string,
+  contentType: "text/csv" | "text/tab-separated-values" | "application/json",
+): { stream: NodeJS.WritableStream; done: Promise<{ sha256: string; bytes: number }> } {
+  const file = getBucket().file(storagePath);
+  const hash = createHash("sha256");
+  let bytes = 0;
+
+  const gcsStream = file.createWriteStream({
+    contentType,
+    resumable: false,
+  });
+
+  const hashingStream = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      hash.update(chunk);
+      bytes += chunk.length;
+      cb(null, chunk);
+    },
+  });
+
+  const done = new Promise<{ sha256: string; bytes: number }>((resolve, reject) => {
+    gcsStream.on("finish", () => {
+      const sha256 = hash.digest("hex");
+      logger.debug({ storagePath, bytes, sha256 }, "Feed file uploaded (streamed)");
+      resolve({ sha256, bytes });
+    });
+    gcsStream.on("error", reject);
+    hashingStream.on("error", reject);
+  });
+
+  hashingStream.pipe(gcsStream);
+  return { stream: hashingStream, done };
 }
 
 /**
