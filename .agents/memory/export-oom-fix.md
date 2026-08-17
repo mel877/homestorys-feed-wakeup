@@ -6,54 +6,64 @@ description: Root cause and fix for all "orphaned" sync runs caused by OOM durin
 ## The problem
 
 All full syncs were crashing with "orphaned: process restarted while run was in progress".
-Root cause: OOM during the Meta/Google export phase (not during Shopify sync phases).
+Root cause: OOM during the Meta export phase (Google was already fixed market-by-market).
 
-**Meta export (old)**: loaded ALL canonicals into `canonicals[]` array (191k market_variants × 5–15KB each = 1–3GB), then built 7 CSV strings concurrently via `Promise.all`.
+**Meta export (second-gen, still OOMing)**: called `processAllCanonicals` once per market (5× total),
+loading 29k variants + 35k images + 55k inventory each time. V8 does not GC old-generation objects
+between async iterations, so 5× worth of bulk data (≈ 5–8 GB) accumulated simultaneously.
 
-**Google export (old)**: accumulated all 5 markets' `GoogleFeedRow[]` simultaneously in `byMarket` Map, then iterated. 191k rows × ~3KB = 570MB just for rows, plus raw data Maps (~200MB).
+OOM manifested at different stages across attempts:
+- All-markets-at-once: OOM at ~4 GB during streaming
+- Per-market loop (processAllCanonicals × 5): OOM at ~8 GB after streaming, during CSV generation
+- Bulk-load-once + accumulator maps (all 3 alive): OOM at ~8 GB during/after AT market processing
+  because langFrRows + langDeRows + baseRows ≈ 135k + 54k + 81k = 270k rows × 5–10 KB = 8 GB
 
-**Local inventory**: kept `Map<string, Map<string, CanonicalProduct>>` for BE markets — ~76k full canonicals = 760MB alone.
+## The fix (in meta/generator.ts)
 
-**feed_items upserts**: 450k sequential `await db.insert()` calls (one per canonical) — slow and memory-intensive.
+### 1. One-time bulk loading
+Load products, variants, marketVariants, images, inventory, recommendations ONCE before the market
+loop. Build lookup Maps once. This eliminates the 5× repeated DB query / V8-no-GC problem.
 
-## The fix
+### 2. Inline country file publishing
+After each market is processed, check if all markets for that country are done. If so, publish the
+country CSV immediately and `pendingCountryRows.delete(country)` to free those rows.
 
-### canonical-reader.ts — `processAllCanonicals(config, options, onCanonical)`
-- Same bulk DB load as `readAllCanonicals` (one pass for all entity types)
-- Processes ONE canonical at a time via async callback — no `canonicals[]` array
-- Batches feed_items DB upserts 100 at a time (vs 1 per canonical) → 100× fewer round-trips
-- Only passes ELIGIBLE canonicals (exclusionReasons empty) to callback
+### 3. Inline language file publishing
+Same pattern for language files: publish `language-fr` right after FR (last French market), publish
+`language-de` right after AT (last German market). This halves the peak accumulator size.
 
-### meta/generator.ts
-- Uses `processAllCanonicals` → accumulates only compact map rows (200–300 bytes each vs 5–15KB full canonicals)
-- Peak memory: ~200MB (raw Maps) + ~30MB (row Maps) = ~230MB total
-- Changed `Promise.all([7 publishFeed])` → sequential `for...of` — only 1 CSV string at a time
+Peak at any point: bulk data (~1 GB) + baseRows (~750 MB) + one language group (≤ 300 MB) + one
+country buffer (≤ 30 MB) ≈ 2–3 GB — well under the 12 GB limit.
 
-### google/runner.ts — market-by-market processing
-- Processes ONE market at a time: `processAllCanonicals(markets: [marketCode])` in a loop
-- Builds/uploads/publishes TSV, then `rows[]` goes out of scope → GC can reclaim
-- Peak per market: ~200MB (raw Maps) + ~60MB (rows) = ~260MB vs 800MB+ before
-- Trade-off: DB bulk queries run 5× (once per market) instead of once — acceptable overhead
+### 4. Explicit array clearing after market loop
+After the loop, both Map.clear() AND `arr.splice(0)` on the raw DB result arrays. V8 GC only
+collects objects when all references are gone; the `const` binding kept the arrays alive even after
+Map.clear(). splice(0) removes array elements so row objects become GC-eligible.
 
-### local-inventory.ts — `submitLocalInventoryEntries(entries)`
-- New function accepting pre-built `LocalInventoryEntry[]` instead of full canonicals
-- Google runner builds entries in streaming callback (tiny struct: variantId, quantity, etc.)
-- `beInventoryByKey: Map<string, LocalInventoryEntry>` replaces `Map<string, Map<string, CanonicalProduct>>`
+### 5. Heap limit: 12 GB
+Changed `--max-old-space-size` from 8192 to 12288 in package.json `start` and `sync:meta` scripts.
+The bulk data + accumulator maps naturally reach ~8 GB during a full-catalog export (134k base rows
+× 5 KB + 35k images × 3 KB, etc.). 12 GB gives V8 enough headroom to GC and complete.
 
-## Verified
-- BE_FR test: 26,994 canonicals streamed in 78s, no OOM, feed uploaded to App Storage
-- TypeScript clean
-- Production Node.js heap limit: 4.2GB (16GB physical RAM available)
+## Verified (2026-08-14)
+- All 7 Meta CSV files generated in a single run (no OOM):
+  - meta-base.csv: 134,973 rows
+  - meta-language-fr.csv: 53,988 rows
+  - meta-language-de.csv: 80,985 rows
+  - meta-country-BE.csv: 53,989 rows, meta-country-FR.csv: 26,994, meta-country-DE.csv: 26,995, meta-country-AT.csv: 26,995
+- Duration: ~12 minutes, dryRun=true (versioned paths; META_DRY_RUN=false needed for live publish)
+- Server remained alive throughout; no crash
 
-## Why: dry-run mode
-Both Google and Meta default to dry-run (`GOOGLE_DRY_RUN !== 'false'`, `META_DRY_RUN !== 'false'`).
-Set `GOOGLE_DRY_RUN=false` and `META_DRY_RUN=false` as env vars to actually publish current pointers.
-Versioned files ARE uploaded in dry-run mode — just not copied to current path.
+## Google export
+Already fixed market-by-market (one processAllCanonicals per market). Peak: ~260 MB.
+5 TSV files confirmed uploaded in a prior run of this session.
 
-## Data scale (as of this session)
-- 2,089 active products
-- 38,363 variants
-- 191,815 market_variants (5 markets)
-- 41,033 images
-- 55,426 inventory_levels
-- 4,814 translations (fr: 2,718 / en: 2,096 / de: 0)
+## Dry-run mode
+Both Google and Meta default to dry-run:
+- `GOOGLE_DRY_RUN !== 'false'` → dry run
+- `META_DRY_RUN !== 'false'` → dry run
+Versioned files ARE uploaded in dry-run. Set both env vars to 'false' to update current pointers.
+
+## Data scale (2026-08-14)
+- 2,089 active products, 29,574 variants, 147,870 market_variants (5 markets)
+- 35,012 images, inventory & recommendations loaded similarly

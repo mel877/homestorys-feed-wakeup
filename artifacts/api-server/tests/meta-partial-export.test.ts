@@ -30,31 +30,56 @@ interface LayerPlan {
 }
 
 /**
+ * Full config mapping: all markets that contribute to each country.
+ * Belgium requires BOTH BE_FR and BE_DE; all other countries need one market.
+ */
+const ALL_COUNTRY_TO_MARKETS: Map<string, string[]> = new Map([
+  ["BE", ["BE_FR", "BE_DE"]],
+  ["FR", ["FR"]],
+  ["DE", ["DE"]],
+  ["AT", ["AT"]],
+]);
+
+/**
  * Mirrors the publishing gate in runMetaExport.
- * Given the loaded markets and the representedCountries set, returns which layers
- * should be published vs skipped.
+ * Given the requested markets (subset or undefined for all), the countries
+ * that have been represented by the processed markets, and the full config
+ * mapping of country→markets, returns which layers should be published.
+ *
+ * Key safety invariant: a country file is only published when ALL markets that
+ * contribute to it (per the full config) are included in this run. A partial
+ * run with only BE_FR must not publish country-BE — that file would be missing
+ * the BE_DE variants and would overwrite a valid full BE snapshot.
  */
 function computeLayerPlan(
   requestedMarkets: string[] | undefined,
   representedCountries: Set<string>,
+  allCountryToMarkets: Map<string, string[]> = ALL_COUNTRY_TO_MARKETS,
 ): LayerPlan[] {
   const isPartialRun = (requestedMarkets?.length ?? 0) > 0;
 
   const plans: LayerPlan[] = [];
 
-  // Shared layers
+  // Shared layers: never safe to publish in a partial run (they aggregate all markets)
   plans.push(
     { key: "base", publish: !isPartialRun, reason: isPartialRun ? "partial-market run" : undefined },
     { key: "language-fr", publish: !isPartialRun, reason: isPartialRun ? "partial-market run" : undefined },
     { key: "language-de", publish: !isPartialRun, reason: isPartialRun ? "partial-market run" : undefined },
   );
 
-  // Country layers
+  // Country layers: safe only when ALL contributing markets (from full config) are in this run
   for (const country of ["BE", "FR", "DE", "AT"] as const) {
     const key: MetaFeedKey = `country-${country}`;
     const hasData = representedCountries.has(country);
-    const shouldPublish = !isPartialRun || hasData;
-    plans.push({ key, publish: shouldPublish, reason: !shouldPublish ? "country not in partial run markets" : undefined });
+    const allMarketsForCountry = allCountryToMarkets.get(country) ?? [];
+    const allContributingMarketsInRun =
+      !isPartialRun || allMarketsForCountry.every((m) => requestedMarkets?.includes(m) ?? true);
+    const shouldPublish = !isPartialRun || (hasData && allContributingMarketsInRun);
+    plans.push({
+      key,
+      publish: shouldPublish,
+      reason: !shouldPublish ? "country not fully represented in partial run" : undefined,
+    });
   }
 
   return plans;
@@ -105,11 +130,12 @@ describe("Meta export — partial run (markets filter active)", () => {
     expect(dePlan.publish).toBe(false);
   });
 
-  it("DOES publish country-BE when BE is represented in the run", () => {
-    // BE_FR market → country BE is in the set
+  it("does NOT publish country-BE when only BE_FR market was requested (BE_DE data missing)", () => {
+    // Belgium requires BOTH BE_FR and BE_DE. A run with only BE_FR must NOT
+    // overwrite the full country-BE snapshot with an incomplete French-only file.
     const plans = computeLayerPlan(["BE_FR"], new Set(["BE"]));
     const bePlan = plans.find((p) => p.key === "country-BE")!;
-    expect(bePlan.publish).toBe(true);
+    expect(bePlan.publish).toBe(false);
   });
 
   it("does NOT publish country-FR when only BE_FR market was requested", () => {
@@ -126,8 +152,8 @@ describe("Meta export — partial run (markets filter active)", () => {
     expect(atPlan.publish).toBe(false);
   });
 
-  it("publishes only BE country layer when BE_FR + BE_DE markets are requested", () => {
-    // Both BE markets → BE country is represented; FR/DE/AT not
+  it("publishes country-BE only when BOTH BE_FR and BE_DE markets are in the run", () => {
+    // Both BE markets present → country-BE is complete and safe to publish.
     const plans = computeLayerPlan(["BE_FR", "BE_DE"], new Set(["BE"]));
     expect(plans.find((p) => p.key === "country-BE")!.publish).toBe(true);
     expect(plans.find((p) => p.key === "country-FR")!.publish).toBe(false);
@@ -139,9 +165,11 @@ describe("Meta export — partial run (markets filter active)", () => {
     expect(plans.find((p) => p.key === "language-de")!.publish).toBe(false);
   });
 
-  it("publishes BE and FR country layers when BE_FR + FR markets are requested", () => {
+  it("publishes only the FR country layer when BE_FR + FR markets are requested (BE_DE absent)", () => {
+    // BE_DE is not in the run, so country-BE must NOT be published even though BE_FR is present.
+    // Only country-FR is safe to publish because all its contributing markets (FR) are in the run.
     const plans = computeLayerPlan(["BE_FR", "FR"], new Set(["BE", "FR"]));
-    expect(plans.find((p) => p.key === "country-BE")!.publish).toBe(true);
+    expect(plans.find((p) => p.key === "country-BE")!.publish).toBe(false); // BE_DE missing
     expect(plans.find((p) => p.key === "country-FR")!.publish).toBe(true);
     expect(plans.find((p) => p.key === "country-DE")!.publish).toBe(false);
     expect(plans.find((p) => p.key === "country-AT")!.publish).toBe(false);

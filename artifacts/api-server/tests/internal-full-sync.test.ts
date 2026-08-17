@@ -90,6 +90,16 @@ vi.mock("../src/jobs/scheduler", () => ({
   runJobWithLock: mockRunJobWithLock,
   stopScheduler: vi.fn(),
   msUntilNext: vi.fn(),
+  // tryAcquireLock / releaseLock are used by export-lock.ts; mocked via
+  // withExportLock below so these stubs are kept as safety nets only.
+  tryAcquireLock: vi.fn().mockResolvedValue({ acquired: true }),
+  releaseLock: vi.fn(),
+}));
+
+// withExportLock: call fn() directly (no DB-backed lock needed in unit tests)
+vi.mock("../src/exporters/export-lock", () => ({
+  withExportLock: vi.fn().mockImplementation(async (fn: () => Promise<unknown>) => fn()),
+  EXPORT_LOCK_JOB_NAME: "feed-export",
 }));
 
 // Suppress alert checks and recommendations sync (not under test)
@@ -148,8 +158,12 @@ describe("POST /api/internal/sync/full — diagnostics reconciliation", () => {
       .post("/api/internal/sync/full")
       .set(AUTH);
 
-    // runJobWithLock executes the job inline so all three are called synchronously
-    expect(mockRunFullSync).toHaveBeenCalledOnce();
+    // The route is fire-and-forget: res.json() is sent before the job promise chain
+    // resolves.  Poll until all three mocks have been called (vi.waitFor retries
+    // for up to 1 s by default, which is more than enough for the micro-task chain).
+    await vi.waitFor(() => {
+      expect(mockRunFullSync).toHaveBeenCalledOnce();
+    });
     expect(mockRunGoogleExport).toHaveBeenCalledWith({ syncRunId: "run-001" });
     expect(mockFetchAndStoreDiagnostics).toHaveBeenCalledOnce();
   });
@@ -162,6 +176,11 @@ describe("POST /api/internal/sync/full — diagnostics reconciliation", () => {
     await request(app)
       .post("/api/internal/sync/full")
       .set(AUTH);
+
+    // Wait for the async fire-and-forget job to populate callOrder
+    await vi.waitFor(() => {
+      expect(callOrder.length).toBeGreaterThanOrEqual(2);
+    });
 
     const googleIdx = callOrder.indexOf("google");
     const diagIdx = callOrder.indexOf("diagnostics");

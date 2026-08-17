@@ -10,6 +10,12 @@
  *   meta-country-DE.csv        — Germany price+availability
  *   meta-country-AT.csv        — Austria price+availability
  *
+ * Memory-efficient design:
+ *   Bulk DB data is loaded ONCE (products, variants, images, inventory) and
+ *   reused across all 5 market iterations. Country and language feed files are
+ *   published and freed from memory as soon as their contributing markets are
+ *   processed. Peak heap ≈ bulk data (~1GB) + baseRows (~750MB) instead of 8GB+.
+ *
  * Each file goes through:
  *   1. Generated to versioned path
  *   2. Atomic publish gate (item count threshold)
@@ -22,8 +28,19 @@
  */
 
 import { stringify } from "csv-stringify/sync";
-import { db, feedSnapshotsTable } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import {
+  db,
+  feedSnapshotsTable,
+  productsTable,
+  variantsTable,
+  marketVariantsTable,
+  productTranslationsTable,
+  imagesTable,
+  inventoryLevelsTable,
+  recommendationsTable,
+  feedItemsTable,
+} from "@workspace/db";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { loadConfig } from "../../config/loader";
 import { logger as rootLogger } from "../../lib/logger";
 import {
@@ -37,7 +54,17 @@ import {
   type FeedManifest,
 } from "../../lib/storage";
 import { sendFeedBlockAlert, resolveAlertWebhookUrl } from "../../lib/alerting";
-import { processAllCanonicals } from "../canonical-reader";
+import { buildCanonical } from "../../canonical/builder";
+import type {
+  ProductRow,
+  VariantRow,
+  MarketVariantRow,
+  TranslationRow,
+  ImageRow,
+  InventoryRow,
+  RecommendationRow,
+} from "../../canonical/types";
+import { computeChecksum } from "../../shopify/checksums";
 import {
   mapToMeta,
   type MetaBaseRow,
@@ -48,8 +75,6 @@ import {
   META_COUNTRY_HEADERS,
 } from "./mapper";
 import { validateMetaFeed } from "../../validation/feed-validator";
-import type { CanonicalProduct } from "../../canonical/types";
-
 const logger = rootLogger.child({ module: "meta-generator" });
 
 export function isDryRun(): boolean {
@@ -105,6 +130,7 @@ export interface MetaRunResult {
   durationMs: number;
 }
 
+const UPSERT_BATCH_SIZE = 100;
 export async function runMetaExport(options: {
   markets?: string[];
   syncRunId?: string;
@@ -115,47 +141,33 @@ export async function runMetaExport(options: {
   const dryRun = isDryRun();
   const alertWebhookUrl = resolveAlertWebhookUrl(config.feedPolicy.alerts.webhook_url);
 
+  // Determine which markets to process
+  const targetMarkets = options.markets ?? Object.keys(config.markets.markets);
+
+  // Partial-market runs must NOT publish shared layers (base + language) because
+  // those layers aggregate all markets and would be incomplete for a subset run.
+  // Country layers are safe to publish for any country that's fully represented
+  // in the target markets.
+  const isPartialRun = (options.markets?.length ?? 0) > 0;
+
+  // Pre-compute which markets contribute to each country FROM THE FULL CONFIG,
+  // not just targetMarkets. Belgium needs both BE_FR and BE_DE; a partial run
+  // that only includes BE_FR must NOT publish country-BE (it would be incomplete).
+  const allConfiguredMarkets = Object.keys(config.markets.markets);
+  const countryToMarkets = new Map<string, string[]>();
+  for (const mc of allConfiguredMarkets) {
+    const country = config.markets.markets[mc]?.country;
+    if (!country) continue;
+    if (!countryToMarkets.has(country)) countryToMarkets.set(country, []);
+    countryToMarkets.get(country)!.push(mc);
+  }
+
   logger.info({ dryRun, markets: options.markets ?? "all" }, "Meta export starting");
 
-  // ── 1. Stream canonicals → accumulate compact map rows ────────────────────
-  //
-  // processAllCanonicals never builds a large canonicals[] array — each
-  // canonical is mapped immediately and released, keeping peak heap at
-  // ~raw-data-maps + compact-row-maps instead of raw-data + all canonicals.
-  // Feed-items upserts are batched 100 at a time (vs. one DB round-trip each).
-  const baseRows = new Map<string, MetaBaseRow>();       // id → row (deduplicated)
-  const langFrRows = new Map<string, MetaLanguageRow>(); // id → row
-  const langDeRows = new Map<string, MetaLanguageRow>();
-  const countryRows = new Map<string, Map<string, MetaCountryRow>>(); // country → id → row
-  let totalCanonicals = 0;
-
-  const { eligible, ineligible, excluded } = await processAllCanonicals(
-    config,
-    { markets: options.markets, channel: "meta", persistFeedItems: true },
-    (canonical) => {
-      totalCanonicals++;
-      const mapped = mapToMeta(canonical, config);
-      if (!mapped) return;
-
-      const { id, language, country, base, language_row, country_row } = mapped;
-
-      // Base: deduplicated by id (identical across markets for same variant)
-      if (!baseRows.has(id)) baseRows.set(id, base);
-
-      // Language rows: one per (language × id)
-      if (language === "fr") langFrRows.set(id, language_row);
-      else if (language === "de") langDeRows.set(id, language_row);
-
-      // Country rows: one per (country × id)
-      if (!countryRows.has(country)) countryRows.set(country, new Map());
-      countryRows.get(country)!.set(id, country_row);
-    },
-  );
-  logger.info({ eligible, ineligible, excluded, totalCanonicals }, "Canonicals streamed");
-
-  // ── 3. Generate and publish each feed file ─────────────────────────────────
+  // ── Output accumulator ───────────────────────────────────────────────────────
   const feedResults: MetaRunResult["files"] = {} as MetaRunResult["files"];
 
+  // ── publishFeed helper ────────────────────────────────────────────────────────
   async function publishFeed(
     key: MetaFeedKey,
     filename: string,
@@ -216,7 +228,7 @@ export async function runMetaExport(options: {
     if (prevManifest) previousItemCount = prevManifest.itemCount;
 
     const published = (!schemaValid || dryRun)
-      ? false // schema invalid or dry-run: versioned uploaded but NOT copied to current
+      ? false
       : await atomicPublish({
           versionedPath: versioned,
           currentPath,
@@ -265,51 +277,396 @@ export async function runMetaExport(options: {
     logger.info({ key, rows: rows.length, published }, "Meta feed file complete");
   }
 
-  // ── Determine which files to publish ─────────────────────────────────────────
+  // ── 1. ONE-TIME bulk loading ──────────────────────────────────────────────────
   //
-  // Partial-market runs (options.markets is set) must NOT publish shared layers
-  // (base + language), because those layers are built from all markets and would
-  // be incomplete for a subset run. Publishing an empty or partial shared layer
-  // would overwrite the valid full-catalog current pointer.
-  //
-  // Only country-specific layers whose target country is represented in the
-  // requested markets are published in a partial run.
-  const isPartialRun = (options.markets?.length ?? 0) > 0;
+  // Previously, processAllCanonicals was called once per market (5× total),
+  // loading 38k variants + 41k images + 55k inventory each time. V8 does not
+  // GC those arrays between async iterations, leading to 5–8× heap pressure and
+  // OOM. Loading all data ONCE eliminates that repeated allocation.
+  const products = await db
+    .select()
+    .from(productsTable)
+    .where(eq(productsTable.status, "active"));
 
-  // Countries represented by the loaded canonicals
-  const representedCountries = new Set(countryRows.keys());
+  if (products.length === 0) {
+    logger.info("No active products found");
+    return { totalCanonicals: 0, files: feedResults, dryRun, durationMs: Date.now() - startedAt };
+  }
 
-  // ── Publish feed files SEQUENTIALLY ──────────────────────────────────────────
+  const productIds = products.map((p) => p.id);
+  logger.info({ count: products.length }, "Active products loaded");
+
+  const variants = await db
+    .select()
+    .from(variantsTable)
+    .where(inArray(variantsTable.productId, productIds));
+
+  const variantIds = variants.map((v) => v.id);
+
+  // Load market_variants for ALL target markets at once
+  const marketVariants = variantIds.length > 0
+    ? await db
+        .select()
+        .from(marketVariantsTable)
+        .where(
+          and(
+            inArray(marketVariantsTable.variantId, variantIds),
+            inArray(marketVariantsTable.marketCode, targetMarkets),
+          ),
+        )
+    : [];
+
+  const translations = await db
+    .select()
+    .from(productTranslationsTable)
+    .where(inArray(productTranslationsTable.productId, productIds));
+
+  const images = await db
+    .select()
+    .from(imagesTable)
+    .where(inArray(imagesTable.productId, productIds));
+
+  const inventory = variantIds.length > 0
+    ? await db
+        .select()
+        .from(inventoryLevelsTable)
+        .where(inArray(inventoryLevelsTable.variantId, variantIds))
+    : [];
+
+  const recommendations = productIds.length > 0
+    ? await db
+        .select()
+        .from(recommendationsTable)
+        .where(inArray(recommendationsTable.productId, productIds))
+    : [];
+
+  logger.info(
+    { products: products.length, variants: variants.length, marketVariants: marketVariants.length, images: images.length },
+    "Bulk data loaded (once)",
+  );
+
+  // ── Build lookup maps ─────────────────────────────────────────────────────────
+  const variantsByProduct = new Map<string, typeof variants>();
+  for (const v of variants) {
+    const list = variantsByProduct.get(v.productId) ?? [];
+    list.push(v);
+    variantsByProduct.set(v.productId, list);
+  }
+
+  const marketVariantsByVariant = new Map<string, typeof marketVariants>();
+  for (const mv of marketVariants) {
+    const list = marketVariantsByVariant.get(mv.variantId) ?? [];
+    list.push(mv);
+    marketVariantsByVariant.set(mv.variantId, list);
+  }
+
+  const translationsByProduct = new Map<string, typeof translations>();
+  for (const t of translations) {
+    const list = translationsByProduct.get(t.productId) ?? [];
+    list.push(t);
+    translationsByProduct.set(t.productId, list);
+  }
+
+  const imagesByProduct = new Map<string, typeof images>();
+  for (const img of images) {
+    const list = imagesByProduct.get(img.productId) ?? [];
+    list.push(img);
+    imagesByProduct.set(img.productId, list);
+  }
+
+  const inventoryByVariant = new Map<string, typeof inventory>();
+  for (const inv of inventory) {
+    const list = inventoryByVariant.get(inv.variantId) ?? [];
+    list.push(inv);
+    inventoryByVariant.set(inv.variantId, list);
+  }
+
+  const recKey = (productId: string, marketCode: string) => `${productId}:${marketCode}`;
+  const recByProductMarket = new Map<string, (typeof recommendations)[0]>();
+  for (const r of recommendations) {
+    recByProductMarket.set(recKey(r.productId, r.marketCode), r);
+  }
+
+  // ── 2. Process markets sequentially; publish country + language files inline ──
   //
-  // Each publishFeed call serializes a full CSV string (~30–100 MB per file).
-  // Running them concurrently via Promise.all would spike memory 7× simultaneously.
-  // Sequential publish keeps peak memory to one CSV at a time.
+  // Three accumulator Maps exist: base, language, country rows.
+  // The OOM root-cause was keeping all three live across all 5 market iterations.
+  //
+  // Fix: apply "publish and free" to BOTH country AND language Maps:
+  //   • Country files are published when the last market for that country is done.
+  //   • Language files are published when the last market for that language is done.
+  //     language-fr: triggers after FR (last French-language market)
+  //     language-de: triggers after AT (last German-language market)
+  //
+  // After the loop only baseRows remains alive, then we publish base and return.
+  //
+  // Peak heap ≈ bulk data (once) + base rows + ONE language group + one country
+  // buffer ≈ ~2–3 GB instead of the previous 8 GB.
+  const baseRows = new Map<string, MetaBaseRow>();
+  // Language rows keyed by language code, published and freed per language group
+  const pendingLangRows = new Map<string, Map<string, MetaLanguageRow>>();
+  const pendingCountryRows = new Map<string, Map<string, MetaCountryRow>>();
+  const processedMarketsByCountry = new Map<string, Set<string>>();
+  const processedMarketsByLanguage = new Map<string, Set<string>>();
+
+  // Pre-compute which markets contribute to each language FROM THE FULL CONFIG.
+  const languageToMarkets = new Map<string, string[]>();
+  for (const mc of allConfiguredMarkets) {
+    const language = config.markets.markets[mc]?.language;
+    if (!language) continue;
+    if (!languageToMarkets.has(language)) languageToMarkets.set(language, []);
+    languageToMarkets.get(language)!.push(mc);
+  }
+
+  let totalCanonicals = 0;
+  let totalEligible = 0;
+  let totalIneligible = 0;
+  let totalExcluded = 0;
+
+  // Batch feed_items upserts (100 at a time) for efficiency
+  type UpsertRow = (typeof feedItemsTable)["$inferInsert"];
+  const upsertBatch: UpsertRow[] = [];
+
+  async function flushUpsertBatch(): Promise<void> {
+    if (upsertBatch.length === 0) return;
+    const batch = upsertBatch.splice(0);
+    await db
+      .insert(feedItemsTable)
+      .values(batch)
+      .onConflictDoUpdate({
+        target: [
+          feedItemsTable.variantId,
+          feedItemsTable.marketCode,
+          feedItemsTable.language,
+          feedItemsTable.channel,
+        ],
+        set: {
+          canonicalJson: sql`excluded.canonical_json`,
+          isEligible: sql`excluded.is_eligible`,
+          exclusionReason: sql`excluded.exclusion_reason`,
+          dataQualityScore: sql`excluded.data_quality_score`,
+          checksum: sql`excluded.checksum`,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  for (const marketCode of targetMarkets) {
+    const market = config.markets.markets[marketCode];
+    if (!market) continue;
+    const { country } = market;
+
+    const { language } = market;
+    if (!pendingLangRows.has(language)) pendingLangRows.set(language, new Map());
+    if (!processedMarketsByLanguage.has(language)) processedMarketsByLanguage.set(language, new Set());
+    if (!pendingCountryRows.has(country)) pendingCountryRows.set(country, new Map());
+    if (!processedMarketsByCountry.has(country)) processedMarketsByCountry.set(country, new Set());
+
+    logger.info({ marketCode, country }, "Meta: processing market");
+    let marketEligible = 0;
+    let marketIneligible = 0;
+    let marketExcluded = 0;
+
+    for (const product of products) {
+      const productVariants = variantsByProduct.get(product.id) ?? [];
+
+      for (const variant of productVariants) {
+        const variantMVs = marketVariantsByVariant.get(variant.id) ?? [];
+        const mv = variantMVs.find((m) => m.marketCode === marketCode);
+        if (!mv) continue;
+
+        if (!mv.isEligible) {
+          marketIneligible++;
+          continue;
+        }
+
+        const rec = recByProductMarket.get(recKey(product.id, marketCode)) ?? null;
+
+        const canonical = buildCanonical(
+          {
+            product: product as unknown as ProductRow,
+            variant: variant as unknown as VariantRow,
+            marketVariants: variantMVs as unknown as MarketVariantRow[],
+            translations: (translationsByProduct.get(product.id) ?? []) as unknown as TranslationRow[],
+            images: (imagesByProduct.get(product.id) ?? []) as unknown as ImageRow[],
+            inventoryLevels: (inventoryByVariant.get(variant.id) ?? []) as unknown as InventoryRow[],
+            recommendations: rec as unknown as RecommendationRow | null,
+            normalizedBestsellerScore: null,
+            config,
+          },
+          marketCode,
+          "meta",
+        );
+
+        if (!canonical) {
+          marketExcluded++;
+          continue;
+        }
+
+        // Persist to feed_items (batched)
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { generatedAt: _omit, ...stableForChecksum } = canonical;
+        const checksum = computeChecksum(stableForChecksum);
+        upsertBatch.push({
+          variantId: variant.id,
+          marketCode,
+          language: canonical.language,
+          channel: "meta",
+          canonicalJson: canonical as unknown as Record<string, unknown>,
+          isEligible: canonical.exclusionReasons.length === 0,
+          exclusionReason: canonical.exclusionReasons[0] ?? null,
+          dataQualityScore: String(canonical.dataQualityScore),
+          checksum,
+        });
+        if (upsertBatch.length >= UPSERT_BATCH_SIZE) {
+          await flushUpsertBatch();
+        }
+
+        if (canonical.exclusionReasons.length > 0) {
+          marketIneligible++;
+          continue;
+        }
+
+        marketEligible++;
+        totalCanonicals++;
+
+        const mapped = mapToMeta(canonical, config);
+        if (!mapped) {
+          marketExcluded++;
+          marketEligible--;
+          totalCanonicals--;
+          continue;
+        }
+
+        const { id, language, country: c, base, language_row, country_row } = mapped;
+
+        // Base: deduplicated by id (same across markets for same variant×market)
+        if (!baseRows.has(id)) baseRows.set(id, base);
+
+        // Language rows: buffered per language group, published and freed when the
+        // last market for that language is processed.
+        pendingLangRows.get(language)?.set(id, language_row);
+
+        // Country rows buffered until country is complete
+        pendingCountryRows.get(c)!.set(id, country_row);
+      }
+    }
+
+    await flushUpsertBatch();
+
+    processedMarketsByCountry.get(country)!.add(marketCode);
+    processedMarketsByLanguage.get(language)!.add(marketCode);
+    totalEligible += marketEligible;
+    totalIneligible += marketIneligible;
+    totalExcluded += marketExcluded;
+
+    logger.info({ marketCode, eligible: marketEligible, ineligible: marketIneligible, excluded: marketExcluded }, "Market processed");
+
+    // If all markets that contribute to this country have been processed,
+    // publish the country file immediately and free the buffer.
+    // Safety: ALL contributing markets (from full config) must be in targetMarkets —
+    // a partial run that only includes BE_FR must not publish country-BE with
+    // incomplete data, even though "BE" appears as a processed country.
+    const allMarketsForCountry = countryToMarkets.get(country) ?? [];
+    const doneMarkets = processedMarketsByCountry.get(country)!;
+    const allContributingMarketsInRun = allMarketsForCountry.every((m) => targetMarkets.includes(m));
+    const isCountryComplete = allContributingMarketsInRun && allMarketsForCountry.every((m) => doneMarkets.has(m));
+
+    if (isCountryComplete) {
+      const key = `country-${country}` as MetaFeedKey;
+      const filename = META_FEED_FILES[key];
+      const rows = [...(pendingCountryRows.get(country)?.values() ?? [])];
+      await publishFeed(key, filename, META_COUNTRY_HEADERS, rows, null, country);
+      pendingCountryRows.delete(country);              // free memory immediately
+      processedMarketsByCountry.delete(country);
+      logger.info({ country, rows: rows.length }, "Country rows published and freed from heap");
+    }
+
+    // If all markets for this language have been processed, publish the language
+    // file now and free those rows. This keeps peak heap to one language group at
+    // a time instead of accumulating fr + de simultaneously.
+    // (Skipped for partial runs — shared layers are not safe to publish partially.)
+    if (!isPartialRun) {
+      const allMarketsForLanguage = languageToMarkets.get(language) ?? [];
+      const doneLangMarkets = processedMarketsByLanguage.get(language)!;
+      const isLanguageComplete = allMarketsForLanguage.every((m) => doneLangMarkets.has(m));
+
+      if (isLanguageComplete) {
+        const key = `language-${language}` as MetaFeedKey;
+        const filename = META_FEED_FILES[key];
+        if (filename) {
+          const rows = [...(pendingLangRows.get(language)?.values() ?? [])];
+          await publishFeed(key, filename, META_LANGUAGE_HEADERS, rows, language, null);
+          pendingLangRows.delete(language);              // free memory immediately
+          processedMarketsByLanguage.delete(language);
+          logger.info({ language, rows: rows.length }, "Language rows published and freed from heap");
+        }
+      }
+    }
+  }
+
+  logger.info(
+    { eligible: totalEligible, ineligible: totalIneligible, excluded: totalExcluded, totalCanonicals },
+    "All markets processed",
+  );
+
+  // ── Release bulk data from scope before base CSV serialization ──────────────
+  //
+  // Clearing the lookup Maps removes the Map-level references, but the raw DB
+  // result arrays (variants, images, etc.) still hold the row objects via their
+  // `const` binding. splice(0) removes all array elements so the row objects
+  // become GC-eligible. Combined with a raised heap limit (12 GB) this gives V8
+  // enough headroom to compact the old generation before the base CSV is built.
+  variantsByProduct.clear();
+  marketVariantsByVariant.clear();
+  translationsByProduct.clear();
+  imagesByProduct.clear();
+  inventoryByVariant.clear();
+  recByProductMarket.clear();
+  // Also clear the raw arrays so the individual row objects are GC-eligible
+  products.splice(0);
+  variants.splice(0);
+  marketVariants.splice(0);
+  translations.splice(0);
+  images.splice(0);
+  inventory.splice(0);
+  recommendations.splice(0);
+
+  // ── 3. Publish base file (language files already published inline) ────────────
+  //
+  // For full runs: language files were published and their Maps freed during the
+  // market loop. Only baseRows remains alive here.
+  //
+  // For partial runs: shared layers (base + language) are NOT published because
+  // they would be incomplete. Set placeholder results and return.
   if (isPartialRun) {
     logger.info(
       { reason: "partial-market run" },
       "Skipping base + language shared layers — not safe to publish partial catalog",
     );
     feedResults["base"] = { itemCount: baseRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["base"]), versionTs), published: false, sha256: "" };
-    feedResults["language-fr"] = { itemCount: langFrRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["language-fr"]), versionTs), published: false, sha256: "" };
-    feedResults["language-de"] = { itemCount: langDeRows.size, storagePath: versionedPath(metaFeedPath(META_FEED_FILES["language-de"]), versionTs), published: false, sha256: "" };
+    // Language placeholders: if inline publishing didn't run (isPartialRun=true),
+    // set empty placeholders for any language not yet in feedResults.
+    for (const lang of ["fr", "de"]) {
+      const key = `language-${lang}` as MetaFeedKey;
+      if (!feedResults[key]) {
+        const langRowCount = pendingLangRows.get(lang)?.size ?? 0;
+        feedResults[key] = { itemCount: langRowCount, storagePath: versionedPath(metaFeedPath(META_FEED_FILES[key]), versionTs), published: false, sha256: "" };
+      }
+    }
   } else {
+    // Language files were published inline; only base remains.
     await publishFeed("base", META_FEED_FILES["base"], META_BASE_HEADERS, [...baseRows.values()], null, null);
-    await publishFeed("language-fr", META_FEED_FILES["language-fr"], META_LANGUAGE_HEADERS, [...langFrRows.values()], "fr", null);
-    await publishFeed("language-de", META_FEED_FILES["language-de"], META_LANGUAGE_HEADERS, [...langDeRows.values()], "de", null);
   }
 
+  // Fill placeholder results for country files skipped in partial runs
   for (const country of ["BE", "FR", "DE", "AT"]) {
     const key = `country-${country}` as MetaFeedKey;
-    const filename = META_FEED_FILES[key];
-    const rows = [...(countryRows.get(country)?.values() ?? [])];
-
-    if (isPartialRun && !representedCountries.has(country)) {
-      logger.info({ country, reason: "country not in partial run markets" }, "Skipping country layer publish");
+    if (!feedResults[key]) {
+      const filename = META_FEED_FILES[key];
       feedResults[key] = { itemCount: 0, storagePath: metaFeedPath(filename), published: false, sha256: "" };
-      continue;
+      logger.info({ country, reason: "country not in run markets" }, "Skipping country layer publish");
     }
-
-    await publishFeed(key, filename, META_COUNTRY_HEADERS, rows, null, country);
   }
 
   const result: MetaRunResult = {

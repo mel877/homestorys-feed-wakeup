@@ -13,13 +13,23 @@
  *   C. Item-count drop exceeds threshold → atomicPublish returns false, no DB insert
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 process.env["CONFIG_DIR"] = resolve(__dir, "../../../config");
 process.env["META_DRY_RUN"] = "false"; // disable dry-run so the gate is exercised
+
+// These imports get the mocked @workspace/db values; imported early so the
+// type-safe mocks are available before vi.mock() hoisting resolves.
+// eslint-disable-next-line import/first
+import {
+  db as _db,
+  productsTable as _productsTable,
+  variantsTable as _variantsTable,
+  marketVariantsTable as _marketVariantsTable,
+} from "@workspace/db";
 
 // ── Hoisted mock state ────────────────────────────────────────────────────────
 
@@ -32,6 +42,7 @@ const {
   mockProcessAllCanonicals,
   mockDbInsert,
   mockDbUpdate,
+  mockBuildCanonical,
 } = vi.hoisted(() => {
   const mockDbInsertValues = vi.fn().mockResolvedValue([]);
   const mockDbInsert = vi.fn().mockReturnValue({ values: mockDbInsertValues });
@@ -47,9 +58,12 @@ const {
     mockUploadManifest: vi.fn().mockResolvedValue(undefined),
     mockDownloadManifest: vi.fn().mockResolvedValue(null), // null = no prior snapshot
     mockValidateMetaFeed: vi.fn(),
-    mockProcessAllCanonicals: vi.fn(),
+    mockProcessAllCanonicals: vi.fn(), // kept for backward compat; generator no longer calls it
     mockDbInsert,
     mockDbUpdate,
+    // buildCanonical returns null → all variants excluded → 0 rows per file,
+    // but all 7 publishFeed calls still happen so the gate logic is exercised.
+    mockBuildCanonical: vi.fn().mockReturnValue(null),
   };
 });
 
@@ -70,27 +84,100 @@ vi.mock("../src/validation/feed-validator", () => ({
   validateMetaFeed: mockValidateMetaFeed,
 }));
 
+// The generator no longer uses processAllCanonicals, but keep the mock so any
+// lingering import doesn't crash the test runner.
 vi.mock("../src/exporters/canonical-reader", () => ({
   processAllCanonicals: mockProcessAllCanonicals,
 }));
 
-vi.mock("@workspace/db", () => ({
-  db: {
-    insert: mockDbInsert,
-    update: mockDbUpdate,
-    select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue([]),
-      }),
-    }),
-  },
-  feedSnapshotsTable: { channel: "channel", storagePath: "storagePath" },
+// buildCanonical returns null → all variants are treated as excluded → 0 rows
+// per feed file, but all 7 publishFeed calls still happen (one per file) so the
+// gate and snapshot logic is fully exercised.
+vi.mock("../src/canonical/builder", () => ({
+  buildCanonical: mockBuildCanonical,
 }));
+
+vi.mock("../src/shopify/checksums", () => ({
+  computeChecksum: vi.fn().mockReturnValue("checksum-abc"),
+}));
+
+vi.mock("../src/lib/alerting", () => ({
+  resolveAlertWebhookUrl: vi.fn().mockReturnValue(null),
+  sendFeedBlockAlert: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Provide all table exports that runMetaExport's bulk loader imports.
+// Each table is a distinct object so the smart from() implementation can
+// return the right rows per table.
+vi.mock("@workspace/db", () => {
+  const productsTableStub = { $inferInsert: null, status: "status", id: "id" };
+  const variantsTableStub = { $inferInsert: null, productId: "productId", id: "id" };
+  const marketVariantsTableStub = { $inferInsert: null, variantId: "variantId", marketCode: "mc" };
+  const productTranslationsTableStub = { productId: "productId" };
+  const imagesTableStub = { productId: "productId" };
+  const inventoryLevelsTableStub = { variantId: "variantId" };
+  const recommendationsTableStub = { productId: "productId" };
+  const feedItemsTableStub = {
+    $inferInsert: null,
+    variantId: "variantId",
+    marketCode: "marketCode",
+    language: "language",
+    channel: "channel",
+  };
+  const feedSnapshotsTableStub = {
+    $inferInsert: null,
+    channel: "channel",
+    storagePath: "storagePath",
+    isCurrent: "isCurrent",
+  };
+
+  // Minimal DB rows so the generator passes the early-exit guard (products.length > 0)
+  // and enters the market loop. buildCanonical is mocked to return null so all
+  // variants end up excluded and 0 rows accumulate — but all 7 publishFeed calls
+  // still fire (one per file) so gate + snapshot logic is exercised.
+  const PRODUCT = { id: "p1", status: "active", title: "Test" };
+  const VARIANT = { id: "v1", productId: "p1", price: "99.99" };
+  const MVS = ["BE_FR", "BE_DE", "FR", "DE", "AT"].map((mc, i) => ({
+    id: `mv${i}`,
+    variantId: "v1",
+    marketCode: mc,
+    isEligible: true,
+  }));
+
+  const dataByTable = new Map<object, unknown[]>([
+    [productsTableStub, [PRODUCT]],
+    [variantsTableStub, [VARIANT]],
+    [marketVariantsTableStub, MVS],
+  ]);
+
+  return {
+    db: {
+      insert: mockDbInsert,
+      update: mockDbUpdate,
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockImplementation((table: object) => ({
+          where: vi.fn().mockResolvedValue(dataByTable.get(table) ?? []),
+        })),
+      }),
+    },
+    productsTable: productsTableStub,
+    variantsTable: variantsTableStub,
+    marketVariantsTable: marketVariantsTableStub,
+    productTranslationsTable: productTranslationsTableStub,
+    imagesTable: imagesTableStub,
+    inventoryLevelsTable: inventoryLevelsTableStub,
+    recommendationsTable: recommendationsTableStub,
+    feedItemsTable: feedItemsTableStub,
+    feedSnapshotsTable: feedSnapshotsTableStub,
+  };
+});
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn().mockReturnValue({}),
   and: vi.fn().mockReturnValue({}),
   desc: vi.fn().mockReturnValue({}),
+  inArray: vi.fn().mockReturnValue({}),
+  sql: vi.fn().mockReturnValue({}),
 }));
 
 // ── Shared canonical fixture ──────────────────────────────────────────────────
@@ -250,11 +337,54 @@ function schemaInvalid() {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+// Minimal DB rows reused across tests to keep db.select returning real data.
+// These are defined at module scope so they survive vi.clearAllMocks().
+const _PRODUCT = { id: "p1", status: "active", title: "Test" };
+const _VARIANT = { id: "v1", productId: "p1", price: "99.99" };
+const _MVS = ["BE_FR", "BE_DE", "FR", "DE", "AT"].map((mc, i) => ({
+  id: `mv${i}`,
+  variantId: "v1",
+  marketCode: mc,
+  isEligible: true,
+}));
+
+/**
+ * Re-apply the db.select mock implementation.
+ *
+ * vi.clearAllMocks() also clears vi.fn() instances created inside the
+ * vi.mock() factory (they are registered in the same mock registry), which
+ * resets their mockReturnValue and mockImplementation.  We call this helper
+ * in beforeEach so every test starts with a working db.select that returns
+ * the minimal fixture rows needed to pass the generator's early-exit guard.
+ */
+function resetDbSelectMock() {
+  const dataByTable = new Map<object, unknown[]>([
+    [_productsTable as object, [_PRODUCT]],
+    [_variantsTable as object, [_VARIANT]],
+    [_marketVariantsTable as object, _MVS],
+  ]);
+  (_db.select as Mock).mockReturnValue({
+    from: vi.fn().mockImplementation((table: object) => ({
+      where: vi.fn().mockResolvedValue(dataByTable.get(table) ?? []),
+    })),
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // Storage / manifest mocks
   mockUploadFeedFile.mockResolvedValue("sha256-abc");
   mockUploadManifest.mockResolvedValue(undefined);
   mockDownloadManifest.mockResolvedValue(null); // no prior snapshot = first publish
+  // Canonical builder mock (returns null → 0 rows per file, but publishFeed still fires)
+  mockBuildCanonical.mockReturnValue(null);
+  // db.insert / db.update default chains
+  mockDbInsert.mockReturnValue({ values: vi.fn().mockResolvedValue([]) });
+  mockDbUpdate.mockReturnValue({
+    set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
+  });
+  // db.select MUST be re-initialised after clearAllMocks (see resetDbSelectMock docstring)
+  resetDbSelectMock();
 });
 
 describe("Meta generator gate — happy path (first publish, schema valid)", () => {
