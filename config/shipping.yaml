@@ -25,28 +25,37 @@ classes:
 rates: {}
 
 # Meta catalog feed: flat shipping rate per country (Fix 9).
-# Key = ISO country code matching config/markets.yaml (BE, FR, DE, AT).
+# Key = ISO country code matching config/markets.yaml (BE, FR, DE, AT, CH, LU).
 # Format emitted in the Meta CSV: "country::service:price currency"
-# Leave meta_feed_rates empty ({}) to omit the shipping field from Meta feeds
-# — Meta will show "Shipping calculated at checkout" as fallback.
-# Update with actual rates from your logistics/carrier agreements.
-meta_feed_rates: {}
-#  BE:
-#    service: "Livraison Standard"
-#    price: "29.90"
-#    currency: "EUR"
-#  FR:
-#    service: "Livraison Standard"
-#    price: "39.90"
-#    currency: "EUR"
-#  DE:
-#    service: "Standardlieferung"
-#    price: "39.90"
-#    currency: "EUR"
-#  AT:
-#    service: "Standardlieferung"
-#    price: "49.90"
-#    currency: "EUR"
+#
+# Source: Channable Projet DE (confirmed 2026-08-18 by Mélissa).
+# Note: Channable has tiered rates (e.g. < 250€ → 9.60€, ≥ 250€ → free).
+# Meta catalog only supports one flat rate per country, so the non-zero tier is
+# used here as a conservative estimate. Orders above the free-shipping threshold
+# will show free shipping at checkout regardless of what appears in the feed.
+# For FR: rates are in the separate Channable Projet FR — configure when available.
+meta_feed_rates:
+  BE:
+    service: "Livraison Standard"
+    price: "9.60"
+    currency: "EUR"
+  DE:
+    service: "Standardlieferung"
+    price: "9.50"
+    currency: "EUR"
+  AT:
+    service: "Standardlieferung"
+    price: "19.50"
+    currency: "EUR"
+  LU:
+    service: "Livraison Standard"
+    price: "9.50"
+    currency: "EUR"
+  CH:
+    service: "Standardlieferung"
+    price: "19.50"
+    currency: "CHF"
+  # FR: rates to be confirmed from Channable Projet FR
 
 # Default class when no metafield is present and no rule matches
 default_class: standard

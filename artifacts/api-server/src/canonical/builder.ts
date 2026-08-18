@@ -187,6 +187,16 @@ export function buildCanonical(
     variant.metafieldDiscontinued ?? false,
   );
 
+  // ── Clean variant guard (Channable rule 2.2) ─────────────────────────────
+  // If the first Shopify image (position 1 = the variant's assigned primary)
+  // is a TEXTURES/Sixtures swatch, the variant represents a fabric/material colour
+  // option — not a real product photo. Exclude the entire variant from all feeds.
+  const firstImage = images.slice().sort((a, b) => (a.position ?? 999) - (b.position ?? 999))[0];
+  if (firstImage) {
+    const firstUrlLower = firstImage.url.toLowerCase();
+    if (firstUrlLower.includes("textures") || firstUrlLower.includes("sixtures")) return null;
+  }
+
   // ── Images ────────────────────────────────────────────────────────────────
   const classifiedImages = images.map((img) => ({
     url: img.url,

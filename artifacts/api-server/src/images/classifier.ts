@@ -484,7 +484,8 @@ function isExcludedFeedImage(img: ClassifiedImage): boolean {
     url.includes("schematic") ||
     url.includes("line-draw") ||
     url.includes("line_draw") ||
-    url.includes("textures")         // rule 2.2 — "TEXTURES" fabric variants
+    url.includes("textures") ||      // rule 2.2 — "TEXTURES" fabric/material swatches
+    url.includes("sixtures")         // rule 2.2 — "Sixtures" variant swatch (same pattern)
   ) {
     return true;
   }
