@@ -297,12 +297,36 @@ export async function startScheduler(): Promise<void> {
         // feed-export lock so it can never overlap a standalone export.
         const { withExportLock } = await import("../exporters/export-lock");
         await withExportLock(async () => {
-          await runGoogleExport({ syncRunId: runId }).catch((err) =>
-            logger.error({ err }, "Google re-export failed after full sync"),
-          );
-          await runMetaExport({ syncRunId: runId }).catch((err) =>
-            logger.error({ err }, "Meta re-export failed after full sync"),
-          );
+          // ── Google export ────────────────────────────────────────────────
+          let googleOutcome: "ok" | "failed" = "ok";
+          await runGoogleExport({ syncRunId: runId }).catch((err) => {
+            googleOutcome = "failed";
+            logger.error({ err }, "Google re-export failed after full sync");
+          });
+
+          // ── Meta export ──────────────────────────────────────────────────
+          // A failed Meta export is recorded in metadata but does NOT block
+          // Google (already finished above) or mark the sync_run as failed.
+          let metaOutcome: "ok" | "failed" = "ok";
+          await runMetaExport({ syncRunId: runId }).catch((err) => {
+            metaOutcome = "failed";
+            logger.error({ err }, "Meta re-export failed after full sync");
+          });
+
+          // Record both export outcomes in the sync_run metadata row so
+          // operators can see on the dashboard whether both feeds succeeded.
+          await db
+            .update(syncRunsTable)
+            .set({
+              metadata: sql`COALESCE(${syncRunsTable.metadata}, '{}'::jsonb) || ${JSON.stringify({
+                googleExport: googleOutcome,
+                metaExport: metaOutcome,
+              })}::jsonb`,
+            })
+            .where(eq(syncRunsTable.id, runId))
+            .catch((err) =>
+              logger.error({ err, runId }, "Failed to record export outcomes in sync_run metadata"),
+            );
         }).catch((err) =>
           logger.error({ err }, "Feed export lock not acquired after full sync"),
         );
