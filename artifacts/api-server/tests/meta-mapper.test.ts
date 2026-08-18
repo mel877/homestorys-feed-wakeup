@@ -109,10 +109,12 @@ function makeConfig(): AppConfig {
         FR: { country: "FR", language: "fr", currency: "EUR" },
         DE: { country: "DE", language: "de", currency: "EUR" },
         AT: { country: "AT", language: "de", currency: "EUR" },
+        CH_DE: { country: "CH", language: "de", currency: "CHF" },
+        LU_DE: { country: "LU", language: "de", currency: "EUR" },
       },
       language_masters: {
         fr: { markets: ["BE_FR", "FR"] },
-        de: { markets: ["BE_DE", "DE", "AT"] },
+        de: { markets: ["BE_DE", "DE", "AT", "CH_DE", "LU_DE"] },
       },
     },
     languages: { languages: [] },
@@ -403,6 +405,60 @@ describe("mapToMeta", () => {
       { market: "BE_FR", language: "fr", expected: "BE::Livraison Standard:9.60 EUR" },
       { market: "DE",    language: "de", expected: "DE::Standardlieferung:9.50 EUR" },
       { market: "AT",    language: "de", expected: "AT::Standardlieferung:19.50 EUR" },
+    ];
+    for (const { market, language, expected } of cases) {
+      const result = mapToMeta(makeCanonical({ market, language }), config)!;
+      expect(result.country_row.shipping).toBe(expected);
+    }
+  });
+
+  // ── CH and LU markets ─────────────────────────────────────────────────────
+
+  it("sets country CH for CH_DE market", () => {
+    const result = mapToMeta(makeCanonical({ market: "CH_DE", language: "de" }), makeConfig())!;
+    expect(result.country).toBe("CH");
+  });
+
+  it("sets country LU for LU_DE market", () => {
+    const result = mapToMeta(makeCanonical({ market: "LU_DE", language: "de" }), makeConfig())!;
+    expect(result.country).toBe("LU");
+  });
+
+  it("country_row.shipping is CH::Standardlieferung:19.50 CHF for CH_DE market", () => {
+    const config = makeConfig();
+    config.shipping.meta_feed_rates = {
+      CH: { service: "Standardlieferung", price: "19.50", currency: "CHF" },
+    };
+    const result = mapToMeta(makeCanonical({ market: "CH_DE", language: "de" }), config)!;
+    expect(result.country_row.shipping).toBe("CH::Standardlieferung:19.50 CHF");
+  });
+
+  it("country_row.shipping is LU::Livraison Standard:9.50 EUR for LU_DE market", () => {
+    const config = makeConfig();
+    config.shipping.meta_feed_rates = {
+      LU: { service: "Livraison Standard", price: "9.50", currency: "EUR" },
+    };
+    const result = mapToMeta(makeCanonical({ market: "LU_DE", language: "de" }), config)!;
+    expect(result.country_row.shipping).toBe("LU::Livraison Standard:9.50 EUR");
+  });
+
+  it("all configured shipping rates including CH and LU produce non-empty shipping fields", () => {
+    const config = makeConfig();
+    config.shipping.meta_feed_rates = {
+      BE: { service: "Livraison Standard", price: "9.60", currency: "EUR" },
+      FR: { service: "Livraison Standard", price: "9.50", currency: "EUR" },
+      DE: { service: "Standardlieferung", price: "9.50", currency: "EUR" },
+      AT: { service: "Standardlieferung", price: "19.50", currency: "EUR" },
+      CH: { service: "Standardlieferung", price: "19.50", currency: "CHF" },
+      LU: { service: "Livraison Standard", price: "9.50", currency: "EUR" },
+    };
+    const cases: Array<{ market: string; language: string; expected: string }> = [
+      { market: "FR",    language: "fr", expected: "FR::Livraison Standard:9.50 EUR" },
+      { market: "BE_FR", language: "fr", expected: "BE::Livraison Standard:9.60 EUR" },
+      { market: "DE",    language: "de", expected: "DE::Standardlieferung:9.50 EUR" },
+      { market: "AT",    language: "de", expected: "AT::Standardlieferung:19.50 EUR" },
+      { market: "CH_DE", language: "de", expected: "CH::Standardlieferung:19.50 CHF" },
+      { market: "LU_DE", language: "de", expected: "LU::Livraison Standard:9.50 EUR" },
     ];
     for (const { market, language, expected } of cases) {
       const result = mapToMeta(makeCanonical({ market, language }), config)!;

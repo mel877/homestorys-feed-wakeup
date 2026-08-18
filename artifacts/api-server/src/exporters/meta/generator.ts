@@ -95,7 +95,9 @@ type MetaFeedKey =
   | "country-BE"
   | "country-FR"
   | "country-DE"
-  | "country-AT";
+  | "country-AT"
+  | "country-CH"
+  | "country-LU";
 
 const META_FEED_FILES: Record<MetaFeedKey, string> = {
   "base":        "meta-base.csv",
@@ -105,6 +107,8 @@ const META_FEED_FILES: Record<MetaFeedKey, string> = {
   "country-FR":  "meta-country-FR.csv",
   "country-DE":  "meta-country-DE.csv",
   "country-AT":  "meta-country-AT.csv",
+  "country-CH":  "meta-country-CH.csv",
+  "country-LU":  "meta-country-LU.csv",
 };
 
 // ── CSV serialization ─────────────────────────────────────────────────────────
@@ -730,7 +734,7 @@ export async function runMetaExport(options: {
   }
 
   // Fill placeholder results for country files skipped in partial runs
-  for (const country of ["BE", "FR", "DE", "AT"]) {
+  for (const country of ["BE", "FR", "DE", "AT", "CH", "LU"]) {
     const key = `country-${country}` as MetaFeedKey;
     if (!feedResults[key]) {
       const filename = META_FEED_FILES[key];
