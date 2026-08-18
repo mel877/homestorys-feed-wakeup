@@ -55,7 +55,12 @@ meta_feed_rates:
     service: "Standardlieferung"
     price: "19.50"
     currency: "CHF"
-  # FR: rates to be confirmed from Channable Projet FR
+  FR:
+    service: "Livraison Standard"
+    price: "9.50"
+    currency: "EUR"
+    # Source: Channable Projet FR — Facebook Dynamic Ads rules "Versandkosten unter/über 250"
+    # Tiered: < 250€ → 9.50€ / ≥ 250€ → free. Flat rate = 9.50€ (conservative estimate).
 
 # Default class when no metafield is present and no rule matches
 default_class: standard
