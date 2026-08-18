@@ -7,6 +7,8 @@ export const MarketSchema = z.object({
   language: z.enum(["fr", "de", "en", "it"]),
   currency: z.string().length(3),
   label: z.string().optional(),
+  /** Canonical base URL for this market's storefront (used for feed product links). */
+  base_url: z.string().url().optional(),
 });
 
 export const MarketsConfigSchema = z.object({
@@ -220,6 +222,21 @@ export const ComplementaryConfigSchema = z.object({
 
 export type ComplementaryConfig = z.infer<typeof ComplementaryConfigSchema>;
 
+// ── Exclusions ────────────────────────────────────────────────────────────────
+
+/**
+ * Feed exclusion rules — sourced from Channable rule groups.
+ * Applied globally before any channel-specific mapping.
+ */
+export const ExclusionsConfigSchema = z.object({
+  /** Shopify vendor values (case-insensitive exact match) → exclude from all feeds. */
+  excluded_vendors: z.array(z.string()).default([]),
+  /** Shopify product_type substrings (case-insensitive) → exclude from all feeds. */
+  excluded_product_types: z.array(z.string()).default([]),
+});
+
+export type ExclusionsConfig = z.infer<typeof ExclusionsConfigSchema>;
+
 // ── Unified app config ────────────────────────────────────────────────────────
 
 export interface AppConfig {
@@ -232,4 +249,5 @@ export interface AppConfig {
   labels: LabelsConfig;
   feedPolicy: FeedPolicyConfig;
   complementary: ComplementaryConfig;
+  exclusions: ExclusionsConfig;
 }

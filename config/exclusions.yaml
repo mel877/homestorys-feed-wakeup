@@ -1,0 +1,62 @@
+# Feed exclusion rules — vendors and product types excluded from ALL feeds.
+# Mirrors the Channable "Exclusion" rule group (Projet DE + Projet FR).
+# All comparisons are case-insensitive exact matches for vendors,
+# and case-insensitive substring matches for product types.
+
+# ── Vendor (brand) exclusions ────────────────────────────────────────────────
+# Products from these Shopify vendors are excluded from every Google and Meta feed.
+# Source: Channable Projet DE — Brand exclusion 1, 2, 3
+excluded_vendors:
+  - Ormo
+  - Olly
+  - Gubi
+  - MK Home
+  - Nikki Amvrosiani
+  - Fast
+  - Farm Living
+  - Pillary
+  - "Cort Hansen & Son"
+  - Extensia
+  - Fermob
+  - Flos
+  - Broste
+  - Fritz Hansen
+  - "Fatü"
+  - Natural Collection
+  - New Mags
+  - Scapa Home
+  - Spotted
+  - Umbrosa
+  - Mon Dada
+  - Gervasoni
+  - Theoret
+
+# ── Product type exclusions ──────────────────────────────────────────────────
+# Products whose Shopify product_type contains any of these strings (case-insensitive)
+# are excluded from all feeds.
+# Source: Channable Projet DE — Product type exclusion 1, 2, 3
+# Note: Shopify primary locale = DE, so category names are German.
+excluded_product_types:
+  - Accessoires
+  - Aromatherapie
+  - Badezimmer
+  - Bücher
+  - Dekoration
+  - Geschenkgutscheine
+  - Geschirr
+  - Holzlagerung
+  - Kerzen
+  - Kleiderhaken
+  - Pflegeprodukte
+  - Produits de soins   # FR legacy name for same category (kept for backwards compat)
+  - Tischaccssoires
+  - Vasen
+  - Windlichter
+  - Abdeckungen
+  - Auflagenboxen
+  - Küchen
+  - Laternen
+  - Reinigungsprodukte
+  - Servierwagen
+  - Sonnenschirme
+  - Decken

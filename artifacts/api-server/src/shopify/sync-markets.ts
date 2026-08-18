@@ -155,6 +155,8 @@ function countryName(code: string): string {
     FR: "france",
     DE: "germany",
     AT: "austria",
+    CH: "switzerland",
+    LU: "luxembourg",
     NL: "netherlands",
     GB: "united kingdom",
     US: "united states",

@@ -12,6 +12,7 @@ import {
   LabelsConfigSchema,
   FeedPolicyConfigSchema,
   ComplementaryConfigSchema,
+  ExclusionsConfigSchema,
 } from "./schemas";
 
 /**
@@ -90,6 +91,9 @@ export function loadConfig(): AppConfig {
     ),
     complementary: loadYaml(configDir, "complementary.yaml", (raw) =>
       ComplementaryConfigSchema.parse(raw),
+    ),
+    exclusions: loadYaml(configDir, "exclusions.yaml", (raw) =>
+      ExclusionsConfigSchema.parse(raw),
     ),
   };
 

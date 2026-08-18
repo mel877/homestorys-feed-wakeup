@@ -284,7 +284,9 @@ export function mapToMeta(
   const language_row: MetaLanguageRow = {
     id,
     title: canonical.title.slice(0, 500),
-    description: (canonical.description || canonical.title).slice(0, 9999),
+    // Meta catalog / Facebook Dynamic Ads: 800-char limit matches Channable rule
+    // "Beschreibung zu lang" — descriptions beyond this are truncated at a word boundary.
+    description: (canonical.description || canonical.title).slice(0, 800),
     link: canonical.productUrl,
   };
 

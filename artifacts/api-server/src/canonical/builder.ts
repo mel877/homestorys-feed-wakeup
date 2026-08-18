@@ -107,10 +107,20 @@ export function buildCanonical(
 
   // ── Policy exclusions — handle / product type (Channable rule set v1.0) ───
   // Rule 1.2 — handle contains "calendrier" (advent calendars, seasonal items)
-  // Rule 2.4 — product_type contains "produits de soins" (beauty/care products)
+  if (product.handle.includes("calendrier")) return null;
+
+  // Vendor exclusions — brands excluded from all feeds (Channable Brand exclusion 1-3)
+  const vendorLower = (product.vendor ?? "").toLowerCase();
   if (
-    product.handle.includes("calendrier") ||
-    product.productType?.toLowerCase().includes("produits de soins")
+    vendorLower &&
+    config.exclusions.excluded_vendors.some((v) => v.toLowerCase() === vendorLower)
+  ) return null;
+
+  // Product type exclusions — categories excluded from all feeds (Channable Product type exclusion 1-3)
+  const productTypeLower = (product.productType ?? "").toLowerCase();
+  if (
+    productTypeLower &&
+    config.exclusions.excluded_product_types.some((t) => productTypeLower.includes(t.toLowerCase()))
   ) return null;
 
   // Rules 2.5, 2.6, 2.8, 3.15 — title-based content exclusions
@@ -254,9 +264,11 @@ export function buildCanonical(
   );
 
   // ── URL ───────────────────────────────────────────────────────────────────
-  // Use localized handle for URL fallback so DE/NL markets get the correct handle
+  // Primary source: productUrl set by sync-markets from Shopify webPresence.rootUrls.
+  // Fallback: construct from per-market base_url (config/markets.yaml) + localized handle.
   const localizedHandle = content.handle ?? product.handle;
-  const productUrl = pricing.productUrl ?? `https://homestorys.be/products/${localizedHandle}`;
+  const marketBaseUrl = market.base_url ?? "https://shop.homestorys.com/";
+  const productUrl = pricing.productUrl ?? `${marketBaseUrl}products/${localizedHandle}`;
 
   // ── Weight ────────────────────────────────────────────────────────────────
   const weightNorm = normaliseWeight(variant.weight, variant.weightUnit);

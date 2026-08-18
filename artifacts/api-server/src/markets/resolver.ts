@@ -17,6 +17,8 @@ export interface ResolvedMarket {
   country: string;
   currency: string;
   label: string;
+  /** Canonical storefront base URL for this market (from config/markets.yaml). */
+  base_url: string | undefined;
 }
 
 export interface ResolvedContent {
@@ -51,6 +53,7 @@ export function resolveMarket(
     country: market.country,
     currency: market.currency,
     label: market.label ?? marketCode,
+    base_url: market.base_url,
   };
 }
 
@@ -123,6 +126,7 @@ export function getAllMarkets(config: MarketsConfig): ResolvedMarket[] {
     country: market.country,
     currency: market.currency,
     label: market.label ?? code,
+    base_url: market.base_url,
   }));
 }
 

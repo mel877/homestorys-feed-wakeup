@@ -4,37 +4,56 @@ markets:
     language: fr
     currency: EUR
     label: Belgium (French)
+    base_url: https://shop-fr.homestorys.com/
 
   BE_DE:
     country: BE
     language: de
     currency: EUR
     label: Belgium (German)
+    base_url: https://shop-de.homestorys.com/
 
   FR:
     country: FR
     language: fr
     currency: EUR
     label: France
+    base_url: https://shop-fr.homestorys.com/
 
   DE:
     country: DE
     language: de
     currency: EUR
     label: Germany
+    base_url: https://shop-de.homestorys.com/
 
   AT:
     country: AT
     language: de
     currency: EUR
     label: Austria
+    base_url: https://shop-de.homestorys.com/
+
+  CH_DE:
+    country: CH
+    language: de
+    currency: CHF
+    label: Switzerland (German)
+    base_url: https://shop-de.homestorys.com/
+
+  LU_DE:
+    country: LU
+    language: de
+    currency: EUR
+    label: Luxembourg (German)
+    base_url: https://shop-de.homestorys.com/
 
 # Language masters — shared content, no per-country duplication
 language_masters:
   fr:
     markets: [BE_FR, FR]
   de:
-    markets: [BE_DE, DE, AT]
+    markets: [BE_DE, DE, AT, CH_DE, LU_DE]
   en:
     markets: []
   it:
