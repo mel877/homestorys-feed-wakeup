@@ -28,12 +28,12 @@ rates: {}
 # Key = ISO country code matching config/markets.yaml (BE, FR, DE, AT, CH, LU).
 # Format emitted in the Meta CSV: "country::service:price currency"
 #
-# Source: Channable Projet DE (confirmed 2026-08-18 by Mélissa).
-# Note: Channable has tiered rates (e.g. < 250€ → 9.60€, ≥ 250€ → free).
+# Source: Channable Projet DE for BE/DE/AT/LU/CH (confirmed 2026-08-18 by Mélissa).
+#         Channable Projet FR for FR (confirmed 2026-08-18 by Mélissa).
+# Note: Channable has tiered rates (e.g. < 250€ → 9.50€, ≥ 250€ → free).
 # Meta catalog only supports one flat rate per country, so the non-zero tier is
 # used here as a conservative estimate. Orders above the free-shipping threshold
 # will show free shipping at checkout regardless of what appears in the feed.
-# For FR: rates are in the separate Channable Projet FR — configure when available.
 meta_feed_rates:
   BE:
     service: "Livraison Standard"
