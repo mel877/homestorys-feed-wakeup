@@ -119,7 +119,11 @@ router.get("/dashboard/overview", requireDashboardAuth, async (req, res): Promis
   // Primary locale (fr) content lives on the products table, not product_translations —
   // use the active product count so it never shows a false zero.
   const config = loadConfig();
-  const primaryLocale = "fr";
+  // Primary locale = the Shopify store default (marked primary:true in languages.yaml).
+  // Its content lives on the products table, not product_translations, so we use the
+  // active product count as its coverage denominator instead of counting translation rows.
+  const primaryLang = config.languages.languages.find((l) => l.primary) ?? config.languages.languages[0]!;
+  const primaryLocale = primaryLang.code;
   const translationCountMap = new Map(dbTranslationCoverage.map((r) => [r.language, r.productCount]));
   const byLanguage = config.languages.languages.map((lang) => ({
     language: lang.code,
@@ -165,6 +169,7 @@ router.get("/dashboard/overview", requireDashboardAuth, async (req, res): Promis
       lastMetaPush: lastMetaPush[0]?.generatedAt?.toISOString() ?? null,
     },
     byLanguage,
+    primaryLocale,
   });
 });
 

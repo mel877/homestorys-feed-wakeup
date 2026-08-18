@@ -78,14 +78,19 @@ function buildProductGid(numericId: string): string {
 export async function syncTranslations(
   client: ShopifyClient,
   tracker: SyncRunTracker,
-  primaryLocale = "fr",
 ): Promise<void> {
   logger.info("Starting translation sync");
   const config = loadConfig();
-  const languages = config.languages.languages.map((l) => l.code);
+  const languages = config.languages.languages;
+
+  // Primary locale = Shopify store default (primary:true in languages.yaml = "de").
+  // Shopify's translation API returns empty arrays for the source locale, so we skip it.
+  // syncProducts already wrote its content to product_translations with this language code.
+  const primaryLang = languages.find((l) => l.primary) ?? languages[0]!;
+  const primaryLocale = primaryLang.code;
 
   // Get all locales we need to sync (skip primary — already handled by product sync)
-  const targetLocales = languages.filter((l) => l !== primaryLocale);
+  const targetLocales = languages.map((l) => l.code).filter((l) => l !== primaryLocale);
 
   logger.info({ targetLocales, primaryLocale }, "Syncing translations");
 
@@ -228,11 +233,11 @@ export async function syncProductTranslations(
   client: ShopifyClient,
   productDbId: string,
   shopifyProductGid: string,
-  primaryLocale = "fr",
 ): Promise<void> {
   const config = loadConfig();
-  const languages = config.languages.languages.map((l) => l.code);
-  const targetLocales = languages.filter((l) => l !== primaryLocale);
+  const languages = config.languages.languages;
+  const primaryLang = languages.find((l) => l.primary) ?? languages[0]!;
+  const targetLocales = languages.map((l) => l.code).filter((l) => l !== primaryLang.code);
 
   for (const locale of targetLocales) {
     const result = await client.request<SingleTranslatableResponse>(

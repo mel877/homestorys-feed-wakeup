@@ -26,6 +26,10 @@ export const LanguageSchema = z.object({
   code: z.enum(["fr", "de", "en", "it"]),
   name: z.string(),
   locale: z.string(),
+  /** True for the Shopify store's default locale — content lives on the products table,
+   *  not in product_translations. syncProducts writes it as the primary language row;
+   *  syncTranslations skips it (Shopify's translation API returns empty for the source locale). */
+  primary: z.boolean().optional().default(false),
 });
 
 export const LanguagesConfigSchema = z.object({

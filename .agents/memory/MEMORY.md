@@ -10,4 +10,5 @@
 - [Sync run reaper](feed-export-serialization.md) — sync_runs has no failure-reason column (use metadata JSONB); scheduler startup reaps orphaned "running" runs as failed.
 - [Export OOM fix](export-oom-fix.md) — all "orphaned" syncs were Meta/Google export OOM; fixed with processAllCanonicals streaming + sequential Meta publishFeed + market-by-market Google.
 - [Feed audit fixes](feed-audit-fixes.md) — 15-point audit applied to google/mapper.ts + meta/mapper.ts: locale suffix, availability_date, metaProductCategory, outlet condition, sale_price guard, localised labels, return_policy_info, shipping infrastructure, product_type hierarchy, delivery highlights.
+- [Shopify primary locale = DE](shopify-primary-locale.md) — German is Shopify default; sync-products must write as `de` not `fr`; Shopify translation API returns empty for source locale.
 - [Meta export heap accumulation](meta-export-heap-accumulation.md) — repeated runMetaExport in same process OOMs; restart server before retrying; fresh process peak ≈ 760 MB (vs 4 GB accumulated).

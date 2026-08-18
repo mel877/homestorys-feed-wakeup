@@ -192,24 +192,26 @@ export default function Overview() {
       <section>
         {(() => {
           const LANG_LABELS: Record<string, string> = { fr: "French", de: "German", en: "English", it: "Italian" };
-          const PRIMARY_LOCALE = "fr";
+          // Primary locale = Shopify store default (German). Content comes from product sync,
+          // not the translation API — it always has 100% coverage by definition.
+          const PRIMARY_LOCALE: string = (overview as { primaryLocale?: string }).primaryLocale ?? "de";
           const total = overview.totalProducts;
 
-          // For non-primary locales: incomplete coverage = fewer translations than active products
-          const deRow = overview.byLanguage.find((l: { language: string; productCount: number }) => l.language === "de");
-          const deCoverage = deRow ? deRow.productCount : 0;
-          const deIncomplete = deCoverage < total;
+          // Find any non-primary locale with 0 translations (genuine gap)
+          const missingLocales = overview.byLanguage
+            .filter((l: { language: string; productCount: number }) =>
+              l.language !== PRIMARY_LOCALE && l.productCount === 0
+            )
+            .filter((l: { language: string }) => l.language !== "it"); // IT intentionally empty
 
           return (
             <>
               <div className="flex items-center gap-3 mb-4">
                 <h2 className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Translation Coverage</h2>
-                {deIncomplete && (
+                {missingLocales.length > 0 && (
                   <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#e7000b] uppercase tracking-wide">
                     <AlertCircle className="w-3.5 h-3.5" />
-                    {deCoverage === 0
-                      ? "German missing — publish DE locale in Shopify admin"
-                      : `German partial — ${deCoverage.toLocaleString()} / ${total.toLocaleString()} products`}
+                    {`${missingLocales.map((l: { language: string }) => LANG_LABELS[l.language] ?? l.language.toUpperCase()).join(", ")} missing — run a full sync`}
                   </span>
                 )}
               </div>
@@ -234,7 +236,7 @@ export default function Overview() {
                         {isPrimary
                           ? "Primary locale (source)"
                           : lang.productCount === 0
-                            ? lang.language === "de" ? "Publish DE in Shopify admin" : "No translations yet"
+                            ? "No translations yet"
                             : isIncomplete
                               ? `${pct}% — ${total - lang.productCount} products use FR fallback`
                               : `${LANG_LABELS[lang.language] ?? lang.language} — 100% translated`}

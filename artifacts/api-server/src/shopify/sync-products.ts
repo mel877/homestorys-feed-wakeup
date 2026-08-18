@@ -8,6 +8,7 @@
 import { db, productsTable, variantsTable, imagesTable, productTranslationsTable } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
+import { loadConfig } from "../config";
 import type { ShopifyClient } from "./client";
 import { runBulkQuery } from "./bulk-ops";
 import { computeChecksum, hashUrl, hasChanged } from "./checksums";
@@ -379,8 +380,13 @@ function chunks<T>(arr: T[], size: number): T[][] {
 export async function syncProducts(
   client: ShopifyClient,
   tracker: SyncRunTracker,
-  primaryLocale = "fr",
 ): Promise<void> {
+  // Derive primary locale from config (Shopify default = "de"; marked primary:true in languages.yaml).
+  // syncProducts stores the Shopify base content under this locale code so that
+  // syncTranslations can fill in every other locale from the Shopify translation API.
+  const _cfg = loadConfig();
+  const _primaryLang = _cfg.languages.languages.find((l) => l.primary) ?? _cfg.languages.languages[0]!;
+  const primaryLocale = _primaryLang.code;
   logger.info("Starting product sync via bulk operation");
 
   // Prefetch existing checksums to detect changes client-side
@@ -691,8 +697,10 @@ export async function syncSingleProduct(
   client: ShopifyClient,
   shopifyProductGid: string,
   tracker?: SyncRunTracker,
-  primaryLocale = "fr",
 ): Promise<void> {
+  const _cfg2 = loadConfig();
+  const _primaryLang2 = _cfg2.languages.languages.find((l) => l.primary) ?? _cfg2.languages.languages[0]!;
+  const primaryLocale = _primaryLang2.code;
   const result = await client.request<SingleProductResponse>(
     SINGLE_PRODUCT_QUERY,
     { id: shopifyProductGid },

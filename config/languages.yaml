@@ -6,6 +6,7 @@ languages:
   - code: de
     name: German
     locale: de-DE
+    primary: true    # Shopify default locale — content lives on products table, not translations
 
   - code: en
     name: English
