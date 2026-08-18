@@ -664,7 +664,7 @@ components:
       properties:
         runType:
           type: string
-          enum: [full, inventory, prices, recommendations, export]
+          enum: [full, inventory, prices, recommendations, export, showroom]
 
     SyncTriggerResult:
       type: object

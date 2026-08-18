@@ -16,6 +16,8 @@ const JOB_MAP: Record<string, { jobName: string; runType: SyncRunType }> = {
   // Feed export only (Google + Meta) — regenerates channel feeds from the
   // already-synced canonical data without re-running the full Shopify sync.
   export: { jobName: "feed-export", runType: "export" },
+  // Showroom-only export — Eupen store availability feed for Google + Meta.
+  showroom: { jobName: "showroom-export", runType: "showroom" },
 };
 
 const router: IRouter = Router();
@@ -204,6 +206,23 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
               message: err instanceof Error ? err.message : String(err),
             });
             logger.error({ err, runId }, "Dashboard trigger: Meta export failed");
+          }
+          await tracker.complete();
+        } else if (runType === "showroom") {
+          const { runShowroomExport } = await import("../../exporters/showroom/runner");
+          const { SyncRunTracker } = await import("../../shopify/sync-run-tracker");
+          const tracker = new SyncRunTracker();
+          runId = await tracker.start("showroom", { trigger: "dashboard" });
+          try {
+            await runShowroomExport({ syncRunId: runId });
+          } catch (err: unknown) {
+            await tracker.logError({
+              errorType: "export_failed",
+              entityType: "channel",
+              entityId: "showroom",
+              message: err instanceof Error ? err.message : String(err),
+            });
+            logger.error({ err, runId }, "Dashboard trigger: Showroom export failed");
           }
           await tracker.complete();
         }

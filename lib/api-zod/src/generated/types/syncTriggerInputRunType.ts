@@ -15,4 +15,5 @@ export const SyncTriggerInputRunType = {
   prices: 'prices',
   recommendations: 'recommendations',
   export: 'export',
+  showroom: 'showroom',
 } as const;

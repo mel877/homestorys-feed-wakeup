@@ -28,7 +28,8 @@ export type SyncRunType =
   | "recommendations"
   | "webhook"
   | "product"
-  | "export";
+  | "export"
+  | "showroom";
 
 export class SyncRunTracker {
   private runId: string | null = null;

@@ -161,7 +161,7 @@ export const GetSyncRunResponse = zod.object({
  * @summary Manually trigger a sync job
  */
 export const TriggerSyncBody = zod.object({
-  "runType": zod.enum(['full', 'inventory', 'prices', 'recommendations', 'export'])
+  "runType": zod.enum(['full', 'inventory', 'prices', 'recommendations', 'export', 'showroom'])
 })
 
 export const TriggerSyncResponse = zod.object({
