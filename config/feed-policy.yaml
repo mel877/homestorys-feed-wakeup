@@ -31,6 +31,7 @@ sync_schedule:
   prices: "0 */2 * * *"       # every 2 hours
   inventory: "0 * * * *"      # hourly
   recommendations: "0 3 * * *" # nightly at 03:00 UTC
+  google: "30 3 * * *"         # nightly at 03:30 UTC (after full sync + recommendations)
 
 # Recommendation engine settings
 recommendations:

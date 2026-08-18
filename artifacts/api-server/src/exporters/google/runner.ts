@@ -43,20 +43,21 @@ const logger = rootLogger.child({ module: "google-runner" });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface GoogleMarketResult {
+  language: string;
+  country: string;
+  rows: number;
+  storagePath: string;
+  published: boolean;
+  publicUrl: string;
+  /** Set when the market failed with an unrecoverable error. */
+  error?: string;
+}
+
 export interface GoogleRunResult {
   markets: string[];
   totalCanonicals: number;
-  byMarket: Record<
-    string,
-    {
-      language: string;
-      country: string;
-      rows: number;
-      storagePath: string;
-      published: boolean;
-      publicUrl: string;
-    }
-  >;
+  byMarket: Record<string, GoogleMarketResult>;
   localInventory: { submitted: number; failed: number };
   dryRun: boolean;
   durationMs: number;
@@ -100,6 +101,9 @@ export async function runGoogleExport(options: {
   //
   // Trade-off: the DB bulk queries run once per market (5×) instead of once total.
   // This costs a few seconds of extra query time but is well worth the memory saving.
+  //
+  // Per-market errors are caught and recorded in byMarket[marketCode].error so a
+  // single market failure cannot abort the remaining markets.
   for (const marketCode of targetMarkets) {
     const market = config.markets.markets[marketCode];
     if (!market) continue;
@@ -107,145 +111,161 @@ export async function runGoogleExport(options: {
 
     logger.info({ marketCode, language, country }, "Google: streaming market canonicals");
 
-    const rows: GoogleFeedRow[] = [];
+    try {
+      const rows: GoogleFeedRow[] = [];
 
-    const { eligible, ineligible, excluded } = await processAllCanonicals(
-      config,
-      {
-        markets: [marketCode],
-        channel: "google",
-        // Persist feed_items only on the first full-catalog pass to avoid
-        // 5× upserts for the same canonical data. Markets are independent
-        // so the first persisted value is valid for all channels.
-        persistFeedItems: true,
-      },
-      (canonical) => {
-        result.totalCanonicals++;
-        const row = mapToGoogleRow(canonical, config);
-        if (row) rows.push(row);
+      const { eligible, ineligible, excluded } = await processAllCanonicals(
+        config,
+        {
+          markets: [marketCode],
+          channel: "google",
+          // Persist feed_items only on the first full-catalog pass to avoid
+          // 5× upserts for the same canonical data. Markets are independent
+          // so the first persisted value is valid for all channels.
+          persistFeedItems: true,
+        },
+        (canonical) => {
+          result.totalCanonicals++;
+          const row = mapToGoogleRow(canonical, config);
+          if (row) rows.push(row);
 
-        // Eupen showroom local inventory: Belgium only, deduplicated by variantId+language
-        if (
-          (canonical.market === "BE_FR" || canonical.market === "BE_DE") &&
-          canonical.pickupEupen &&
-          (canonical.stockEupen ?? 0) > 0
-        ) {
-          const key = `${canonical.variantId}:${canonical.language}`;
-          if (!beInventoryByKey.has(key)) {
-            beInventoryByKey.set(key, {
-              offerId: `online:${canonical.language}:BE:${canonical.variantId}`,
-              storeCode,
-              quantity: canonical.stockEupen ?? 0,
-              availability: "in stock",
-              pickup: "multi-day",
-            });
+          // Eupen showroom local inventory: Belgium only, deduplicated by variantId+language
+          if (
+            (canonical.market === "BE_FR" || canonical.market === "BE_DE") &&
+            canonical.pickupEupen &&
+            (canonical.stockEupen ?? 0) > 0
+          ) {
+            const key = `${canonical.variantId}:${canonical.language}`;
+            if (!beInventoryByKey.has(key)) {
+              beInventoryByKey.set(key, {
+                offerId: `online:${canonical.language}:BE:${canonical.variantId}`,
+                storeCode,
+                quantity: canonical.stockEupen ?? 0,
+                availability: "in stock",
+                pickup: "multi-day",
+              });
+            }
           }
-        }
-      },
-    );
+        },
+      );
 
-    logger.info({ marketCode, rows: rows.length, eligible, ineligible, excluded }, "Market streamed");
+      logger.info({ marketCode, rows: rows.length, eligible, ineligible, excluded }, "Market streamed");
 
-    // ── Generate TSV → upload → validate → publish ─────────────────────────
-    const currentPath = googleFeedPath(language, marketCode);
-    const versioned = versionedPath(currentPath, versionTs);
+      // ── Generate TSV → upload → validate → publish ──────────────────────
+      const currentPath = googleFeedPath(language, marketCode);
+      const versioned = versionedPath(currentPath, versionTs);
 
-    const tsv = buildGoogleTsv(rows);
-    const sha256 = await uploadFeedFile(versioned, tsv, "text/tab-separated-values");
+      const tsv = buildGoogleTsv(rows);
+      const sha256 = await uploadFeedFile(versioned, tsv, "text/tab-separated-values");
 
-    const manifest: FeedManifest = {
-      version: versionTs,
-      generatedAt: new Date().toISOString(),
-      itemCount: rows.length,
-      sha256,
-      sourceRunId: options.syncRunId ?? null,
-      channel: "google",
-      language,
-      marketCode,
-    };
-    await uploadManifest(versioned, manifest);
-
-    let previousItemCount: number | null = null;
-    const prevManifest = await downloadManifest(currentPath).catch(() => null);
-    if (prevManifest) previousItemCount = prevManifest.itemCount;
-
-    let schemaValid = true;
-    if (snapshot_gate.require_zero_schema_errors) {
-      const validation = await validateGoogleFeed(versioned);
-      schemaValid = validation.valid;
-      if (!schemaValid) {
-        logger.error(
-          { marketCode, errors: validation.errorCount, firstError: validation.errors[0] },
-          "Google feed schema validation FAILED — blocking publish",
-        );
-        await sendFeedBlockAlert(
-          {
-            channel: "google",
-            marketOrFile: marketCode,
-            previousItemCount,
-            newItemCount: rows.length,
-            dropPct: null,
-            reason: "schema_error",
-            syncRunId: options.syncRunId ?? null,
-          },
-          alertWebhookUrl,
-        );
-      } else {
-        logger.info({ marketCode, rows: validation.rowCount }, "Google feed schema validation passed");
-      }
-    }
-
-    const published = (!dryRun && schemaValid)
-      ? await atomicPublish({
-          versionedPath: versioned,
-          currentPath,
-          manifest,
-          previousItemCount,
-          maxDropPct: snapshot_gate.max_item_count_drop_pct,
-          alertWebhookUrl,
-        })
-      : false;
-
-    if (dryRun) {
-      logger.info({ marketCode, rows: rows.length, dryRun: true }, "DRY RUN: TSV generated (not published)");
-    }
-
-    if (published) {
-      await db
-        .update(feedSnapshotsTable)
-        .set({ isCurrent: false })
-        .where(
-          and(
-            eq(feedSnapshotsTable.channel, "google"),
-            eq(feedSnapshotsTable.language, language),
-            eq(feedSnapshotsTable.marketCode, marketCode),
-          ),
-        );
-
-      await db.insert(feedSnapshotsTable).values({
+      const manifest: FeedManifest = {
+        version: versionTs,
+        generatedAt: new Date().toISOString(),
+        itemCount: rows.length,
+        sha256,
+        sourceRunId: options.syncRunId ?? null,
         channel: "google",
         language,
         marketCode,
-        storagePath: currentPath,
-        itemCount: rows.length,
-        sha256,
-        isCurrent: true,
-        syncRunId: options.syncRunId ?? null,
-        generatedAt: new Date(),
-      });
+      };
+      await uploadManifest(versioned, manifest);
+
+      let previousItemCount: number | null = null;
+      const prevManifest = await downloadManifest(currentPath).catch(() => null);
+      if (prevManifest) previousItemCount = prevManifest.itemCount;
+
+      let schemaValid = true;
+      if (snapshot_gate.require_zero_schema_errors) {
+        const validation = await validateGoogleFeed(versioned);
+        schemaValid = validation.valid;
+        if (!schemaValid) {
+          logger.error(
+            { marketCode, errors: validation.errorCount, firstError: validation.errors[0] },
+            "Google feed schema validation FAILED — blocking publish",
+          );
+          await sendFeedBlockAlert(
+            {
+              channel: "google",
+              marketOrFile: marketCode,
+              previousItemCount,
+              newItemCount: rows.length,
+              dropPct: null,
+              reason: "schema_error",
+              syncRunId: options.syncRunId ?? null,
+            },
+            alertWebhookUrl,
+          );
+        } else {
+          logger.info({ marketCode, rows: validation.rowCount }, "Google feed schema validation passed");
+        }
+      }
+
+      const published = (!dryRun && schemaValid)
+        ? await atomicPublish({
+            versionedPath: versioned,
+            currentPath,
+            manifest,
+            previousItemCount,
+            maxDropPct: snapshot_gate.max_item_count_drop_pct,
+            alertWebhookUrl,
+          })
+        : false;
+
+      if (dryRun) {
+        logger.info({ marketCode, rows: rows.length, dryRun: true }, "DRY RUN: TSV generated (not published)");
+      }
+
+      if (published) {
+        await db
+          .update(feedSnapshotsTable)
+          .set({ isCurrent: false })
+          .where(
+            and(
+              eq(feedSnapshotsTable.channel, "google"),
+              eq(feedSnapshotsTable.language, language),
+              eq(feedSnapshotsTable.marketCode, marketCode),
+            ),
+          );
+
+        await db.insert(feedSnapshotsTable).values({
+          channel: "google",
+          language,
+          marketCode,
+          storagePath: currentPath,
+          itemCount: rows.length,
+          sha256,
+          isCurrent: true,
+          syncRunId: options.syncRunId ?? null,
+          generatedAt: new Date(),
+        });
+      }
+
+      result.byMarket[marketCode] = {
+        language,
+        country,
+        rows: rows.length,
+        storagePath: published ? currentPath : versioned,
+        published: published || dryRun,
+        publicUrl: `/api/feeds/google/market/${marketCode}.tsv`,
+      };
+
+      logger.info({ marketCode, rows: rows.length, published }, "Market feed complete");
+      // rows[] goes out of scope here → V8 can reclaim the memory before the next market
+
+    } catch (marketErr) {
+      // Record the error and continue — one market failure must not abort the others.
+      const errorMsg = marketErr instanceof Error ? marketErr.message : String(marketErr);
+      logger.error({ marketCode, err: errorMsg }, "Google market export failed — continuing with remaining markets");
+      result.byMarket[marketCode] = {
+        language,
+        country,
+        rows: 0,
+        storagePath: "",
+        published: false,
+        publicUrl: `/api/feeds/google/market/${marketCode}.tsv`,
+        error: errorMsg,
+      };
     }
-
-    result.byMarket[marketCode] = {
-      language,
-      country,
-      rows: rows.length,
-      storagePath: published ? currentPath : versioned,
-      published: published || dryRun,
-      publicUrl: `/api/feeds/google/market/${marketCode}.tsv`,
-    };
-
-    logger.info({ marketCode, rows: rows.length, published }, "Market feed complete");
-    // rows[] goes out of scope here → V8 can reclaim the memory before the next market
   }
 
   // ── Sync local inventory (Eupen showroom) ─────────────────────────────────

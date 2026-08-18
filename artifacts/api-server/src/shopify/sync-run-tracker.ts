@@ -29,7 +29,8 @@ export type SyncRunType =
   | "webhook"
   | "product"
   | "export"
-  | "showroom";
+  | "showroom"
+  | "google-export";
 
 export class SyncRunTracker {
   private runId: string | null = null;

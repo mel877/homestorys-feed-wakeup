@@ -185,6 +185,8 @@ export const FeedPolicyConfigSchema = z.object({
     prices: z.string(),
     inventory: z.string(),
     recommendations: z.string(),
+    /** Standalone nightly Google feed export (default: "30 3 * * *"). */
+    google: z.string().default("30 3 * * *"),
   }),
   recommendations: z.object({
     top_n: z.number().default(8),
