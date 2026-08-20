@@ -7,6 +7,12 @@ const router: IRouter = Router();
 
 const COOKIE_NAME = "dash_session";
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
+const cookieOptions = {
+  httpOnly: true,
+  secure: process.env["NODE_ENV"] === "production",
+  sameSite: "lax" as const,
+  path: "/",
+};
 
 /** Derive the expected cookie value from the SESSION_SECRET so it can't be forged. */
 function makeSessionToken(): string {
@@ -49,9 +55,7 @@ router.post("/dashboard/auth/login", async (req, res): Promise<void> => {
 
   const token = makeSessionToken();
   res.cookie(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env["NODE_ENV"] === "production",
-    sameSite: "lax",
+    ...cookieOptions,
     maxAge: COOKIE_MAX_AGE,
     signed: true,
   });
@@ -61,7 +65,8 @@ router.post("/dashboard/auth/login", async (req, res): Promise<void> => {
 
 // POST /dashboard/auth/logout
 router.post("/dashboard/auth/logout", (_req, res): void => {
-  res.clearCookie(COOKIE_NAME);
+  res.clearCookie(COOKIE_NAME, cookieOptions);
+  res.clearCookie(`${COOKIE_NAME}.sig`, cookieOptions);
   res.json({ ok: true });
 });
 

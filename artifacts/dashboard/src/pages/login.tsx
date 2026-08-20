@@ -3,7 +3,11 @@ import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useDashboardLogin, getGetDashboardAuthMeQueryKey } from "@workspace/api-client-react";
+import {
+  useDashboardLogin,
+  useGetDashboardAuthMe,
+  getGetDashboardAuthMeQueryKey,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +24,9 @@ export default function Login() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const login = useDashboardLogin();
+  const { data: session, isLoading: isCheckingSession } = useGetDashboardAuthMe({
+    query: { queryKey: getGetDashboardAuthMeQueryKey(), retry: false },
+  });
 
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -28,8 +35,8 @@ export default function Login() {
 
   const onSubmit = (data: z.infer<typeof loginSchema>) => {
     login.mutate({ data }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetDashboardAuthMeQueryKey() });
+      onSuccess: (authenticatedSession) => {
+        queryClient.setQueryData(getGetDashboardAuthMeQueryKey(), authenticatedSession);
         setLocation("/overview");
       },
       onError: (err) => {
@@ -41,6 +48,20 @@ export default function Login() {
       }
     });
   };
+
+  React.useEffect(() => {
+    if (session?.authenticated) {
+      setLocation("/overview");
+    }
+  }, [session?.authenticated, setLocation]);
+
+  if (isCheckingSession || session?.authenticated) {
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center bg-background">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[100dvh] flex items-center justify-center bg-background p-6 font-sans">
@@ -65,6 +86,7 @@ export default function Login() {
                     <Input
                       id="password"
                       type="password"
+                      autoComplete="current-password"
                       placeholder="Enter Access Key"
                       className="text-center h-11 rounded-[18px] text-[14px] border-border shadow-xs focus-visible:ring-1 focus-visible:ring-ring"
                       {...field}

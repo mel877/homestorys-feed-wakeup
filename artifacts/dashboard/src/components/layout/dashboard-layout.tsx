@@ -27,14 +27,15 @@ const NAV_ITEMS = [
 ];
 
 export function DashboardLayout({ children }: { children: ReactNode }) {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const logout = useDashboardLogout();
 
   const handleLogout = () => {
     logout.mutate(undefined, {
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetDashboardAuthMeQueryKey() });
+        queryClient.setQueryData(getGetDashboardAuthMeQueryKey(), { authenticated: false });
+        setLocation("/");
       }
     });
   };

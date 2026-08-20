@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import express, { type Express } from "express";
+import cookieParser from "cookie-parser";
 import request from "supertest";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -8,6 +9,8 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 // Point to workspace root config/ from artifacts/api-server/tests/
 const CONFIG_DIR = resolve(__dir, "../../../config");
 process.env["CONFIG_DIR"] = CONFIG_DIR;
+const originalDashboardSecret = process.env["DASHBOARD_SECRET"];
+const originalSessionSecret = process.env["SESSION_SECRET"];
 
 // ── DB mock (feed-health and recommendations require @workspace/db) ───────────
 vi.mock("@workspace/db", () => {
@@ -68,6 +71,7 @@ vi.mock("@workspace/db", () => {
 async function buildApp(): Promise<Express> {
   const app = express();
   app.use(express.json());
+  app.use(cookieParser(process.env["SESSION_SECRET"]));
 
   // Minimal pino-like req.log shim
   app.use((req, _res, next) => {
@@ -86,7 +90,45 @@ async function buildApp(): Promise<Express> {
 
 let app: Express;
 beforeAll(async () => {
+  process.env["DASHBOARD_SECRET"] = "test-dashboard-access-key";
+  process.env["SESSION_SECRET"] = "test-dashboard-session-secret";
   app = await buildApp();
+});
+
+afterAll(() => {
+  if (originalDashboardSecret === undefined) delete process.env["DASHBOARD_SECRET"];
+  else process.env["DASHBOARD_SECRET"] = originalDashboardSecret;
+  if (originalSessionSecret === undefined) delete process.env["SESSION_SECRET"];
+  else process.env["SESSION_SECRET"] = originalSessionSecret;
+});
+
+describe("Dashboard session", () => {
+  it("restores an authenticated session on a new request", async () => {
+    const agent = request.agent(app);
+    const login = await agent
+      .post("/api/dashboard/auth/login")
+      .send({ password: "test-dashboard-access-key" });
+
+    expect(login.status).toBe(200);
+    expect(login.headers["set-cookie"]?.join(";")).toContain("dash_session");
+    expect(login.headers["set-cookie"]?.join(";")).toContain("HttpOnly");
+
+    const restoredSession = await agent.get("/api/dashboard/auth/me");
+    expect(restoredSession.status).toBe(200);
+    expect(restoredSession.body).toEqual({ authenticated: true });
+  });
+
+  it("invalidates the session after logout", async () => {
+    const agent = request.agent(app);
+    await agent.post("/api/dashboard/auth/login").send({ password: "test-dashboard-access-key" });
+
+    const logout = await agent.post("/api/dashboard/auth/logout");
+    expect(logout.status).toBe(200);
+
+    const sessionAfterLogout = await agent.get("/api/dashboard/auth/me");
+    expect(sessionAfterLogout.status).toBe(200);
+    expect(sessionAfterLogout.body).toEqual({ authenticated: false });
+  });
 });
 
 // ── Health routes ─────────────────────────────────────────────────────────────

@@ -1,13 +1,15 @@
 import React, { ReactNode } from "react";
-import { Link, useLocation } from "wouter";
-import { useGetDashboardAuthMe } from "@workspace/api-client-react";
+import { useLocation } from "wouter";
+import { getGetDashboardAuthMeQueryKey, useGetDashboardAuthMe } from "@workspace/api-client-react";
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
-  const { data: auth, isLoading } = useGetDashboardAuthMe();
+  const { data: auth, isLoading } = useGetDashboardAuthMe({
+    query: { queryKey: getGetDashboardAuthMeQueryKey(), retry: false },
+  });
 
   React.useEffect(() => {
-    if (!isLoading && auth && !auth.authenticated && location !== "/") {
+    if (!isLoading && !auth?.authenticated && location !== "/") {
       setLocation("/");
     }
   }, [auth, isLoading, location, setLocation]);
@@ -20,7 +22,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     );
   }
 
-  if (auth && !auth.authenticated && location !== "/") {
+  if (!auth?.authenticated && location !== "/") {
     return null;
   }
 
