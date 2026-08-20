@@ -65,13 +65,14 @@ describe("Config loader", () => {
     expect(stores["eupen"]!.name).toBe("Homestorys Eupen");
   });
 
-  it("markets have correct currency EUR", async () => {
+  it("markets keep their configured market currencies", async () => {
     const { loadConfig } = await import("../src/config/loader");
     const { markets } = loadConfig().markets;
 
-    for (const [_code, market] of Object.entries(markets)) {
-      expect(market.currency).toBe("EUR");
-    }
+    expect(markets["FR"]?.currency).toBe("EUR");
+    expect(markets["DE"]?.currency).toBe("EUR");
+    expect(markets["CH_DE"]?.currency).toBe("CHF");
+    expect(markets["CH_FR"]?.currency).toBe("CHF");
   });
 
   it("labels have 5 price bands", async () => {
@@ -92,12 +93,12 @@ describe("Config loader", () => {
     expect(discount_buckets[6]!.key).toBe("70_plus");
   });
 
-  it("feed policy dry_run defaults to true for both channels", async () => {
+  it("feed policy publishes standard channels by default", async () => {
     const { loadConfig } = await import("../src/config/loader");
     const { dry_run } = loadConfig().feedPolicy;
 
-    expect(dry_run.google).toBe(true);
-    expect(dry_run.meta).toBe(true);
+    expect(dry_run.google).toBe(false);
+    expect(dry_run.meta).toBe(false);
   });
 
   it("quality weights sum to 100", async () => {

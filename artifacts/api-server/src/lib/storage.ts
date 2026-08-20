@@ -256,8 +256,18 @@ export function googleFeedPath(language: string, marketCode: string): string {
   return `feeds/google/google-${language}-${marketCode}.tsv`;
 }
 
+/** Stable public language feed; overwritten atomically after every export. */
+export function googleLanguageFeedPath(language: string): string {
+  return `feeds/google/google-${language}.tsv`;
+}
+
 export function metaFeedPath(suffix: string): string {
   return `feeds/meta/${suffix}`;
+}
+
+/** Stable public language feed; overwritten atomically after every export. */
+export function metaLanguageFeedPath(language: string): string {
+  return `feeds/meta/meta-${language}.csv`;
 }
 
 export function versionedPath(basePath: string, versionTs: string): string {

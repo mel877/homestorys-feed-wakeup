@@ -9,6 +9,11 @@ export const MarketSchema = z.object({
   label: z.string().optional(),
   /** Canonical base URL for this market's storefront (used for feed product links). */
   base_url: z.string().url().optional(),
+  /**
+   * Shopify market providing the price and eligibility for this locale.
+   * Used only when one commercial country has more than one storefront language.
+   */
+  pricing_market: z.string().optional(),
 });
 
 export const MarketsConfigSchema = z.object({

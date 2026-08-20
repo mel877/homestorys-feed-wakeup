@@ -79,6 +79,9 @@ export async function readAllCanonicals(
   const { channel, persistFeedItems = false } = options;
 
   const targetMarkets = options.markets ?? Object.keys(config.markets.markets);
+  const sourceMarkets = [...new Set(targetMarkets.map(
+    (marketCode) => config.markets.markets[marketCode]?.pricing_market ?? marketCode,
+  ))];
   logger.info({ markets: targetMarkets, channel }, "Loading canonical products");
 
   // ── 1. Load active products ──────────────────────────────────────────────
@@ -111,7 +114,7 @@ export async function readAllCanonicals(
         .where(
           and(
             inArray(marketVariantsTable.variantId, variantIds),
-            inArray(marketVariantsTable.marketCode, targetMarkets),
+            inArray(marketVariantsTable.marketCode, sourceMarkets),
           ),
         )
     : [];
@@ -199,14 +202,18 @@ export async function readAllCanonicals(
       const variantMVs = marketVariantsByVariant.get(variant.id) ?? [];
       if (variantMVs.length === 0) continue;
 
-      for (const mv of variantMVs) {
-        if (!targetMarkets.includes(mv.marketCode)) continue;
+      for (const marketCode of targetMarkets) {
+        const market = config.markets.markets[marketCode];
+        if (!market) continue;
+        const sourceMarketCode = market.pricing_market ?? marketCode;
+        const mv = variantMVs.find((candidate) => candidate.marketCode === sourceMarketCode);
+        if (!mv) continue;
         if (!mv.isEligible) {
           ineligible++;
           continue;
         }
 
-        const rec = recByProductMarket.get(recKey(product.id, mv.marketCode)) ?? null;
+        const rec = recByProductMarket.get(recKey(product.id, sourceMarketCode)) ?? null;
 
         const canonical = buildCanonical(
           {
@@ -220,7 +227,7 @@ export async function readAllCanonicals(
             normalizedBestsellerScore: null,
             config,
           },
-          mv.marketCode,
+          marketCode,
           channel,
         );
 
@@ -238,7 +245,7 @@ export async function readAllCanonicals(
             .insert(feedItemsTable)
             .values({
               variantId: variant.id,
-              marketCode: mv.marketCode,
+              marketCode,
               language: canonical.language,
               channel,
               canonicalJson: canonical as unknown as Record<string, unknown>,
@@ -308,6 +315,9 @@ export async function processAllCanonicals(
   const { channel, persistFeedItems = false } = options;
 
   const targetMarkets = options.markets ?? Object.keys(config.markets.markets);
+  const sourceMarkets = [...new Set(targetMarkets.map(
+    (marketCode) => config.markets.markets[marketCode]?.pricing_market ?? marketCode,
+  ))];
   logger.info({ markets: targetMarkets, channel }, "Streaming canonical products");
 
   // ── Bulk data loading (same as readAllCanonicals) ─────────────────────────
@@ -338,7 +348,7 @@ export async function processAllCanonicals(
         .where(
           and(
             inArray(marketVariantsTable.variantId, variantIds),
-            inArray(marketVariantsTable.marketCode, targetMarkets),
+            inArray(marketVariantsTable.marketCode, sourceMarkets),
           ),
         )
     : [];
@@ -448,14 +458,18 @@ export async function processAllCanonicals(
       const variantMVs = marketVariantsByVariant.get(variant.id) ?? [];
       if (variantMVs.length === 0) continue;
 
-      for (const mv of variantMVs) {
-        if (!targetMarkets.includes(mv.marketCode)) continue;
+      for (const marketCode of targetMarkets) {
+        const market = config.markets.markets[marketCode];
+        if (!market) continue;
+        const sourceMarketCode = market.pricing_market ?? marketCode;
+        const mv = variantMVs.find((candidate) => candidate.marketCode === sourceMarketCode);
+        if (!mv) continue;
         if (!mv.isEligible) {
           ineligible++;
           continue;
         }
 
-        const rec = recByProductMarket.get(recKey(product.id, mv.marketCode)) ?? null;
+        const rec = recByProductMarket.get(recKey(product.id, sourceMarketCode)) ?? null;
 
         const canonical = buildCanonical(
           {
@@ -469,7 +483,7 @@ export async function processAllCanonicals(
             normalizedBestsellerScore: null,
             config,
           },
-          mv.marketCode,
+          marketCode,
           channel,
         );
 
@@ -487,7 +501,7 @@ export async function processAllCanonicals(
           const checksum = canonicalChecksum(canonical);
           upsertBatch.push({
             variantId: variant.id,
-            marketCode: mv.marketCode,
+            marketCode,
             language: canonical.language,
             channel,
             canonicalJson: canonical as unknown as Record<string, unknown>,

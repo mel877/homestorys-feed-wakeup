@@ -46,6 +46,7 @@ import {
 } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { loadConfig } from "../../config/loader";
+import type { AppConfig } from "../../config/schemas";
 import { logger as rootLogger } from "../../lib/logger";
 import {
   uploadFeedFile,
@@ -80,10 +81,12 @@ import {
   META_COUNTRY_HEADERS,
 } from "./mapper";
 import { validateMetaFeed } from "../../validation/feed-validator";
+import { publishMetaLanguageFeeds } from "./language-feeds";
+import { resolveMetaDryRun } from "../dry-run";
 const logger = rootLogger.child({ module: "meta-generator" });
 
-export function isDryRun(): boolean {
-  return process.env["META_DRY_RUN"] !== "false";
+export function isDryRun(config: AppConfig): boolean {
+  return resolveMetaDryRun(config);
 }
 
 // ── Feed files to generate ────────────────────────────────────────────────────
@@ -147,7 +150,7 @@ export async function runMetaExport(options: {
   const startedAt = Date.now();
   const config = await loadConfig();
   const versionTs = formatVersionTs();
-  const dryRun = isDryRun();
+  const dryRun = isDryRun(config);
   const alertWebhookUrl = resolveAlertWebhookUrl(config.feedPolicy.alerts.webhook_url);
 
   // Determine which markets to process
@@ -749,6 +752,14 @@ export async function runMetaExport(options: {
     dryRun,
     durationMs: Date.now() - startedAt,
   };
+
+  // The public operational feeds are a single flat file per language. Legacy
+  // layer files above remain available while channel configuration is migrated.
+  const languageFiles = await publishMetaLanguageFeeds(config, {
+    syncRunId: options.syncRunId,
+    dryRun,
+  });
+  logger.info({ languageFiles }, "Meta language feeds complete");
 
   logger.info(
     { totalCanonicals, durationMs: result.durationMs },

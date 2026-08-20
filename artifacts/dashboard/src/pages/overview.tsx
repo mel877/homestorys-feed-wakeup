@@ -198,7 +198,10 @@ export default function Overview() {
           const total = overview.totalProducts;
 
           // Find any non-primary locale with 0 translations (genuine gap)
-          const missingLocales = overview.byLanguage
+          const byLanguage = (overview as unknown as {
+            byLanguage?: Array<{ language: string; productCount: number }>;
+          }).byLanguage ?? [];
+          const missingLocales = byLanguage
             .filter((l: { language: string; productCount: number }) =>
               l.language !== PRIMARY_LOCALE && l.productCount === 0
             )
@@ -216,7 +219,7 @@ export default function Overview() {
                 )}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {overview.byLanguage.map((lang: { language: string; productCount: number }) => {
+                {byLanguage.map((lang: { language: string; productCount: number }) => {
                   const isPrimary = lang.language === PRIMARY_LOCALE;
                   // Non-primary locales are flagged when coverage < 100% of active products
                   const isIncomplete = !isPrimary && lang.productCount < total;

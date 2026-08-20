@@ -11,7 +11,8 @@
  *   7. Record feed_snapshots in DB
  *
  * Run via: pnpm sync:google
- * Env: GOOGLE_DRY_RUN=false to actually push to Merchant Center.
+ * Dry-run is controlled by feed-policy.yaml and can be overridden with
+ * GOOGLE_DRY_RUN=true or GOOGLE_DRY_RUN=false.
  */
 
 import { db, feedSnapshotsTable } from "@workspace/db";
@@ -24,6 +25,7 @@ import {
   atomicPublish,
   downloadManifest,
   googleFeedPath,
+  googleLanguageFeedPath,
   versionedPath,
   formatVersionTs,
   type FeedManifest,
@@ -72,7 +74,7 @@ export async function runGoogleExport(options: {
   const startedAt = Date.now();
   const config = await loadConfig();
   const versionTs = formatVersionTs();
-  const dryRun = isDryRun();
+  const dryRun = isDryRun(config);
   const { snapshot_gate } = config.feedPolicy;
   const storeCode = process.env["GOOGLE_EUPEN_STORE_CODE"] ?? "";
   const alertWebhookUrl = resolveAlertWebhookUrl(config.feedPolicy.alerts.webhook_url);
@@ -264,6 +266,90 @@ export async function runGoogleExport(options: {
         published: false,
         publicUrl: `/api/feeds/google/market/${marketCode}.tsv`,
         error: errorMsg,
+      };
+    }
+  }
+
+  // Public channel feeds are grouped by language, while their rows remain
+  // market-specific. This preserves each country's price, currency and link.
+  for (const language of ["fr", "de"]) {
+    const markets = config.markets.language_masters[language]?.markets ?? [];
+    const languageKey = `LANG_${language.toUpperCase()}`;
+    const currentPath = googleLanguageFeedPath(language);
+    const versioned = versionedPath(currentPath, versionTs);
+    try {
+      const rows: GoogleFeedRow[] = [];
+      await processAllCanonicals(
+        config,
+        { markets, channel: "google", persistFeedItems: false },
+        (canonical) => {
+          const row = mapToGoogleRow(canonical, config);
+          if (row) rows.push(row);
+        },
+      );
+      const tsv = buildGoogleTsv(rows);
+      const sha256 = await uploadFeedFile(versioned, tsv, "text/tab-separated-values");
+      const manifest: FeedManifest = {
+        version: versionTs,
+        generatedAt: new Date().toISOString(),
+        itemCount: rows.length,
+        sha256,
+        sourceRunId: options.syncRunId ?? null,
+        channel: "google",
+        language,
+        marketCode: languageKey,
+      };
+      await uploadManifest(versioned, manifest);
+      const previousItemCount = (await downloadManifest(currentPath))?.itemCount ?? null;
+      const validation = await validateGoogleFeed(versioned);
+      const published = !dryRun && validation.valid
+        ? await atomicPublish({
+            versionedPath: versioned,
+            currentPath,
+            manifest,
+            previousItemCount,
+            maxDropPct: snapshot_gate.max_item_count_drop_pct,
+            alertWebhookUrl,
+          })
+        : false;
+
+      if (published) {
+        await db.update(feedSnapshotsTable).set({ isCurrent: false }).where(and(
+          eq(feedSnapshotsTable.channel, "google"),
+          eq(feedSnapshotsTable.language, language),
+          eq(feedSnapshotsTable.marketCode, languageKey),
+        ));
+        await db.insert(feedSnapshotsTable).values({
+          channel: "google",
+          language,
+          marketCode: languageKey,
+          storagePath: currentPath,
+          itemCount: rows.length,
+          sha256,
+          isCurrent: true,
+          syncRunId: options.syncRunId ?? null,
+          generatedAt: new Date(),
+        });
+      }
+      result.byMarket[languageKey] = {
+        language,
+        country: "multiple",
+        rows: rows.length,
+        storagePath: published ? currentPath : versioned,
+        published: published || dryRun,
+        publicUrl: `/api/feeds/google/${language}.tsv`,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error({ error: message, language }, "Google language feed failed; existing file remains current");
+      result.byMarket[languageKey] = {
+        language,
+        country: "multiple",
+        rows: 0,
+        storagePath: currentPath,
+        published: false,
+        publicUrl: `/api/feeds/google/${language}.tsv`,
+        error: message,
       };
     }
   }

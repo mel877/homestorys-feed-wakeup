@@ -45,6 +45,14 @@ async function serveFeedFile(
 
 // ── Meta feed routes ──────────────────────────────────────────────────────────
 
+/** Stable flat catalog URLs for Meta. */
+router.get("/feeds/meta/fr.csv", async (_req: Request, res: Response) => {
+  await serveFeedFile("feeds/meta/meta-fr.csv", "text/csv; charset=utf-8", res);
+});
+router.get("/feeds/meta/de.csv", async (_req: Request, res: Response) => {
+  await serveFeedFile("feeds/meta/meta-de.csv", "text/csv; charset=utf-8", res);
+});
+
 /** GET /feeds/meta/base.csv */
 router.get("/feeds/meta/base.csv", async (_req: Request, res: Response) => {
   await serveFeedFile("feeds/meta/meta-base.csv", "text/csv; charset=utf-8", res);
@@ -98,6 +106,14 @@ router.get("/feeds/meta/:file", async (req: Request, res: Response) => {
 });
 
 // ── Google feed routes (public — for GMC file-fetch) ─────────────────────────
+
+/** Stable language URLs for Google Merchant Center. */
+router.get("/feeds/google/fr.tsv", async (_req: Request, res: Response) => {
+  await serveFeedFile("feeds/google/google-fr.tsv", "text/tab-separated-values; charset=utf-8", res);
+});
+router.get("/feeds/google/de.tsv", async (_req: Request, res: Response) => {
+  await serveFeedFile("feeds/google/google-de.tsv", "text/tab-separated-values; charset=utf-8", res);
+});
 
 /**
  * GET /feeds/google/market/:market.tsv

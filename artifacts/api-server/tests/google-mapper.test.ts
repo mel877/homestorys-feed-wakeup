@@ -148,7 +148,14 @@ function makeConfig(): AppConfig {
         },
       },
     },
-    shipping: { classes: {}, rates: {}, default_class: "standard" },
+    shipping: {
+      classes: {},
+      rates: {},
+      default_class: "standard",
+      meta_feed_rates: {
+        BE: { service: "Livraison Standard", price: "9.60", currency: "EUR" },
+      },
+    },
     returns: { classes: {}, default_class: "standard" },
     categories: {
       fallback_google_category_id: "436",
@@ -230,13 +237,13 @@ describe("Google product API identifier contract", () => {
     expect(restId).toBe("online:fr:BE:var-uuid-123");
   });
 
-  it("TSV row id matches resource offerId (both are the raw variantId)", () => {
+  it("TSV row id adds the market so a language feed can carry multiple prices", () => {
     const canonical = makeCanonical({ variantId: "var-uuid-999" });
     const row = mapToGoogleRow(canonical, makeConfig())!;
     const resource = mapToGoogleResource(canonical, makeConfig())!;
 
-    expect(row.id).toBe(resource.offerId);
-    expect(row.id).toBe("var-uuid-999");
+    expect(row.id).toBe(`${resource.offerId}:BE_FR`);
+    expect(row.id).toBe("var-uuid-999:BE_FR");
     expect(row.id).not.toContain("online:");
   });
 
@@ -277,16 +284,16 @@ describe("mapToGoogleResource", () => {
     expect(result.availability).toBe("in stock");
   });
 
-  it("maps backorder to 'backorder'", () => {
+  it("maps backorder to 'in stock' for standard orderable feeds", () => {
     const canonical = makeCanonical({ availability: "backorder" });
     const result = mapToGoogleResource(canonical, makeConfig())!;
-    expect(result.availability).toBe("backorder");
+    expect(result.availability).toBe("in stock");
   });
 
-  it("maps out_of_stock to 'out of stock'", () => {
+  it("maps out_of_stock to 'in stock' for standard orderable feeds", () => {
     const canonical = makeCanonical({ availability: "out_of_stock" });
     const result = mapToGoogleResource(canonical, makeConfig())!;
-    expect(result.availability).toBe("out of stock");
+    expect(result.availability).toBe("in stock");
   });
 
   it("maps discontinued to 'out of stock'", () => {
@@ -442,6 +449,11 @@ describe("mapToGoogleRow", () => {
     expect(row.shipping_weight).toBe("45 kg");
   });
 
+  it("keeps country-specific shipping in a combined language feed", () => {
+    const row = mapToGoogleRow(makeCanonical({ market: "BE_FR" }), makeConfig())!;
+    expect(row.shipping).toBe("BE::Livraison Standard:9.60 EUR");
+  });
+
   it("returns null when primary image is null", () => {
     const result = mapToGoogleRow(makeCanonical({ primaryImage: null }), makeConfig());
     expect(result).toBeNull();
@@ -475,6 +487,7 @@ describe("TSV serialization", () => {
       material: "",
       size: "",
       shipping_weight: "",
+      shipping: "",
       custom_label_0: "evergreen",
       custom_label_1: "unknown",
       custom_label_2: "0_500",

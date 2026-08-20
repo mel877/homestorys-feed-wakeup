@@ -24,8 +24,12 @@ export default function Images() {
 
   const totalImages = overview?.feedHealth?.totalImages ?? 0;
   const classifiedImages = overview?.feedHealth?.classifiedImages ?? 0;
-  const productsWithImages = overview?.feedHealth?.productsWithImages ?? 0;
-  const productsWithoutImages = overview?.feedHealth?.productsWithoutImages ?? 0;
+  const imageHealth = overview?.feedHealth as unknown as {
+    productsWithImages?: number;
+    productsWithoutImages?: number;
+  } | undefined;
+  const productsWithImages = imageHealth?.productsWithImages ?? 0;
+  const productsWithoutImages = imageHealth?.productsWithoutImages ?? 0;
   const totalProducts = overview?.totalProducts ?? 0;
   const coveragePct = totalProducts > 0 ? Math.round((productsWithImages / totalProducts) * 100) : 0;
   const classifiedPct = totalImages > 0 ? Math.round((classifiedImages / totalImages) * 100) : 0;

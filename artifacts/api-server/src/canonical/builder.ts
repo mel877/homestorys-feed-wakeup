@@ -97,7 +97,10 @@ export function buildCanonical(
   if (!market) return null; // unconfigured market — skip
 
   // ── Resolve pricing ────────────────────────────────────────────────────────
-  const pricing = resolvePricing(marketCode, input.marketVariants, market.currency);
+  // Some storefront languages share one Shopify commercial market. In that
+  // case the price still comes from the same country, never another country.
+  const pricingMarketCode = market.pricing_market ?? marketCode;
+  const pricing = resolvePricing(pricingMarketCode, input.marketVariants, market.currency);
   if (!pricing) return null; // no market variant row → product not available in this market
 
   if (!pricing.isEligible) return null; // explicitly ineligible
@@ -113,14 +116,14 @@ export function buildCanonical(
   const vendorLower = (product.vendor ?? "").toLowerCase();
   if (
     vendorLower &&
-    config.exclusions.excluded_vendors.some((v) => v.toLowerCase() === vendorLower)
+    (config.exclusions?.excluded_vendors ?? []).some((v) => v.toLowerCase() === vendorLower)
   ) return null;
 
   // Product type exclusions — categories excluded from all feeds (Channable Product type exclusion 1-3)
   const productTypeLower = (product.productType ?? "").toLowerCase();
   if (
     productTypeLower &&
-    config.exclusions.excluded_product_types.some((t) => productTypeLower.includes(t.toLowerCase()))
+    (config.exclusions?.excluded_product_types ?? []).some((t) => productTypeLower.includes(t.toLowerCase()))
   ) return null;
 
   // Rules 2.5, 2.6, 2.8, 3.15 — title-based content exclusions
@@ -186,16 +189,6 @@ export function buildCanonical(
     sellWhenOutOfStock,
     variant.metafieldDiscontinued ?? false,
   );
-
-  // ── Clean variant guard (Channable rule 2.2) ─────────────────────────────
-  // If the first Shopify image (position 1 = the variant's assigned primary)
-  // is a TEXTURES/Sixtures swatch, the variant represents a fabric/material colour
-  // option — not a real product photo. Exclude the entire variant from all feeds.
-  const firstImage = images.slice().sort((a, b) => (a.position ?? 999) - (b.position ?? 999))[0];
-  if (firstImage) {
-    const firstUrlLower = firstImage.url.toLowerCase();
-    if (firstUrlLower.includes("textures") || firstUrlLower.includes("sixtures")) return null;
-  }
 
   // ── Images ────────────────────────────────────────────────────────────────
   const classifiedImages = images.map((img) => ({
@@ -278,7 +271,11 @@ export function buildCanonical(
   // Fallback: construct from per-market base_url (config/markets.yaml) + localized handle.
   const localizedHandle = content.handle ?? product.handle;
   const marketBaseUrl = market.base_url ?? "https://shop.homestorys.com/";
-  const productUrl = pricing.productUrl ?? `${marketBaseUrl}products/${localizedHandle}`;
+  // A language alias must use its own storefront URL, not the source
+  // commercial market's URL (for example Swiss French reuses CH pricing).
+  const productUrl = market.pricing_market
+    ? `${marketBaseUrl}products/${localizedHandle}`
+    : pricing.productUrl ?? `${marketBaseUrl}products/${localizedHandle}`;
 
   // ── Weight ────────────────────────────────────────────────────────────────
   const weightNorm = normaliseWeight(variant.weight, variant.weightUnit);

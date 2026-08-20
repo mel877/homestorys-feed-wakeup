@@ -396,8 +396,8 @@ describe("Meta generator gate — happy path (first publish, schema valid)", () 
     const { runMetaExport } = await import("../src/exporters/meta/generator");
     await runMetaExport({});
 
-    // 7 feed files: base + language-fr + language-de + 4 country files
-    expect(mockAtomicPublish).toHaveBeenCalledTimes(7);
+    // 11 files: legacy base/language/country layers plus flat FR/DE public files.
+    expect(mockAtomicPublish).toHaveBeenCalledTimes(11);
   });
 
   it("inserts a feed_snapshots row with isCurrent=true for each published file", async () => {

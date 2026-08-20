@@ -174,6 +174,48 @@ describe("Test 1: Standard price", () => {
   });
 });
 
+describe("Language market aliases", () => {
+  it("uses Swiss commercial pricing with French content and storefront URLs for CH_FR", () => {
+    const fixture = loadFixture("normal_product");
+    const config = structuredClone(testConfig);
+    config.markets.markets["CH_DE"] = {
+      country: "CH",
+      language: "de",
+      currency: "CHF",
+      base_url: "https://shop-de.homestorys.com/",
+    };
+    config.markets.markets["CH_FR"] = {
+      country: "CH",
+      language: "fr",
+      currency: "CHF",
+      base_url: "https://shop-fr.homestorys.com/",
+      pricing_market: "CH_DE",
+    };
+
+    const source = fixture.marketVariants.find((market: { marketCode: string }) => market.marketCode === "BE_FR");
+    expect(source).toBeDefined();
+    const input = makeInput(fixture);
+    input.config = config;
+    input.marketVariants = [
+      ...fixture.marketVariants,
+      {
+        ...source,
+        marketCode: "CH_DE",
+        priceAmount: "999.00",
+        priceCurrency: "CHF",
+        productUrl: "https://shop-de.homestorys.com/products/german-source",
+      },
+    ];
+
+    const canonical = buildCanonical(input, "CH_FR");
+    expect(canonical).not.toBeNull();
+    expect(canonical!.market).toBe("CH_FR");
+    expect(canonical!.language).toBe("fr");
+    expect(canonical!.price).toMatchObject({ amount: 999, currency: "CHF" });
+    expect(canonical!.productUrl).toMatch(/^https:\/\/shop-fr\.homestorys\.com\/products\//);
+  });
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // Test 2: Sale price (compare-at > price)
 // ════════════════════════════════════════════════════════════════════════════

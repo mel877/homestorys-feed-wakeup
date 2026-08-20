@@ -11,13 +11,15 @@
  *
  * Usage:
  *   pnpm sync:google
- *   GOOGLE_DRY_RUN=false pnpm sync:google
+ *   GOOGLE_DRY_RUN=true pnpm sync:google
  *   pnpm sync:google --markets BE_FR,BE_DE
  *
  * Exit codes: 0 = success, 1 = failure
  */
 
 import { runGoogleExport } from "../exporters/google/runner";
+import { loadConfig } from "../config/loader";
+import { resolveGoogleDryRun } from "../exporters/dry-run";
 
 async function main() {
   // Parse --markets flag — supports both forms:
@@ -33,7 +35,7 @@ async function main() {
     markets = argv[marketsSpaceIdx + 1]!.split(",").filter(Boolean);
   }
 
-  const dryRun = process.env["GOOGLE_DRY_RUN"] !== "false";
+  const dryRun = resolveGoogleDryRun(loadConfig());
   console.log(`\n🚀 Google Feed Sync — ${dryRun ? "DRY RUN" : "LIVE"}\n`);
   if (markets) console.log(`   Markets: ${markets.join(", ")}`);
 
@@ -59,7 +61,7 @@ async function main() {
     }
 
     if (dryRun) {
-      console.log("\n   ℹ  Set GOOGLE_DRY_RUN=false to push to Google Merchant Center");
+      console.log("\n   ℹ  Set GOOGLE_DRY_RUN=false to publish this run");
     }
 
     process.exit(0);

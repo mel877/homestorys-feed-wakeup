@@ -14,6 +14,9 @@
 import { GoogleAuth } from "google-auth-library";
 import { logger as rootLogger } from "../../lib/logger";
 import type { GoogleProductResource } from "./mapper";
+import { loadConfig } from "../../config/loader";
+import type { AppConfig } from "../../config/schemas";
+import { resolveGoogleDryRun } from "../dry-run";
 
 const logger = rootLogger.child({ module: "google-merchant-client" });
 
@@ -29,10 +32,8 @@ function getMerchantId(): string {
   return id;
 }
 
-export function isDryRun(): boolean {
-  const env = process.env["GOOGLE_DRY_RUN"];
-  // Default true unless explicitly set to "false"
-  return env !== "false";
+export function isDryRun(config?: AppConfig): boolean {
+  return resolveGoogleDryRun(config ?? loadConfig());
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────

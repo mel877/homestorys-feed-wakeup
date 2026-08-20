@@ -299,14 +299,14 @@ describe("mapToMeta", () => {
     expect(result.country_row.availability).toBe("in stock");
   });
 
-  it("country_row.availability 'available for order' for backorder", () => {
+  it("country_row.availability is in stock for backorder in standard feeds", () => {
     const result = mapToMeta(makeCanonical({ availability: "backorder" }), makeConfig())!;
-    expect(result.country_row.availability).toBe("available for order");
+    expect(result.country_row.availability).toBe("in stock");
   });
 
-  it("country_row.availability 'out of stock' for out_of_stock", () => {
+  it("country_row.availability is in stock for an orderable out_of_stock item", () => {
     const result = mapToMeta(makeCanonical({ availability: "out_of_stock" }), makeConfig())!;
-    expect(result.country_row.availability).toBe("out of stock");
+    expect(result.country_row.availability).toBe("in stock");
   });
 
   it("country_row.availability 'discontinued' for discontinued", () => {

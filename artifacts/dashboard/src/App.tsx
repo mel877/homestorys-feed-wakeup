@@ -59,6 +59,7 @@ function Router() {
         <Route path="/meta">
           <ProtectedRoute><DashboardLayout><Meta /></DashboardLayout></ProtectedRoute>
         </Route>
+        {/* Retained for direct links; not shown in operational navigation. */}
         <Route path="/images">
           <ProtectedRoute><DashboardLayout><Images /></DashboardLayout></ProtectedRoute>
         </Route>

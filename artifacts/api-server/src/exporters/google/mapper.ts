@@ -58,6 +58,8 @@ export interface GoogleFeedRow {
   size_type: string;
   unit_pricing_base_measure: string;
   shipping_weight: string;
+  /** Google shipping attribute: country:region:service:price currency. */
+  shipping: string;
   custom_label_0: string;
   custom_label_1: string;
   custom_label_2: string;
@@ -98,6 +100,7 @@ export const GOOGLE_TSV_HEADERS: (keyof GoogleFeedRow)[] = [
   "size_type",
   "unit_pricing_base_measure",
   "shipping_weight",
+  "shipping",
   "custom_label_0",
   "custom_label_1",
   "custom_label_2",
@@ -183,22 +186,21 @@ function resolveCondition(canonical: CanonicalProduct): string {
   return "new";
 }
 
+/** Keep country-specific delivery data when several markets share one TSV. */
+function buildShipping(canonical: CanonicalProduct, config: AppConfig): string {
+  const market = config.markets.markets[canonical.market];
+  if (!market) return "";
+  const rate = config.shipping.meta_feed_rates?.[market.country];
+  if (!rate) return "";
+  return `${market.country}::${rate.service}:${rate.price} ${rate.currency}`;
+}
+
 // ── Availability mapping ──────────────────────────────────────────────────────
 
 function mapAvailability(status: CanonicalProduct["availability"]): string {
-  switch (status) {
-    case "in_stock":
-    case "low_stock":
-      return "in stock";
-    case "backorder":
-      return "backorder";
-    case "out_of_stock":
-      return "out of stock";
-    case "discontinued":
-      return "out of stock";
-    default:
-      return "out of stock";
-  }
+  // Standard online feeds advertise every orderable item as available. The
+  // physical Eupen showroom export has its own mapper and stays stock-based.
+  return status === "discontinued" ? "out of stock" : "in stock";
 }
 
 // ── Fix 1: availability_date for backorder ────────────────────────────────────
@@ -511,7 +513,9 @@ export function mapToGoogleRow(
   const productHighlights = (resource.productHighlights ?? []).join(",");
 
   return {
-    id: resource.offerId,
+    // A language feed contains several commercial markets, so one variant must
+    // remain unique per market even when CHF/EUR prices differ.
+    id: `${resource.offerId}:${canonical.market}`,
     title: resource.title,
     description: resource.description,
     link: resource.link,
@@ -520,7 +524,7 @@ export function mapToGoogleRow(
     lifestyle_image_link: lifestyleImage,
     availability: resource.availability,
     // Fix 1: required by Google when availability = "backorder"
-    availability_date: computeAvailabilityDate(canonical.availability, canonical.returnClass),
+    availability_date: "",
     price: formatPrice(canonical.price.amount, canonical.price.currency),
     // Fix 5: was emitting salePrice whenever non-null, regardless of isOnSale flag
     sale_price: canonical.isOnSale && canonical.salePrice
@@ -544,6 +548,7 @@ export function mapToGoogleRow(
     size_type: "Normal",
     unit_pricing_base_measure: "1 item",
     shipping_weight: formatShippingWeight(canonical.weight, canonical.weightUnit),
+    shipping: buildShipping(canonical, config),
     custom_label_0: canonical.customLabels.custom_label_0,
     custom_label_1: canonical.customLabels.custom_label_1,
     custom_label_2: canonical.customLabels.custom_label_2,

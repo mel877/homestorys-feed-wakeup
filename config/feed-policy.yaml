@@ -20,10 +20,11 @@ snapshot_gate:
   # Block if global validation returns errors
   require_zero_schema_errors: true
 
-# Dry-run defaults (override with GOOGLE_DRY_RUN / META_DRY_RUN env vars)
+# Publishing is live by default. Set GOOGLE_DRY_RUN=true or META_DRY_RUN=true
+# only when an operator explicitly needs a non-publishing test run.
 dry_run:
-  google: true
-  meta: true
+  google: false
+  meta: false
 
 # Sync schedules (cron expressions, UTC)
 sync_schedule:

@@ -19,6 +19,8 @@ export interface ResolvedMarket {
   label: string;
   /** Canonical storefront base URL for this market (from config/markets.yaml). */
   base_url: string | undefined;
+  /** Optional commercial source when two languages share one Shopify market. */
+  pricing_market: string | undefined;
 }
 
 export interface ResolvedContent {
@@ -54,6 +56,7 @@ export function resolveMarket(
     currency: market.currency,
     label: market.label ?? marketCode,
     base_url: market.base_url,
+    pricing_market: market.pricing_market,
   };
 }
 
@@ -127,6 +130,7 @@ export function getAllMarkets(config: MarketsConfig): ResolvedMarket[] {
     currency: market.currency,
     label: market.label ?? code,
     base_url: market.base_url,
+    pricing_market: market.pricing_market,
   }));
 }
 

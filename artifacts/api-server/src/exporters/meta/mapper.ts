@@ -135,19 +135,9 @@ function resolveCondition(canonical: CanonicalProduct): string {
 // ── Availability mapping ──────────────────────────────────────────────────────
 
 function mapAvailability(status: CanonicalProduct["availability"]): string {
-  switch (status) {
-    case "in_stock":
-    case "low_stock":
-      return "in stock";
-    case "backorder":
-      return "available for order";
-    case "out_of_stock":
-      return "out of stock";
-    case "discontinued":
-      return "discontinued";
-    default:
-      return "out of stock";
-  }
+  // The standard catalog is orderability-based, not Shopify physical stock.
+  // The separate Eupen showroom catalog remains stock-based.
+  return status === "discontinued" ? "discontinued" : "in stock";
 }
 
 // ── Price formatting ──────────────────────────────────────────────────────────

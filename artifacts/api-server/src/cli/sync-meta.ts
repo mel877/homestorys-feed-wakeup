@@ -8,18 +8,20 @@
  *   meta-country-BE.csv / FR / DE / AT
  *
  * Files are written to App Storage under feeds/meta/.
- * In dry-run mode (META_DRY_RUN=true, default), files are uploaded to
+ * In dry-run mode (META_DRY_RUN=true), files are uploaded to
  * versioned paths but NOT copied to the current pointer.
  *
  * Usage:
  *   pnpm sync:meta
- *   META_DRY_RUN=false pnpm sync:meta
+ *   META_DRY_RUN=true pnpm sync:meta
  *   pnpm sync:meta --markets BE_FR,FR
  *
  * Exit codes: 0 = success, 1 = failure
  */
 
 import { runMetaExport } from "../exporters/meta/generator";
+import { loadConfig } from "../config/loader";
+import { resolveMetaDryRun } from "../exporters/dry-run";
 
 async function main() {
   // Parse --markets flag — supports both forms:
@@ -35,7 +37,7 @@ async function main() {
     markets = argv[marketsSpaceIdx + 1]!.split(",").filter(Boolean);
   }
 
-  const dryRun = process.env["META_DRY_RUN"] !== "false";
+  const dryRun = resolveMetaDryRun(loadConfig());
   console.log(`\n🚀 Meta Feed Sync — ${dryRun ? "DRY RUN" : "LIVE"}\n`);
   if (markets) console.log(`   Markets: ${markets.join(", ")}`);
 
