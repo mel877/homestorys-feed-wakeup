@@ -26,7 +26,10 @@ import { eq, sql } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { syncProduct, updateInventoryItem } from "../shopify/index";
 import { sleep } from "../shopify/client";
-import { publishProductChanges } from "../exporters/incremental-publisher";
+import {
+  IncrementalFeedPublicationBlockedError,
+  publishProductChanges,
+} from "../exporters/incremental-publisher";
 
 const logger = rootLogger.child({ module: "webhook-worker" });
 
@@ -190,11 +193,16 @@ export class WebhookWorker {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const newRetryCount = retryCount + 1;
-      const isFinal = newRetryCount >= MAX_RETRIES;
-      const retryAfter = isFinal ? null : nextRetryAfter(newRetryCount);
+      const publicationBlocked = err instanceof IncrementalFeedPublicationBlockedError;
+      // A feed gate preserves the last complete public catalog. Reset the
+      // counter so its triggering webhook remains claimable after the normal
+      // transient-error cap.
+      const persistedRetryCount = publicationBlocked ? 0 : newRetryCount;
+      const isFinal = !publicationBlocked && newRetryCount >= MAX_RETRIES;
+      const retryAfter = isFinal ? null : nextRetryAfter(persistedRetryCount || 1);
 
       logger.error(
-        { eventId, topic, retryCount: newRetryCount, isFinal, retryAfter, err: message },
+        { eventId, topic, retryCount: newRetryCount, publicationBlocked, isFinal, retryAfter, err: message },
         "Webhook processing failed",
       );
 
@@ -202,7 +210,7 @@ export class WebhookWorker {
         .update(webhookEventsTable)
         .set({
           status: isFinal ? "failed" : "pending",
-          retryCount: newRetryCount,
+          retryCount: persistedRetryCount,
           retryAfter,
           error: message,
         })

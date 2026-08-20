@@ -99,7 +99,7 @@ const BULK_PRODUCTS_QUERY = `
 
 // Single-product targeted fetch (for webhook delta updates)
 export const SINGLE_PRODUCT_QUERY = `
-  query GetProduct($id: ID!) {
+  query GetProduct($id: ID!, $variantsCursor: String) {
     product(id: $id) {
       id
       title
@@ -111,7 +111,8 @@ export const SINGLE_PRODUCT_QUERY = `
       status
       publishedAt
       updatedAt
-      variants(first: 100) {
+      variants(first: 100, after: $variantsCursor) {
+        pageInfo { hasNextPage endCursor }
         edges {
           node {
             id
@@ -140,8 +141,38 @@ export const SINGLE_PRODUCT_QUERY = `
   }
 `;
 
-// Paginated product-images query — used by syncSingleProduct to fetch ALL images
-// without the first:30 cap that truncates products with many images.
+const PRODUCT_VARIANTS_QUERY = `
+  query GetProductVariants($id: ID!, $cursor: String) {
+    product(id: $id) {
+      variants(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            id
+            title
+            sku
+            barcode
+            position
+            price
+            compareAtPrice
+            taxable
+            availableForSale
+            inventoryItem {
+              id
+              requiresShipping
+              measurement { weight { value unit } }
+            }
+            metafields(namespace: "feed", first: 30) {
+              edges {
+                node { id namespace key value type }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
 const PRODUCT_IMAGES_QUERY = `
   query GetProductImages($id: ID!, $cursor: String) {
     product(id: $id) {
@@ -668,6 +699,7 @@ interface SingleProductResponse {
     publishedAt: string | null;
     updatedAt: string;
     variants: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
       edges: Array<{
         node: {
           id: string;
@@ -693,6 +725,7 @@ interface SingleProductResponse {
   } | null;
 }
 
+type ProductVariantPage = NonNullable<SingleProductResponse["product"]>["variants"];
 export async function syncSingleProduct(
   client: ShopifyClient,
   shopifyProductGid: string,
@@ -703,7 +736,7 @@ export async function syncSingleProduct(
   const primaryLocale = _primaryLang2.code;
   const result = await client.request<SingleProductResponse>(
     SINGLE_PRODUCT_QUERY,
-    { id: shopifyProductGid },
+    { id: shopifyProductGid, variantsCursor: null },
     { expectedCost: 30 },
   );
 
@@ -731,7 +764,8 @@ export async function syncSingleProduct(
     updatedAt: product.updatedAt,
   };
 
-  const variantNodes: BulkVariantNode[] = product.variants.edges.map(({ node: v }) => ({
+  const variantEdges = await fetchAllProductVariants(client, product.id, product.variants);
+  const variantNodes: BulkVariantNode[] = variantEdges.map(({ node: v }) => ({
     id: v.id,
     __parentId: product.id,
     title: v.title,
@@ -746,7 +780,7 @@ export async function syncSingleProduct(
   }));
 
   const metafieldsByVariant = new Map<string, BulkMetafieldNode[]>();
-  for (const { node: v } of product.variants.edges) {
+  for (const { node: v } of variantEdges) {
     const metas: BulkMetafieldNode[] = v.metafields.edges.map(({ node: m }) => ({
       id: m.id,
       __parentId: v.id,
@@ -850,4 +884,39 @@ export async function syncSingleProduct(
 
   tracker?.bumpRead(1);
   logger.info({ shopifyProductGid }, "Single product sync complete");
+}
+
+/** Fetch every variant page before treating a targeted Shopify sync as authoritative. */
+export async function fetchAllProductVariants(
+  client: ShopifyClient,
+  productGid: string,
+  firstPage: ProductVariantPage,
+): Promise<ProductVariantPage["edges"]> {
+  const variants = [...firstPage.edges];
+  let pageInfo = firstPage.pageInfo;
+
+  while (pageInfo.hasNextPage) {
+    if (!pageInfo.endCursor) {
+      throw new Error(`Shopify returned a variant page without an end cursor for ${productGid}`);
+    }
+    const response = await client.request<ProductVariantsResponse>(
+      PRODUCT_VARIANTS_QUERY,
+      { id: productGid, cursor: pageInfo.endCursor },
+      { expectedCost: 15 },
+    );
+    const page = response.product?.variants;
+    if (!page) {
+      throw new Error(`Shopify product disappeared while paging variants: ${productGid}`);
+    }
+    variants.push(...page.edges);
+    pageInfo = page.pageInfo;
+  }
+
+  return variants;
+}
+
+interface ProductVariantsResponse {
+  product: {
+    variants: ProductVariantPage;
+  } | null;
 }

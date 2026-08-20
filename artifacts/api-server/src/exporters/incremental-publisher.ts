@@ -14,7 +14,7 @@ import {
   feedSnapshotsTable,
   variantsTable,
 } from "@workspace/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { CanonicalProduct } from "../canonical/types";
 import { loadConfig } from "../config/loader";
 import { logger as rootLogger } from "../lib/logger";
@@ -42,6 +42,17 @@ import { validateGoogleFeed, validateMetaFeed } from "../validation/feed-validat
 const logger = rootLogger.child({ module: "incremental-feed-publisher" });
 
 type Channel = "google" | "meta";
+
+/**
+ * Raised when a Shopify delta cannot be reflected in every affected public
+ * catalog. The webhook worker keeps this event retryable.
+ */
+export class IncrementalFeedPublicationBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IncrementalFeedPublicationBlockedError";
+  }
+}
 
 interface CachedFeedItem {
   marketCode: string;
@@ -195,6 +206,9 @@ async function bootstrapCompleteCacheIfNeeded(): Promise<boolean> {
   if (complete.every(Boolean)) return false;
 
   logger.warn("Incremental cache is not proven complete; running safe full reconciliation");
+  // Full exports are authoritative for active products, but only upsert their
+  // current rows. Clearing first removes rows left by missed deletions.
+  await db.delete(feedItemsTable).where(sql`true`);
   const [{ runGoogleExport }, { runMetaExport }] = await Promise.all([
     import("./google/runner"),
     import("./meta/generator"),
@@ -203,6 +217,14 @@ async function bootstrapCompleteCacheIfNeeded(): Promise<boolean> {
   await runMetaExport({});
 
   const config = loadConfig();
+  // Meta's public language export intentionally avoids persisting feed_items
+  // while it writes its flat URLs. Rebuild the Meta cache explicitly so the
+  // parity check below can prove both channels are complete.
+  await processAllCanonicals(
+    config,
+    { channel: "meta", persistFeedItems: true },
+    () => undefined,
+  );
   const checks = await Promise.all(
     (["google", "meta"] as const).flatMap((channel) =>
       ["fr", "de"].map(async (language) => ({
@@ -219,7 +241,7 @@ async function bootstrapCompleteCacheIfNeeded(): Promise<boolean> {
   );
   const failed = mustBePublished.filter(({ matches }) => !matches);
   if (failed.length > 0) {
-    throw new Error(
+    throw new IncrementalFeedPublicationBlockedError(
       `Full URL-feed reconciliation did not produce verifiable current snapshots: ${failed
         .map(({ channel, language }) => `${channel}/${language}`)
         .join(", ")}`,
@@ -253,9 +275,10 @@ async function recordSnapshot(params: {
   });
 }
 
-async function publishGoogleLanguage(language: string): Promise<void> {
+async function publishGoogleLanguage(language: string): Promise<boolean> {
   const config = loadConfig();
-  if (resolveGoogleDryRun(config) || !(await hasCurrentSnapshot("google", language))) return;
+  if (resolveGoogleDryRun(config)) return true;
+  if (!(await hasCurrentSnapshot("google", language))) return false;
   const markets = config.markets.language_masters[language]?.markets ?? [];
   const rows = (await cachedCanonicals("google", markets))
     .flatMap((canonical) => {
@@ -282,7 +305,7 @@ async function publishGoogleLanguage(language: string): Promise<void> {
   const previousItemCount = (await downloadManifest(currentPath))?.itemCount ?? null;
   if (!validation.valid) {
     logger.error({ language, errors: validation.errorCount }, "Incremental Google feed validation failed; retaining current feed");
-    return;
+    return false;
   }
   const published = await atomicPublish({
     versionedPath: versioned,
@@ -292,11 +315,13 @@ async function publishGoogleLanguage(language: string): Promise<void> {
     maxDropPct: config.feedPolicy.snapshot_gate.max_item_count_drop_pct,
   });
   if (published) await recordSnapshot({ channel: "google", language, storagePath: currentPath, itemCount: rows.length, sha256 });
+  return published;
 }
 
-async function publishMetaLanguage(language: string): Promise<void> {
+async function publishMetaLanguage(language: string): Promise<boolean> {
   const config = loadConfig();
-  if (resolveMetaDryRun(config) || !(await hasCurrentSnapshot("meta", language))) return;
+  if (resolveMetaDryRun(config)) return true;
+  if (!(await hasCurrentSnapshot("meta", language))) return false;
   const markets = config.markets.language_masters[language]?.markets ?? [];
   const rows = (await cachedCanonicals("meta", markets))
     .flatMap((canonical) => {
@@ -328,7 +353,7 @@ async function publishMetaLanguage(language: string): Promise<void> {
   const previousItemCount = (await downloadManifest(currentPath))?.itemCount ?? null;
   if (!validation.valid) {
     logger.error({ language, errors: validation.errorCount }, "Incremental Meta feed validation failed; retaining current feed");
-    return;
+    return false;
   }
   const published = await atomicPublish({
     versionedPath: versioned,
@@ -338,6 +363,7 @@ async function publishMetaLanguage(language: string): Promise<void> {
     maxDropPct: config.feedPolicy.snapshot_gate.max_item_count_drop_pct,
   });
   if (published) await recordSnapshot({ channel: "meta", language, storagePath: currentPath, itemCount, sha256 });
+  return published;
 }
 
 /**
@@ -366,10 +392,15 @@ export async function publishProductChanges(productIds: string[]): Promise<void>
         byChannelLanguage.get(row.channel)?.add(row.language);
       }
     }
-    await Promise.all([
+    const published = await Promise.all([
       ...[...byChannelLanguage.get("google")!].map(publishGoogleLanguage),
       ...[...byChannelLanguage.get("meta")!].map(publishMetaLanguage),
     ]);
+    if (!published.every(Boolean)) {
+      throw new IncrementalFeedPublicationBlockedError(
+        "One or more incremental public URL feeds were blocked; retaining webhook for retry",
+      );
+    }
     logger.info(
       { products: uniqueIds.length, googleLanguages: [...byChannelLanguage.get("google")!], metaLanguages: [...byChannelLanguage.get("meta")!] },
       "Incremental URL feeds refreshed",
