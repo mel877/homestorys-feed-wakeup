@@ -24,11 +24,36 @@ import {
 
 const logger = rootLogger.child({ module: "meta-language-feeds" });
 
-const META_LANGUAGE_FEED_HEADERS = [
+export const META_LANGUAGE_FEED_HEADERS = [
   ...META_BASE_HEADERS,
   ...META_LANGUAGE_HEADERS.filter((header) => header !== "id"),
   ...META_COUNTRY_HEADERS.filter((header) => header !== "id"),
 ] as string[];
+
+/**
+ * The public Meta language URL is a flat, market-aware file. Keep its byte
+ * order deterministic so a cached re-serialization can prove it matches the
+ * current snapshot before an incremental publish is allowed.
+ */
+export function serializeMetaLanguageRows(rows: Record<string, string>[]): {
+  csv: string;
+  itemCount: number;
+} {
+  const ordered = [...rows].sort((a, b) =>
+    META_LANGUAGE_FEED_HEADERS
+      .map((header) => String(a[header] ?? ""))
+      .join("\u001f")
+      .localeCompare(
+        META_LANGUAGE_FEED_HEADERS
+          .map((header) => String(b[header] ?? ""))
+          .join("\u001f"),
+      ),
+  );
+  return {
+    csv: stringify(ordered, { header: true, columns: META_LANGUAGE_FEED_HEADERS }),
+    itemCount: ordered.length,
+  };
+}
 
 export type MetaLanguageFeedResult = {
   rows: number;
@@ -74,12 +99,12 @@ export async function publishMetaLanguageFeeds(
         },
       );
 
-      const csv = stringify(rows, { header: true, columns: META_LANGUAGE_FEED_HEADERS });
+       const { csv, itemCount } = serializeMetaLanguageRows(rows);
       const sha256 = await uploadFeedFile(versioned, csv, "text/csv");
       const manifest: FeedManifest = {
         version,
         generatedAt: new Date().toISOString(),
-        itemCount: rows.length,
+        itemCount,
         sha256,
         sourceRunId: options.syncRunId ?? null,
         channel: "meta",
@@ -111,7 +136,7 @@ export async function publishMetaLanguageFeeds(
           language,
           marketCode: manifest.marketCode!,
           storagePath: currentPath,
-          itemCount: rows.length,
+          itemCount,
           sha256,
           isCurrent: true,
           syncRunId: options.syncRunId ?? null,
@@ -119,7 +144,7 @@ export async function publishMetaLanguageFeeds(
         });
       }
       results[language] = {
-        rows: rows.length,
+        rows: itemCount,
         published: published || options.dryRun,
         storagePath: published ? currentPath : versioned,
       };

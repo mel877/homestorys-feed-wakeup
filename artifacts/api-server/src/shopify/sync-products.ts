@@ -6,7 +6,7 @@
  */
 
 import { db, productsTable, variantsTable, imagesTable, productTranslationsTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config";
 import type { ShopifyClient } from "./client";
@@ -824,6 +824,19 @@ export async function syncSingleProduct(
           target: variantsTable.shopifyGid,
           set: { ...variantFields, checksum: variantChecksum, updatedAt: new Date() },
         });
+    }
+
+    // A targeted Shopify product update is authoritative for its variants.
+    // Remove variants no longer returned by Shopify so a deleted SKU cannot
+    // survive in feed_items or a subsequently rebuilt public feed.
+    const currentVariantGids = variantNodes.map((variant) => variant.id);
+    if (currentVariantGids.length > 0) {
+      await tx.delete(variantsTable).where(and(
+        eq(variantsTable.productId, productDbId),
+        notInArray(variantsTable.shopifyGid, currentVariantGids),
+      ));
+    } else {
+      await tx.delete(variantsTable).where(eq(variantsTable.productId, productDbId));
     }
 
     // Replace images — delete unconditionally so products that had all images

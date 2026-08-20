@@ -53,6 +53,8 @@ const logger = rootLogger.child({ module: "canonical-reader" });
 export interface ReadOptions {
   /** Markets to include. Undefined = all configured markets. */
   markets?: string[];
+  /** Product database IDs to include. Undefined = every active product. */
+  productIds?: string[];
   channel: CanonicalChannel;
   /** If true, persist each canonical to feed_items table. */
   persistFeedItems?: boolean;
@@ -85,10 +87,13 @@ export async function readAllCanonicals(
   logger.info({ markets: targetMarkets, channel }, "Loading canonical products");
 
   // ── 1. Load active products ──────────────────────────────────────────────
+  const productFilter = options.productIds?.length
+    ? and(eq(productsTable.status, "active"), inArray(productsTable.id, options.productIds))
+    : eq(productsTable.status, "active");
   const products = await db
     .select()
     .from(productsTable)
-    .where(eq(productsTable.status, "active"));
+    .where(productFilter);
 
   if (products.length === 0) {
     logger.info("No active products found");
@@ -321,10 +326,13 @@ export async function processAllCanonicals(
   logger.info({ markets: targetMarkets, channel }, "Streaming canonical products");
 
   // ── Bulk data loading (same as readAllCanonicals) ─────────────────────────
+  const productFilter = options.productIds?.length
+    ? and(eq(productsTable.status, "active"), inArray(productsTable.id, options.productIds))
+    : eq(productsTable.status, "active");
   const products = await db
     .select()
     .from(productsTable)
-    .where(eq(productsTable.status, "active"));
+    .where(productFilter);
 
   if (products.length === 0) {
     logger.info("No active products found");

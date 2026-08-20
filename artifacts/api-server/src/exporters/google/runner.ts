@@ -70,6 +70,8 @@ export interface GoogleRunResult {
 export async function runGoogleExport(options: {
   markets?: string[];
   syncRunId?: string;
+  /** URL-feed reconciliation must not call Merchant Center inventory APIs. */
+  skipGoogleApi?: boolean;
 }): Promise<GoogleRunResult> {
   const startedAt = Date.now();
   const config = await loadConfig();
@@ -287,6 +289,7 @@ export async function runGoogleExport(options: {
           if (row) rows.push(row);
         },
       );
+      rows.sort((a, b) => a.id.localeCompare(b.id));
       const tsv = buildGoogleTsv(rows);
       const sha256 = await uploadFeedFile(versioned, tsv, "text/tab-separated-values");
       const manifest: FeedManifest = {
@@ -355,7 +358,7 @@ export async function runGoogleExport(options: {
   }
 
   // ── Sync local inventory (Eupen showroom) ─────────────────────────────────
-  if (beInventoryByKey.size > 0) {
+  if (!options.skipGoogleApi && beInventoryByKey.size > 0) {
     const invResult = await submitLocalInventoryEntries([...beInventoryByKey.values()]);
     result.localInventory.submitted += invResult.submitted;
     result.localInventory.failed += invResult.failed;

@@ -26,6 +26,7 @@ import { eq, sql } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { syncProduct, updateInventoryItem } from "../shopify/index";
 import { sleep } from "../shopify/client";
+import { publishProductChanges } from "../exporters/incremental-publisher";
 
 const logger = rootLogger.child({ module: "webhook-worker" });
 
@@ -219,6 +220,12 @@ export class WebhookWorker {
         const productId = payload?.["id"];
         if (!productId) throw new Error(`Missing id in ${topic} payload`);
         await syncProduct(String(productId));
+        const [product] = await db
+          .select({ id: productsTable.id })
+          .from(productsTable)
+          .where(eq(productsTable.shopifyGid, `gid://shopify/Product/${productId}`))
+          .limit(1);
+        if (product) await publishProductChanges([product.id]);
         break;
       }
 
@@ -230,6 +237,12 @@ export class WebhookWorker {
           .update(productsTable)
           .set({ status: "archived", updatedAt: new Date() })
           .where(eq(productsTable.shopifyGid, `gid://shopify/Product/${productId}`));
+        const [deletedProduct] = await db
+          .select({ id: productsTable.id })
+          .from(productsTable)
+          .where(eq(productsTable.shopifyGid, `gid://shopify/Product/${productId}`))
+          .limit(1);
+        if (deletedProduct) await publishProductChanges([deletedProduct.id]);
         logger.info({ productId }, "Product archived via webhook");
         break;
       }
@@ -239,7 +252,8 @@ export class WebhookWorker {
         if (!inventoryItemId) {
           throw new Error("Missing inventory_item_id in inventory_levels/update payload");
         }
-        await updateInventoryItem(String(inventoryItemId));
+        const productId = await updateInventoryItem(String(inventoryItemId));
+        if (productId) await publishProductChanges([productId]);
         break;
       }
 

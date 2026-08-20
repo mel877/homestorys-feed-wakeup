@@ -270,7 +270,7 @@ export async function syncSingleInventoryItem(
   client: ShopifyClient,
   inventoryItemGid: string,
   tracker?: SyncRunTracker,
-): Promise<void> {
+): Promise<string | null> {
   const result = await client.request<InventoryQueryResponse>(
     SINGLE_INVENTORY_QUERY,
     { inventoryItemId: inventoryItemGid },
@@ -280,18 +280,18 @@ export async function syncSingleInventoryItem(
   const item = result.inventoryItem;
   if (!item || !item.variant) {
     logger.warn({ inventoryItemGid }, "Inventory item not found or has no variant");
-    return;
+    return null;
   }
 
   const [variant] = await db
-    .select({ id: variantsTable.id })
+    .select({ id: variantsTable.id, productId: variantsTable.productId })
     .from(variantsTable)
     .where(eq(variantsTable.shopifyGid, item.variant.id))
     .limit(1);
 
   if (!variant) {
     logger.warn({ variantGid: item.variant.id }, "Variant not in DB — skipping inventory update");
-    return;
+    return null;
   }
 
   for (const { node: level } of item.inventoryLevels.edges) {
@@ -336,4 +336,5 @@ export async function syncSingleInventoryItem(
 
   tracker?.bumpChanged();
   logger.debug({ inventoryItemGid, totalAvailable }, "Single inventory item updated");
+  return variant.productId;
 }

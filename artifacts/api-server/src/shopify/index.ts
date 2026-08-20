@@ -179,14 +179,15 @@ export async function syncProduct(shopifyProductRef: string): Promise<string> {
  * Used by the webhook worker for inventory_levels/update events.
  * Accepts inventory item numeric ID or GID.
  */
-export async function updateInventoryItem(shopifyInventoryItemRef: string): Promise<void> {
+export async function updateInventoryItem(shopifyInventoryItemRef: string): Promise<string | null> {
   const gid = shopifyInventoryItemRef.startsWith("gid://")
     ? shopifyInventoryItemRef
     : `gid://shopify/InventoryItem/${shopifyInventoryItemRef}`;
 
   const client = getShopifyClient();
-  await syncSingleInventoryItem(client, gid);
+  const productId = await syncSingleInventoryItem(client, gid);
   logger.debug({ gid }, "Inventory item updated via targeted sync");
+  return productId;
 }
 
 // ── Sync status ───────────────────────────────────────────────────────────────
