@@ -41,6 +41,10 @@ vi.mock("../src/exporters/meta/generator", () => ({
   runMetaExport: mockRunMetaExport,
 }));
 
+vi.mock("../src/exporters/meta/fresh-process", () => ({
+  runMetaExportInFreshProcess: mockRunMetaExport,
+}));
+
 vi.mock("../src/exporters/google/runner", () => ({
   runGoogleExport: mockRunGoogleExport,
 }));
@@ -96,7 +100,7 @@ describe("POST /api/local/export/meta — lock invariant", () => {
     expect(res.body).toMatchObject({ status: "started" });
   });
 
-  it("acquires withExportLock before calling runMetaExport", async () => {
+  it("acquires withExportLock before calling the isolated Meta export", async () => {
     mockWithExportLock.mockClear();
     mockRunMetaExport.mockClear();
 
@@ -128,7 +132,7 @@ describe("POST /api/local/export/meta — lock invariant", () => {
     expect(releaseIdx).toBeGreaterThan(exportIdx);
   });
 
-  it("releases withExportLock even when runMetaExport throws", async () => {
+  it("releases withExportLock even when the isolated Meta export throws", async () => {
     mockWithExportLock.mockClear();
     mockRunMetaExport.mockClear();
 

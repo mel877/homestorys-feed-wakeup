@@ -1,20 +1,25 @@
 import { stringify } from "csv-stringify/sync";
-import { and, eq } from "drizzle-orm";
-import { db, feedSnapshotsTable } from "@workspace/db";
+import { stringify as stringifyStream } from "csv-stringify";
+import { once } from "node:events";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import { db, feedItemsTable, feedSnapshotsTable } from "@workspace/db";
 import type { AppConfig } from "../../config/schemas";
 import { logger as rootLogger } from "../../lib/logger";
 import {
   atomicPublish,
+  createFeedFileWriteStream,
   downloadManifest,
   formatVersionTs,
   metaLanguageFeedPath,
-  uploadFeedFile,
   uploadManifest,
   versionedPath,
   type FeedManifest,
 } from "../../lib/storage";
-import { validateMetaFeed } from "../../validation/feed-validator";
-import { processAllCanonicals } from "../canonical-reader";
+import {
+  createMetaRowValidator,
+  type FeedValidationResult,
+  type ValidationError,
+} from "../../validation/feed-validator";
 import {
   mapToMeta,
   META_BASE_HEADERS,
@@ -69,38 +74,73 @@ export type MetaLanguageFeedResult = {
  */
 export async function publishMetaLanguageFeeds(
   config: AppConfig,
-  options: { syncRunId?: string; dryRun: boolean },
+  options: { syncRunId?: string; dryRun: boolean; languages?: Array<"fr" | "de"> },
 ): Promise<Record<string, MetaLanguageFeedResult>> {
   const results: Record<string, MetaLanguageFeedResult> = {};
   const version = formatVersionTs();
 
-  for (const language of ["fr", "de"]) {
+  for (const language of options.languages ?? ["fr", "de"]) {
     const markets = config.markets.language_masters[language]?.markets ?? [];
-    const rows: Record<string, string>[] = [];
     const currentPath = metaLanguageFeedPath(language);
     const versioned = versionedPath(currentPath, version);
 
     try {
-      await processAllCanonicals(
-        config,
-        { markets, channel: "meta", persistFeedItems: false },
-        (canonical) => {
-          const mapped = mapToMeta(canonical, config);
-          if (!mapped) return;
-          rows.push({
-            ...mapped.base,
-            ...Object.fromEntries(
-              Object.entries(mapped.language_row).filter(([key]) => key !== "id"),
-            ),
-            ...Object.fromEntries(
-              Object.entries(mapped.country_row).filter(([key]) => key !== "id"),
-            ),
-          });
-        },
-      );
+      const upload = createFeedFileWriteStream(versioned, "text/csv");
+      const stringifier = stringifyStream();
+      stringifier.pipe(upload.stream);
+      stringifier.write(META_LANGUAGE_FEED_HEADERS);
 
-       const { csv, itemCount } = serializeMetaLanguageRows(rows);
-      const sha256 = await uploadFeedFile(versioned, csv, "text/csv");
+      const validateRow = config.feedPolicy.snapshot_gate.require_zero_schema_errors
+        ? createMetaRowValidator("meta-product")
+        : null;
+      let validationRowCount = 0;
+      let validationErrorCount = 0;
+      const validationErrors: ValidationError[] = [];
+      let itemCount = 0;
+      let offset = 0;
+      const pageSize = 250;
+
+      while (true) {
+        const items = await db
+          .select({ canonicalJson: feedItemsTable.canonicalJson })
+          .from(feedItemsTable)
+          .where(and(
+            eq(feedItemsTable.channel, "meta"),
+            eq(feedItemsTable.language, language),
+            inArray(feedItemsTable.marketCode, markets),
+          ))
+          .orderBy(asc(feedItemsTable.variantId), asc(feedItemsTable.marketCode))
+          .limit(pageSize)
+          .offset(offset);
+        if (items.length === 0) break;
+
+        for (const item of items) {
+          const mapped = mapToMeta(item.canonicalJson as Parameters<typeof mapToMeta>[0], config);
+          if (!mapped) continue;
+          const row: Record<string, string> = {
+            ...mapped.base,
+            ...Object.fromEntries(Object.entries(mapped.language_row).filter(([key]) => key !== "id")),
+            ...Object.fromEntries(Object.entries(mapped.country_row).filter(([key]) => key !== "id")),
+          };
+          itemCount++;
+          validationRowCount++;
+          if (validateRow) {
+            const errors = validateRow(row, validationRowCount + 1);
+            validationErrorCount += errors.length;
+            if (validationErrors.length < 200) {
+              validationErrors.push(...errors.slice(0, 200 - validationErrors.length));
+            }
+          }
+          const record = META_LANGUAGE_FEED_HEADERS.map((header) => row[header] ?? "");
+          if (!stringifier.write(record)) {
+            await once(stringifier, "drain");
+          }
+        }
+        offset += items.length;
+      }
+
+      stringifier.end();
+      const { sha256 } = await upload.done;
       const manifest: FeedManifest = {
         version,
         generatedAt: new Date().toISOString(),
@@ -114,7 +154,14 @@ export async function publishMetaLanguageFeeds(
       await uploadManifest(versioned, manifest);
 
       const previousItemCount = (await downloadManifest(currentPath))?.itemCount ?? null;
-      const validation = await validateMetaFeed(versioned);
+      const validation: FeedValidationResult = {
+        file: versioned,
+        rowCount: validationRowCount,
+        errorCount: validationErrorCount,
+        errors: validationErrors,
+        valid: validationErrorCount === 0,
+        schema: "meta-product",
+      };
       const published = !options.dryRun && validation.valid
         ? await atomicPublish({
             versionedPath: versioned,

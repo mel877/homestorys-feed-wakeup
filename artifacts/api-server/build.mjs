@@ -19,6 +19,7 @@ async function buildAll() {
       path.resolve(artifactDir, "src/index.ts"),
       path.resolve(artifactDir, "src/cli/sync-google.ts"),
       path.resolve(artifactDir, "src/cli/sync-meta.ts"),
+      path.resolve(artifactDir, "src/cli/sync-meta-language.ts"),
       path.resolve(artifactDir, "src/cli/validate-feeds.ts"),
       path.resolve(artifactDir, "src/cli/sync-full.ts"),
       path.resolve(artifactDir, "src/cli/sync-inventory.ts"),

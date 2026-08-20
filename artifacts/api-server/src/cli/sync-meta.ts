@@ -28,6 +28,7 @@ async function main() {
   //   --markets=BE_FR,BE_DE   (equals form)
   //   --markets BE_FR,BE_DE   (space form)
   let markets: string[] | undefined;
+  let syncRunId: string | undefined;
   const argv = process.argv.slice(2);
   const marketsEqArg = argv.find((a) => a.startsWith("--markets="));
   const marketsSpaceIdx = argv.indexOf("--markets");
@@ -36,13 +37,20 @@ async function main() {
   } else if (marketsSpaceIdx !== -1 && argv[marketsSpaceIdx + 1]) {
     markets = argv[marketsSpaceIdx + 1]!.split(",").filter(Boolean);
   }
+  const syncRunIdArg = argv.find((a) => a.startsWith("--sync-run-id="));
+  const syncRunIdIndex = argv.indexOf("--sync-run-id");
+  if (syncRunIdArg) {
+    syncRunId = syncRunIdArg.replace("--sync-run-id=", "");
+  } else if (syncRunIdIndex !== -1 && argv[syncRunIdIndex + 1]) {
+    syncRunId = argv[syncRunIdIndex + 1];
+  }
 
   const dryRun = resolveMetaDryRun(loadConfig());
   console.log(`\n🚀 Meta Feed Sync — ${dryRun ? "DRY RUN" : "LIVE"}\n`);
   if (markets) console.log(`   Markets: ${markets.join(", ")}`);
 
   try {
-    const result = await runMetaExport({ markets });
+    const result = await runMetaExport({ markets, syncRunId });
 
     console.log(`\n✅ Meta export complete (${result.durationMs}ms)`);
     console.log(`   Total canonicals: ${result.totalCanonicals}`);

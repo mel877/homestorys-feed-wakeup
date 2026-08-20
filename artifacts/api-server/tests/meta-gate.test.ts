@@ -39,6 +39,7 @@ const {
   mockUploadManifest,
   mockDownloadManifest,
   mockValidateMetaFeed,
+  mockCreateMetaRowValidator,
   mockProcessAllCanonicals,
   mockDbInsert,
   mockDbUpdate,
@@ -58,6 +59,7 @@ const {
     mockUploadManifest: vi.fn().mockResolvedValue(undefined),
     mockDownloadManifest: vi.fn().mockResolvedValue(null), // null = no prior snapshot
     mockValidateMetaFeed: vi.fn(),
+    mockCreateMetaRowValidator: vi.fn().mockReturnValue(vi.fn().mockReturnValue([])),
     mockProcessAllCanonicals: vi.fn(), // kept for backward compat; generator no longer calls it
     mockDbInsert,
     mockDbUpdate,
@@ -82,6 +84,7 @@ vi.mock("../src/lib/storage", async (importOriginal) => {
 
 vi.mock("../src/validation/feed-validator", () => ({
   validateMetaFeed: mockValidateMetaFeed,
+  createMetaRowValidator: mockCreateMetaRowValidator,
 }));
 
 // The generator no longer uses processAllCanonicals, but keep the mock so any
@@ -396,8 +399,9 @@ describe("Meta generator gate — happy path (first publish, schema valid)", () 
     const { runMetaExport } = await import("../src/exporters/meta/generator");
     await runMetaExport({});
 
-    // 11 files: legacy base/language/country layers plus flat FR/DE public files.
-    expect(mockAtomicPublish).toHaveBeenCalledTimes(11);
+    // Nine legacy base/language/country layers. Flat FR/DE public files run in
+    // their own memory-isolated child processes.
+    expect(mockAtomicPublish).toHaveBeenCalledTimes(9);
   });
 
   it("inserts a feed_snapshots row with isCurrent=true for each published file", async () => {

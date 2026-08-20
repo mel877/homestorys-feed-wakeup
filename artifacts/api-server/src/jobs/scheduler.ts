@@ -286,7 +286,7 @@ export async function startScheduler(): Promise<void> {
   const { runFullSync, runInventorySync, runPriceSync } = await import("../shopify/index");
   const { runRecommendationsSync } = await import("./sync-recommendations");
   const { runGoogleExport } = await import("../exporters/google/runner");
-  const { runMetaExport } = await import("../exporters/meta/generator");
+  const { runMetaExportInFreshProcess } = await import("../exporters/meta/fresh-process");
 
   const jobs: JobDefinition[] = [
     {
@@ -311,7 +311,7 @@ export async function startScheduler(): Promise<void> {
           // A failed Meta export is recorded in metadata but does NOT block
           // Google (already finished above) or mark the sync_run as failed.
           let metaOutcome: "ok" | "failed" = "ok";
-          await runMetaExport({ syncRunId: runId }).catch((err) => {
+          await runMetaExportInFreshProcess({ syncRunId: runId }).catch((err) => {
             metaOutcome = "failed";
             logger.error({ err }, "Meta re-export failed after full sync");
           });

@@ -214,6 +214,10 @@ vi.mock("../src/exporters/meta/generator", () => ({
   runMetaExport: mockRunMetaExport,
 }));
 
+vi.mock("../src/exporters/meta/fresh-process", () => ({
+  runMetaExportInFreshProcess: mockRunMetaExport,
+}));
+
 function hash(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
@@ -451,7 +455,7 @@ describe("incremental Shopify URL-feed publishing", () => {
     await publishProductChanges(["product-changed"]);
 
     expect(mockRunGoogleExport).toHaveBeenCalledWith({ skipGoogleApi: true });
-    expect(mockRunMetaExport).toHaveBeenCalledWith({});
+    expect(mockRunMetaExport).toHaveBeenCalledWith();
     expect(mockProcessAllCanonicals).toHaveBeenCalledWith(
       expect.anything(),
       { channel: "meta", persistFeedItems: true },

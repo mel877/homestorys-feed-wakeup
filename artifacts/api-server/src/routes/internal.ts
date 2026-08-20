@@ -58,7 +58,7 @@ router.post("/sync/full", (req, res) => {
     .then((withLock) =>
       withLock("full-sync", "full", async () => {
         const { runGoogleExport } = await import("../exporters/google/runner");
-        const { runMetaExport } = await import("../exporters/meta/generator");
+        const { runMetaExportInFreshProcess } = await import("../exporters/meta/fresh-process");
         const { fetchAndStoreDiagnostics } = await import("../exporters/google/diagnostics");
         const { withExportLock } = await import("../exporters/export-lock");
         const runId = await runFullSync();
@@ -68,7 +68,7 @@ router.post("/sync/full", (req, res) => {
           await runGoogleExport({ syncRunId: runId }).catch((err) =>
             logger.error({ err }, "Google re-export failed after full sync"),
           );
-          await runMetaExport({ syncRunId: runId }).catch((err) =>
+          await runMetaExportInFreshProcess({ syncRunId: runId }).catch((err) =>
             logger.error({ err }, "Meta re-export failed after full sync"),
           );
         }).catch((err) =>

@@ -209,12 +209,12 @@ async function bootstrapCompleteCacheIfNeeded(): Promise<boolean> {
   // Full exports are authoritative for active products, but only upsert their
   // current rows. Clearing first removes rows left by missed deletions.
   await db.delete(feedItemsTable).where(sql`true`);
-  const [{ runGoogleExport }, { runMetaExport }] = await Promise.all([
+  const [{ runGoogleExport }, { runMetaExportInFreshProcess }] = await Promise.all([
     import("./google/runner"),
-    import("./meta/generator"),
+    import("./meta/fresh-process"),
   ]);
   await runGoogleExport({ skipGoogleApi: true });
-  await runMetaExport({});
+  await runMetaExportInFreshProcess();
 
   const config = loadConfig();
   // Meta's public language export intentionally avoids persisting feed_items

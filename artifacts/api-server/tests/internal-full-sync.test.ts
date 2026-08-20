@@ -81,6 +81,10 @@ vi.mock("../src/exporters/meta/generator", () => ({
   runMetaExport: mockRunMetaExport,
 }));
 
+vi.mock("../src/exporters/meta/fresh-process", () => ({
+  runMetaExportInFreshProcess: mockRunMetaExport,
+}));
+
 vi.mock("../src/exporters/google/diagnostics", () => ({
   fetchAndStoreDiagnostics: mockFetchAndStoreDiagnostics,
 }));

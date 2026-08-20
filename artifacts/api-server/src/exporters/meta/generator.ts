@@ -29,7 +29,6 @@
  *       atomic copy to the current pointer path).
  */
 
-import { stringify } from "csv-stringify/sync";
 import { stringify as stringifyStream } from "csv-stringify";
 import { once } from "events";
 import {
@@ -49,7 +48,6 @@ import { loadConfig } from "../../config/loader";
 import type { AppConfig } from "../../config/schemas";
 import { logger as rootLogger } from "../../lib/logger";
 import {
-  uploadFeedFile,
   createFeedFileWriteStream,
   uploadManifest,
   atomicPublish,
@@ -80,8 +78,12 @@ import {
   META_LANGUAGE_HEADERS,
   META_COUNTRY_HEADERS,
 } from "./mapper";
-import { validateMetaFeed } from "../../validation/feed-validator";
-import { publishMetaLanguageFeeds } from "./language-feeds";
+import {
+  createMetaRowValidator,
+  validateMetaFeed,
+  type FeedValidationResult,
+  type ValidationError,
+} from "../../validation/feed-validator";
 import { resolveMetaDryRun } from "../dry-run";
 const logger = rootLogger.child({ module: "meta-generator" });
 
@@ -113,17 +115,6 @@ const META_FEED_FILES: Record<MetaFeedKey, string> = {
   "country-CH":  "meta-country-CH.csv",
   "country-LU":  "meta-country-LU.csv",
 };
-
-// ── CSV serialization ─────────────────────────────────────────────────────────
-
-function toCsv<T extends object>(
-  headers: (keyof T)[],
-  rows: T[],
-): string {
-  const header = headers.map((h) => String(h));
-  const data = rows.map((row) => headers.map((h) => String((row as Record<string | symbol, unknown>)[h as string | symbol] ?? "")));
-  return stringify([header, ...data]);
-}
 
 // ── Main generator ─────────────────────────────────────────────────────────────
 
@@ -181,23 +172,38 @@ export async function runMetaExport(options: {
 
   // ── publishFeed helpers ───────────────────────────────────────────────────────
   //
-  // publishFeed: serializes rows in memory and uploads (small files).
+  // publishFeed: streams rows directly to storage. Language files can contain
+  // more than 100k records, so serializing them into one in-memory CSV would
+  // duplicate the pending row map and exceed the V8 heap limit.
   // finalizeFeed: gate + manifest + DB record for content already uploaded to
   //   the versioned path (used by the streamed base file).
   async function publishFeed(
     key: MetaFeedKey,
     filename: string,
     headers: string[],
-    rows: object[],
+    rows: Iterable<object>,
+    itemCount: number,
     feedLanguage: string | null,
     feedCountry: string | null,
   ): Promise<void> {
     const currentPath = metaFeedPath(filename);
     const versioned = versionedPath(currentPath, versionTs);
 
-    const csv = toCsv(headers as never[], rows as never[]);
-    const sha256 = await uploadFeedFile(versioned, csv, "text/csv");
-    await finalizeFeed(key, currentPath, versioned, rows.length, sha256, feedLanguage, feedCountry);
+    const upload = createFeedFileWriteStream(versioned, "text/csv");
+    const stringifier = stringifyStream();
+    stringifier.pipe(upload.stream);
+    stringifier.write(headers.map((header) => String(header)));
+    for (const row of rows) {
+      const record = headers.map(
+        (header) => String((row as Record<string, unknown>)[header] ?? ""),
+      );
+      if (!stringifier.write(record)) {
+        await once(stringifier, "drain");
+      }
+    }
+    stringifier.end();
+    const { sha256 } = await upload.done;
+    await finalizeFeed(key, currentPath, versioned, itemCount, sha256, feedLanguage, feedCountry);
   }
 
   async function finalizeFeed(
@@ -208,6 +214,7 @@ export async function runMetaExport(options: {
     sha256: string,
     feedLanguage: string | null,
     feedCountry: string | null,
+    streamedValidation?: FeedValidationResult,
   ): Promise<void> {
     const manifest: FeedManifest = {
       version: versionTs,
@@ -225,7 +232,7 @@ export async function runMetaExport(options: {
     const { snapshot_gate } = config.feedPolicy;
     let schemaValid = true;
     if (snapshot_gate.require_zero_schema_errors) {
-      const validation = await validateMetaFeed(versioned);
+      const validation = streamedValidation ?? await validateMetaFeed(versioned);
       schemaValid = validation.valid;
       if (!schemaValid) {
         logger.error(
@@ -444,6 +451,12 @@ export async function runMetaExport(options: {
     ? null
     : createFeedFileWriteStream(baseVersionedPath, "text/csv");
   const baseStringifier = baseUpload ? stringifyStream() : null;
+  const validateBaseRow = baseUpload && config.feedPolicy.snapshot_gate.require_zero_schema_errors
+    ? createMetaRowValidator("meta-base")
+    : null;
+  let baseValidationRowCount = 0;
+  let baseValidationErrorCount = 0;
+  const baseValidationErrors: ValidationError[] = [];
   if (baseStringifier && baseUpload) {
     baseStringifier.pipe(baseUpload.stream);
     baseStringifier.write(META_BASE_HEADERS.map((h) => String(h)));
@@ -451,6 +464,14 @@ export async function runMetaExport(options: {
 
   async function writeBaseRow(row: MetaBaseRow): Promise<void> {
     if (!baseStringifier) return;
+    if (validateBaseRow) {
+      baseValidationRowCount++;
+      const errors = validateBaseRow(row as unknown as Record<string, string>, baseValidationRowCount + 1);
+      baseValidationErrorCount += errors.length;
+      if (baseValidationErrors.length < 200) {
+        baseValidationErrors.push(...errors.slice(0, 200 - baseValidationErrors.length));
+      }
+    }
     const record = META_BASE_HEADERS.map(
       (h) => String((row as unknown as Record<string, unknown>)[h as string] ?? ""),
     );
@@ -645,11 +666,12 @@ export async function runMetaExport(options: {
     if (isCountryComplete) {
       const key = `country-${country}` as MetaFeedKey;
       const filename = META_FEED_FILES[key];
-      const rows = [...(pendingCountryRows.get(country)?.values() ?? [])];
-      await publishFeed(key, filename, META_COUNTRY_HEADERS, rows, null, country);
+      const rows = pendingCountryRows.get(country);
+      const itemCount = rows?.size ?? 0;
+      await publishFeed(key, filename, META_COUNTRY_HEADERS, rows?.values() ?? [], itemCount, null, country);
       pendingCountryRows.delete(country);              // free memory immediately
       processedMarketsByCountry.delete(country);
-      logger.info({ country, rows: rows.length }, "Country rows published and freed from heap");
+      logger.info({ country, rows: itemCount }, "Country rows published and freed from heap");
     }
 
     // If all markets for this language have been processed, publish the language
@@ -665,11 +687,12 @@ export async function runMetaExport(options: {
         const key = `language-${language}` as MetaFeedKey;
         const filename = META_FEED_FILES[key];
         if (filename) {
-          const rows = [...(pendingLangRows.get(language)?.values() ?? [])];
-          await publishFeed(key, filename, META_LANGUAGE_HEADERS, rows, language, null);
+          const rows = pendingLangRows.get(language);
+          const itemCount = rows?.size ?? 0;
+          await publishFeed(key, filename, META_LANGUAGE_HEADERS, rows?.values() ?? [], itemCount, language, null);
           pendingLangRows.delete(language);              // free memory immediately
           processedMarketsByLanguage.delete(language);
-          logger.info({ language, rows: rows.length }, "Language rows published and freed from heap");
+          logger.info({ language, rows: itemCount }, "Language rows published and freed from heap");
         }
       }
     }
@@ -733,7 +756,26 @@ export async function runMetaExport(options: {
       { rows: seenBaseIds.size, bytes: baseBytes, heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) },
       "Base CSV streamed to storage",
     );
-    await finalizeFeed("base", baseCurrentPath, baseVersionedPath, seenBaseIds.size, baseSha256, null, null);
+    const streamedValidation: FeedValidationResult | undefined = validateBaseRow && baseValidationRowCount > 0
+      ? {
+          file: baseVersionedPath,
+          rowCount: baseValidationRowCount,
+          errorCount: baseValidationErrorCount,
+          errors: baseValidationErrors,
+          valid: baseValidationErrorCount === 0,
+          schema: "meta-base",
+        }
+      : undefined;
+    await finalizeFeed(
+      "base",
+      baseCurrentPath,
+      baseVersionedPath,
+      seenBaseIds.size,
+      baseSha256,
+      null,
+      null,
+      streamedValidation,
+    );
   }
 
   // Fill placeholder results for country files skipped in partial runs
@@ -752,14 +794,6 @@ export async function runMetaExport(options: {
     dryRun,
     durationMs: Date.now() - startedAt,
   };
-
-  // The public operational feeds are a single flat file per language. Legacy
-  // layer files above remain available while channel configuration is migrated.
-  const languageFiles = await publishMetaLanguageFeeds(config, {
-    syncRunId: options.syncRunId,
-    dryRun,
-  });
-  logger.info({ languageFiles }, "Meta language feeds complete");
 
   logger.info(
     { totalCanonicals, durationMs: result.durationMs },

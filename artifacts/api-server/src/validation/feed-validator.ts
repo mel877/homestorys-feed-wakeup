@@ -157,6 +157,17 @@ function validateRow(
   return errors;
 }
 
+/**
+ * Build a row validator for a Meta schema without downloading or parsing an
+ * entire CSV. Large feeds use this while they are streamed to App Storage.
+ */
+export function createMetaRowValidator(
+  schemaName: "meta-base" | "meta-language" | "meta-country" | "meta-product",
+): (row: Record<string, string>, rowIndex: number) => ValidationError[] {
+  const schema = loadSchema(schemaName) as JsonSchemaNode;
+  return (row, rowIndex) => validateRow(row, schema, rowIndex);
+}
+
 // ── TSV parsing ───────────────────────────────────────────────────────────────
 
 function parseTsv(content: string): Record<string, string>[] {

@@ -149,7 +149,7 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
         if (runType === "full") {
           const { runFullSync } = await import("../../shopify/index");
           const { runGoogleExport } = await import("../../exporters/google/runner");
-          const { runMetaExport } = await import("../../exporters/meta/generator");
+          const { runMetaExportInFreshProcess } = await import("../../exporters/meta/fresh-process");
           const { fetchAndStoreDiagnostics } = await import("../../exporters/google/diagnostics");
           const { withExportLock } = await import("../../exporters/export-lock");
           // Complete full-sync pipeline, matching the scheduler exactly.
@@ -161,7 +161,7 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
             await runGoogleExport({ syncRunId: capturedFullRunId }).catch((err: unknown) =>
               logger.error({ err, runId: capturedFullRunId }, "Dashboard trigger: Google export failed"),
             );
-            await runMetaExport({ syncRunId: capturedFullRunId }).catch((err: unknown) =>
+            await runMetaExportInFreshProcess({ syncRunId: capturedFullRunId }).catch((err: unknown) =>
               logger.error({ err, runId: capturedFullRunId }, "Dashboard trigger: Meta export failed"),
             );
           }).catch((err: unknown) =>
@@ -181,7 +181,7 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
           runId = await runRecommendationsSync();
         } else if (runType === "export") {
           const { runGoogleExport } = await import("../../exporters/google/runner");
-          const { runMetaExport } = await import("../../exporters/meta/generator");
+          const { runMetaExportInFreshProcess } = await import("../../exporters/meta/fresh-process");
           const { SyncRunTracker } = await import("../../shopify/sync-run-tracker");
           const tracker = new SyncRunTracker();
           runId = await tracker.start("export", { trigger: "dashboard" });
@@ -197,7 +197,7 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
             logger.error({ err, runId }, "Dashboard trigger: Google export failed");
           }
           try {
-            await runMetaExport({ syncRunId: runId });
+            await runMetaExportInFreshProcess({ syncRunId: runId });
           } catch (err: unknown) {
             await tracker.logError({
               errorType: "export_failed",

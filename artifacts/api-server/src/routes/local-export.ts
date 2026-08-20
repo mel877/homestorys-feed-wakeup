@@ -47,17 +47,12 @@ router.post("/export/meta", (req, res) => {
 
   Promise.all([
     import("../exporters/export-lock"),
-    import("../exporters/meta/generator"),
+    import("../exporters/meta/fresh-process"),
   ])
-    .then(([{ withExportLock }, { runMetaExport }]) =>
-      withExportLock(() => runMetaExport({})),
+    .then(([{ withExportLock }, { runMetaExportInFreshProcess }]) =>
+      withExportLock(() => runMetaExportInFreshProcess()),
     )
-    .then((result) =>
-      logger.info(
-        { totalCanonicals: result.totalCanonicals, durationMs: result.durationMs },
-        "Local meta export complete",
-      ),
-    )
+    .then(() => logger.info("Local meta export complete"))
     .catch((err) => logger.error({ err }, "Local meta export failed"));
 
   res.json({ status: "started", message: "Meta export running in background" });
