@@ -7,6 +7,18 @@
 # Products from these Shopify vendors are excluded from every Google and Meta feed.
 # Source: Channable Projet DE — Brand exclusion 1, 2, 3
 excluded_vendors:
+  # Exact names from Channable Projet DE.
+  - Onno
+  - Ofyr
+  - "MX Home"
+  - "Nicki Amsterdam"
+  - "Ferm Living"
+  - Piffany
+  - "Carl Hansen & Son"
+  - Extremis
+  - Brokis
+  - Thonet
+  # Legacy supplier aliases retained until Shopify source data is fully normalised.
   - Ormo
   - Olly
   - Gubi
@@ -49,6 +61,7 @@ excluded_product_types:
   - Kleiderhaken
   - Pflegeprodukte
   - Produits de soins   # FR legacy name for same category (kept for backwards compat)
+  - Tischaccessoires
   - Tischaccssoires
   - Vasen
   - Windlichter

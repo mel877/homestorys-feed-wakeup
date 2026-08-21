@@ -8,7 +8,7 @@
  * - Null exclusion when no primary image
  * - Language field routing (fr → langFrRows, de → langDeRows)
  * - Country field routing (BE_FR country = "BE", etc.)
- * - Additional image limit (max 20)
+ * - Additional image limit (max 10)
  * - Custom labels pass-through in base layer
  */
 
@@ -234,7 +234,7 @@ describe("mapToMeta", () => {
     expect(result.base.gtin).toBe("");
   });
 
-  it("base limits additional images to 20", () => {
+  it("base limits additional images to 10", () => {
     const extras = Array.from({ length: 25 }, (_, i) => ({
       url: `https://cdn.example.com/img-${i}.jpg`,
       urlHash: `h${i}`,
@@ -246,7 +246,7 @@ describe("mapToMeta", () => {
     }));
     const result = mapToMeta(makeCanonical({ additionalImages: extras }), makeConfig())!;
     const additionalLinks = result.base.additional_image_link.split(",").filter(Boolean);
-    expect(additionalLinks.length).toBeLessThanOrEqual(20);
+    expect(additionalLinks.length).toBeLessThanOrEqual(10);
   });
 
   // ── Language layer ────────────────────────────────────────────────────────
@@ -270,7 +270,23 @@ describe("mapToMeta", () => {
   it("language_row.description falls back to title when empty", () => {
     const canonical = makeCanonical({ description: "", title: "Fallback Title" });
     const result = mapToMeta(canonical, makeConfig())!;
-    expect(result.language_row.description).toBe("Fallback Title");
+    expect(result.language_row.description.startsWith("Fallback Title")).toBe(true);
+    expect(result.language_row.description).toContain("Avec Homestorys partez dans un voyage passionnant");
+  });
+
+  it("adds the exact French short-description template", () => {
+    const description = "A".repeat(450);
+    const result = mapToMeta(makeCanonical({ description }), makeConfig())!;
+    expect(result.language_row.description).toBe(
+      `${description} Avec Homestorys partez dans un voyage passionnant avec nos 9 Homestorys pour découvrir les meilleures idées d'aménagement et de style de vie à la Belge sur les thèmes suivants : le plaisir, famille et traditions, loisirs et voyages, expériences dans la nature et paradis du jardin, design et une nouvelle forme de luxe.`,
+    );
+  });
+
+  it("applies the French template at the inclusive 500-character boundary before capping at 800", () => {
+    const description = "A".repeat(500);
+    const result = mapToMeta(makeCanonical({ description }), makeConfig())!;
+    expect(result.language_row.description.startsWith(`${description} Avec Homestorys`)).toBe(true);
+    expect(result.language_row.description.length).toBeLessThanOrEqual(800);
   });
 
   // ── Country layer ─────────────────────────────────────────────────────────
@@ -353,6 +369,25 @@ describe("mapToMeta", () => {
     };
     const result = mapToMeta(makeCanonical({ market: "FR" }), config)!;
     expect(result.country_row.shipping).toBe("FR::Livraison Standard:9.50 EUR");
+  });
+
+  it("uses the free-shipping tier when the market price reaches the threshold", () => {
+    const config = makeConfig();
+    config.shipping.meta_feed_rates = {
+      DE: {
+        service: "Standardlieferung",
+        currency: "EUR",
+        tiers: [
+          { minimum_order_value: 0, price: "9.50" },
+          { minimum_order_value: 250, price: "0" },
+        ],
+      },
+    };
+    const result = mapToMeta(
+      makeCanonical({ market: "DE", language: "de", price: { amount: 250, currency: "EUR", formatted: "€250.00" } }),
+      config,
+    )!;
+    expect(result.country_row.shipping).toBe("DE::Standardlieferung:0 EUR");
   });
 
   it("country_row.shipping is BE::Livraison Standard:9.60 EUR for BE_FR market", () => {

@@ -24,43 +24,61 @@ classes:
 # and configure in Google Merchant Center account-level shipping settings.
 rates: {}
 
-# Meta catalog feed: flat shipping rate per country (Fix 9).
+# Google and Meta catalog feeds: product-level shipping tiers per country.
 # Key = ISO country code matching config/markets.yaml (BE, FR, DE, AT, CH, LU).
 # Format emitted in the Meta CSV: "country::service:price currency"
 #
 # Source: Channable Projet DE for BE/DE/AT/LU/CH (confirmed 2026-08-18 by Mélissa).
 #         Channable Projet FR for FR (confirmed 2026-08-18 by Mélissa).
-# Note: Channable has tiered rates (e.g. < 250€ → 9.50€, ≥ 250€ → free).
-# Meta catalog only supports one flat rate per country, so the non-zero tier is
-# used here as a conservative estimate. Orders above the free-shipping threshold
-# will show free shipping at checkout regardless of what appears in the feed.
 meta_feed_rates:
   BE:
     service: "Livraison Standard"
-    price: "9.60"
     currency: "EUR"
+    tiers:
+      - minimum_order_value: 0
+        price: "9.50"
+      - minimum_order_value: 250
+        price: "0"
   DE:
     service: "Standardlieferung"
-    price: "9.50"
     currency: "EUR"
+    tiers:
+      - minimum_order_value: 0
+        price: "9.50"
+      - minimum_order_value: 250
+        price: "0"
   AT:
     service: "Standardlieferung"
-    price: "19.50"
     currency: "EUR"
+    tiers:
+      - minimum_order_value: 0
+        price: "19.50"
+      - minimum_order_value: 500
+        price: "0"
   LU:
     service: "Livraison Standard"
-    price: "9.50"
     currency: "EUR"
+    tiers:
+      - minimum_order_value: 0
+        price: "9.50"
+      - minimum_order_value: 250
+        price: "0"
   CH:
     service: "Standardlieferung"
-    price: "19.50"
     currency: "CHF"
+    tiers:
+      - minimum_order_value: 0
+        price: "19.50"
+      - minimum_order_value: 500
+        price: "0"
   FR:
     service: "Livraison Standard"
-    price: "9.50"
     currency: "EUR"
-    # Source: Channable Projet FR — Facebook Dynamic Ads rules "Versandkosten unter/über 250"
-    # Tiered: < 250€ → 9.50€ / ≥ 250€ → free. Flat rate = 9.50€ (conservative estimate).
+    tiers:
+      - minimum_order_value: 0
+        price: "9.50"
+      - minimum_order_value: 250
+        price: "0"
 
 # Default class when no metafield is present and no rule matches
 default_class: standard

@@ -21,6 +21,8 @@
 
 import type { CanonicalProduct } from "../../canonical/types";
 import type { AppConfig } from "../../config/schemas";
+import { buildFeedDescription } from "../feed-content";
+import { buildMarketShipping } from "../shipping";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,6 +58,7 @@ export interface GoogleFeedRow {
   age_group: string;
   size_system: string;
   size_type: string;
+  unit_pricing_measure: string;
   unit_pricing_base_measure: string;
   shipping_weight: string;
   /** Google shipping attribute: country:region:service:price currency. */
@@ -98,6 +101,7 @@ export const GOOGLE_TSV_HEADERS: (keyof GoogleFeedRow)[] = [
   "age_group",
   "size_system",
   "size_type",
+  "unit_pricing_measure",
   "unit_pricing_base_measure",
   "shipping_weight",
   "shipping",
@@ -136,6 +140,11 @@ export interface GoogleProductResource {
   itemGroupId: string;
   color?: string;
   material?: string;
+  gender?: string;
+  ageGroup?: string;
+  sizeSystem?: string;
+  sizeType?: string;
+  unitPricingBaseMeasure?: string;
   shippingWeight?: { value: number; unit: string };
   customLabel0?: string;
   customLabel1?: string;
@@ -164,13 +173,7 @@ const BRAND_SUFFIX_BY_LANGUAGE: Record<string, string> = {
 };
 
 function buildDescription(canonical: CanonicalProduct): string {
-  const raw = canonical.description || canonical.title;
-  const suffix =
-    BRAND_SUFFIX_BY_LANGUAGE[canonical.language] ??
-    BRAND_SUFFIX_BY_LANGUAGE["fr"] ??
-    "";
-  const padded = raw.length < 500 ? raw + suffix : raw;
-  return padded.slice(0, 5000);
+  return buildFeedDescription(canonical);
 }
 
 // ── Condition helper ──────────────────────────────────────────────────────────
@@ -188,11 +191,7 @@ function resolveCondition(canonical: CanonicalProduct): string {
 
 /** Keep country-specific delivery data when several markets share one TSV. */
 function buildShipping(canonical: CanonicalProduct, config: AppConfig): string {
-  const market = config.markets.markets[canonical.market];
-  if (!market) return "";
-  const rate = config.shipping.meta_feed_rates?.[market.country];
-  if (!rate) return "";
-  return `${market.country}::${rate.service}:${rate.price} ${rate.currency}`;
+  return buildMarketShipping(canonical, config);
 }
 
 // ── Availability mapping ──────────────────────────────────────────────────────
@@ -453,6 +452,11 @@ export function mapToGoogleResource(
     googleProductCategory: canonical.googleProductCategory ?? "",
     productTypes: [buildProductType(canonical)].filter(Boolean), // Fix 14
     itemGroupId: canonical.itemGroupId,
+    gender: "unisex",
+    ageGroup: "adult",
+    sizeSystem: "EU",
+    sizeType: "regular",
+    unitPricingBaseMeasure: "1 item",
     targetCountry: country,
     contentLanguage: language,
     channel: "online",
@@ -546,6 +550,9 @@ export function mapToGoogleRow(
     age_group: "Adult",
     size_system: "EU",
     size_type: "Normal",
+    // Channable emits "<taille> mm" only when a source size is available.
+    // Shopify size data is not synced yet, so never invent a measurement.
+    unit_pricing_measure: "",
     unit_pricing_base_measure: "1 item",
     shipping_weight: formatShippingWeight(canonical.weight, canonical.weightUnit),
     shipping: buildShipping(canonical, config),

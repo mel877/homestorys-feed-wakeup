@@ -19,6 +19,8 @@
 
 import type { CanonicalProduct } from "../../canonical/types";
 import type { AppConfig } from "../../config/schemas";
+import { buildFeedDescription } from "../feed-content";
+import { buildMarketShipping } from "../shipping";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -170,31 +172,6 @@ function buildReturnPolicyInfo(canonical: CanonicalProduct, config: AppConfig): 
   return `{"is_final_sale": "false", "return_policy_days": "${days}"}`;
 }
 
-// ── Fix 9: shipping field ─────────────────────────────────────────────────────
-
-/**
- * Build Meta shipping field from config.shipping.meta_feed_rates.
- *
- * Format: country:region:service:price (region empty = all regions)
- * Example: BE::Livraison Standard:29.90 EUR
- *
- * Returns "" when no rate is configured for this country (Meta shows
- * "Shipping calculated at checkout" as a fallback — not ideal for furniture
- * where freight costs are a purchase decision factor, but safe).
- *
- * To activate: populate meta_feed_rates in config/shipping.yaml.
- */
-function buildMetaShippingInfo(canonical: CanonicalProduct, config: AppConfig): string {
-  const market = config.markets.markets[canonical.market];
-  if (!market) return "";
-
-  const metaRates = config.shipping.meta_feed_rates ?? {};
-  const rate = metaRates[market.country];
-  if (!rate) return "";
-
-  return `${market.country}::${rate.service}:${rate.price} ${rate.currency}`;
-}
-
 // ── Fix 14: product_type hierarchy ────────────────────────────────────────────
 
 /**
@@ -239,7 +216,7 @@ export function mapToMeta(
 
   const additionalImages = canonical.additionalImages
     .filter((img) => img.url !== canonical.primaryImage?.url)
-    .slice(0, 20)
+    .slice(0, 10)
     .map((img) => img.url)
     .join(",");
 
@@ -274,9 +251,7 @@ export function mapToMeta(
   const language_row: MetaLanguageRow = {
     id,
     title: canonical.title.slice(0, 500),
-    // Meta catalog / Facebook Dynamic Ads: 800-char limit matches Channable rule
-    // "Beschreibung zu lang" — descriptions beyond this are truncated at a word boundary.
-    description: (canonical.description || canonical.title).slice(0, 800),
+    description: buildFeedDescription(canonical),
     link: canonical.productUrl,
   };
 
@@ -290,8 +265,7 @@ export function mapToMeta(
     // Not currently synced — add to sync-prices phase when available.
     sale_price_effective_date: "",
     availability: mapAvailability(canonical.availability),
-    // Fix 9: flat shipping rate per country (empty = "calculated at checkout")
-    shipping: buildMetaShippingInfo(canonical, config),
+    shipping: buildMarketShipping(canonical, config),
   };
 
   return { id, language, country, base, language_row, country_row };

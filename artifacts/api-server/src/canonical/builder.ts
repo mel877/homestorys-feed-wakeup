@@ -132,7 +132,8 @@ export function buildCanonical(
     titleLower.includes("calendrier") ||  // rules 1.2, 2.5 — advent calendars
     titleLower.includes("expo") ||        // rule 2.6 — showroom / expo products
     titleLower.includes("livre") ||       // rule 2.8 — books
-    titleLower.includes("langify")        // rule 3.15 — Langify translation artefacts
+    titleLower.includes("langify") ||     // rule 3.15 — Langify translation artefacts
+    (market.language === "de" && titleLower.includes("hardwax"))
   ) return null;
 
   // ── Brand normalisation ───────────────────────────────────────────────────

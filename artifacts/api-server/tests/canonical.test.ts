@@ -1062,3 +1062,16 @@ describe("Publication status gate", () => {
     expect(product).not.toBeNull();
   });
 });
+
+describe("German-only Channable exclusions", () => {
+  it("excludes a Hardwax title from German markets only", () => {
+    const fixture = loadFixture("normal_product");
+    const input: BuildCanonicalInput = {
+      ...makeInput(fixture),
+      product: { ...fixture.product, title: "Hardwax Pflege" },
+    };
+
+    expect(buildCanonical(input, "DE")).toBeNull();
+    expect(buildCanonical(input, "BE_FR")).not.toBeNull();
+  });
+});

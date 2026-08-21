@@ -363,10 +363,10 @@ describe("mapToGoogleResource", () => {
     expect(result.title.length).toBe(150);
   });
 
-  it("limits description to 5000 chars", () => {
+  it("limits description to 800 chars at a word boundary", () => {
     const longDesc = "B".repeat(6000);
     const result = mapToGoogleResource(makeCanonical({ description: longDesc }), makeConfig())!;
-    expect(result.description.length).toBe(5000);
+    expect(result.description.length).toBe(800);
   });
 
   it("falls back to title as base when description is empty", () => {
@@ -386,6 +386,17 @@ describe("mapToGoogleResource", () => {
   it("sets shippingWeight when weight is present", () => {
     const result = mapToGoogleResource(makeCanonical({ weight: 45, weightUnit: "kg" }), makeConfig())!;
     expect(result.shippingWeight).toEqual({ value: 45, unit: "kg" });
+  });
+
+  it("sets Channable Google defaults on the API resource", () => {
+    const result = mapToGoogleResource(makeCanonical(), makeConfig())!;
+    expect(result).toMatchObject({
+      gender: "unisex",
+      ageGroup: "adult",
+      sizeSystem: "EU",
+      sizeType: "regular",
+      unitPricingBaseMeasure: "1 item",
+    });
   });
 
   it("omits shippingWeight when weight is null", () => {
@@ -452,6 +463,38 @@ describe("mapToGoogleRow", () => {
   it("keeps country-specific shipping in a combined language feed", () => {
     const row = mapToGoogleRow(makeCanonical({ market: "BE_FR" }), makeConfig())!;
     expect(row.shipping).toBe("BE::Livraison Standard:9.60 EUR");
+  });
+
+  it("uses the free-shipping tier when the market price reaches the threshold", () => {
+    const config = makeConfig();
+    config.shipping.meta_feed_rates = {
+      DE: {
+        service: "Standardlieferung",
+        currency: "EUR",
+        tiers: [
+          { minimum_order_value: 0, price: "9.50" },
+          { minimum_order_value: 250, price: "0" },
+        ],
+      },
+    };
+
+    const result = mapToGoogleRow(
+      makeCanonical({ market: "DE", language: "de", price: { amount: 250, currency: "EUR", formatted: "€250.00" } }),
+      config,
+    )!;
+    expect(result.shipping).toBe("DE::Standardlieferung:0 EUR");
+    expect(result.unit_pricing_measure).toBe("");
+  });
+
+  it("adds the exact German short-description template at the inclusive 500-character boundary", () => {
+    const description = "A".repeat(500);
+    const result = mapToGoogleResource(
+      makeCanonical({ market: "DE", language: "de", description }),
+      makeConfig(),
+    )!;
+    expect(result.description).toBe(
+      `${description} Herzlich willkommen bei Homestorys, dem Online-Shop für Ihr Zuhause. Entdecken Sie die Best of Belgian Lifestyle und lassen Sie sich von unseren Themenwelten inspirieren! Entdecken Sie für sich das Beste aus allen Welten für Ihr Zuhause-Gefühl.`,
+    );
   });
 
   it("returns null when primary image is null", () => {

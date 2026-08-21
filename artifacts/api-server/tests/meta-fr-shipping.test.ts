@@ -3,7 +3,7 @@
  *
  * Loads the real config/shipping.yaml (not an in-memory fixture) and maps an
  * FR canonical product through mapToMeta, asserting that the shipping column
- * in the generated country row contains the expected flat rate.
+ * in the generated country row contains the expected price tier.
  *
  * This test will fail if the FR entry in config/shipping.yaml is deleted,
  * renamed, or its price/service/currency is changed — giving a reliable
@@ -123,24 +123,37 @@ describe("Meta FR feed shipping — real config/shipping.yaml", () => {
     const rates = config.shipping.meta_feed_rates ?? {};
     expect(rates).toHaveProperty("FR");
     expect(rates["FR"].service).toBeTruthy();
-    expect(rates["FR"].price).toBeTruthy();
+    expect(rates["FR"].tiers).toHaveLength(2);
     expect(rates["FR"].currency).toBeTruthy();
   });
 
-  it("FR meta_feed_rates matches Channable Projet FR rule: 9.50 EUR Livraison Standard", () => {
+  it("FR meta_feed_rates matches Channable Projet FR shipping tiers", () => {
     const config = loadConfig();
     const fr = (config.shipping.meta_feed_rates ?? {})["FR"];
     expect(fr).toBeDefined();
     expect(fr.service).toBe("Livraison Standard");
-    expect(fr.price).toBe("9.50");
+    expect(fr.tiers).toEqual([
+      { minimum_order_value: 0, price: "9.50" },
+      { minimum_order_value: 250, price: "0" },
+    ]);
     expect(fr.currency).toBe("EUR");
   });
 
-  it("mapToMeta emits FR::Livraison Standard:9.50 EUR in country_row.shipping for FR product", () => {
+  it("maps the paid FR shipping tier below 250 EUR", () => {
+    const config = loadConfig();
+    const result = mapToMeta(
+      makeFrCanonical({ market: "FR", price: { amount: 249, currency: "EUR", formatted: "€249.00" } }),
+      config,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.country_row.shipping).toBe("FR::Livraison Standard:9.50 EUR");
+  });
+
+  it("maps free FR shipping from 250 EUR onward", () => {
     const config = loadConfig();
     const result = mapToMeta(makeFrCanonical({ market: "FR" }), config);
     expect(result).not.toBeNull();
-    expect(result!.country_row.shipping).toBe("FR::Livraison Standard:9.50 EUR");
+    expect(result!.country_row.shipping).toBe("FR::Livraison Standard:0 EUR");
   });
 
   it("no FR product row has an empty or missing shipping field", () => {
@@ -156,8 +169,7 @@ describe("Meta FR feed shipping — real config/shipping.yaml", () => {
 
   it("all markets with configured meta_feed_rates produce non-empty shipping fields", () => {
     const config = loadConfig();
-    const rates: Record<string, { service: string; price: string; currency: string }> =
-      config.shipping.meta_feed_rates ?? {};
+    const rates = config.shipping.meta_feed_rates ?? {};
 
     // Map country → one representative market code
     const countryToMarket: Record<string, string> = {
@@ -174,7 +186,13 @@ describe("Meta FR feed shipping — real config/shipping.yaml", () => {
       const language = ["FR", "BE"].includes(country) ? "fr" : "de";
       const result = mapToMeta(makeFrCanonical({ market: marketCode, language }), config);
       expect(result).not.toBeNull();
-      const expected = `${country}::${rate.service}:${rate.price} ${rate.currency}`;
+       const tiers = rate.tiers ?? [];
+       const price = makeFrCanonical({ market: marketCode, language }).price.amount;
+       const activeTier = tiers
+         .filter((tier) => tier.minimum_order_value <= price)
+         .sort((a, b) => b.minimum_order_value - a.minimum_order_value)[0];
+       expect(activeTier).toBeDefined();
+       const expected = `${country}::${rate.service}:${activeTier!.price} ${rate.currency}`;
       expect(result!.country_row.shipping).toBe(expected);
     }
   });

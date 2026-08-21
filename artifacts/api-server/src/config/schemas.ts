@@ -79,11 +79,22 @@ export const ShippingClassSchema = z.object({
   description: z.string().optional(),
 });
 
-// Fix 9: per-country flat shipping rate for Meta catalog feed
+export const ShippingTierSchema = z.object({
+  /** Inclusive minimum product price for this tier, in the market currency. */
+  minimum_order_value: z.number().nonnegative(),
+  price: z.string(),
+});
+
+// Per-country product-level shipping rate used by Google and Meta catalog feeds.
 export const MetaShippingRateSchema = z.object({
   service: z.string(),  // e.g. "Livraison Standard"
-  price: z.string(),    // e.g. "29.90"
   currency: z.string().length(3), // ISO 4217, e.g. "EUR"
+  /** Legacy single-price configuration. Kept so older config files stay readable. */
+  price: z.string().optional(),
+  /** Price thresholds, ordered independently by the resolver. */
+  tiers: z.array(ShippingTierSchema).min(1).optional(),
+}).refine((rate) => !!rate.price || !!rate.tiers?.length, {
+  message: "A shipping rate must provide either price or tiers",
 });
 
 export type MetaShippingRate = z.infer<typeof MetaShippingRateSchema>;
@@ -93,9 +104,9 @@ export const ShippingConfigSchema = z.object({
   rates: z.record(z.string(), z.unknown()).default({}),
   default_class: z.string().default("standard"),
   /**
-   * Per-country flat shipping rates for the Meta catalog feed.
+   * Per-country shipping rates for Google and Meta catalog feeds.
    * Key = ISO country code (BE, FR, DE, AT).
-   * Emitted in the Meta CSV country layer as: "country::service:price currency"
+   * The active price tier is emitted as: "country::service:price currency".
    * Leave empty ({}) to omit shipping from Meta feeds (shows "calculated at checkout").
    * Configure actual rates from business/logistics data.
    */
