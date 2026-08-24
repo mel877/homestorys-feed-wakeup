@@ -14,3 +14,4 @@
 - [Shopify primary locale = DE](shopify-primary-locale.md) — German is Shopify default; sync-products must write as `de` not `fr`; Shopify translation API returns empty for source locale.
 - [Meta export heap accumulation](meta-export-heap-accumulation.md) — repeated runMetaExport in same process OOMs; restart server before retrying; fresh process peak ≈ 760 MB (vs 4 GB accumulated).
 - [Language feed market aliases](language-feed-market-aliases.md) — Swiss French uses the Swiss commercial price source with French content/URLs; preserve country data per row in grouped feeds.
+- [Artifact production working directory](artifact-production-cwd.md) — published artifact commands start from the workspace root; config loading must not assume the package working directory.

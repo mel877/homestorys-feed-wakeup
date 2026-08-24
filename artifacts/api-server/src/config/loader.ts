@@ -1,5 +1,6 @@
-import { readFileSync } from "fs";
-import { resolve } from "path";
+import { existsSync, readFileSync } from "fs";
+import { dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 import { parse as parseYaml } from "yaml";
 import type { AppConfig } from "./schemas";
 import {
@@ -18,8 +19,10 @@ import {
 /**
  * Resolve the config directory.
  *
- * When running as the api-server (cwd = artifacts/api-server/),
- * the workspace root config/ is two levels up.
+ * Development commands normally run with cwd = artifacts/api-server/, while
+ * artifact production commands run with cwd = the workspace root. Resolve
+ * from both locations and from the module path so the bundled server does not
+ * depend on the deployer's working directory.
  *
  * Override with CONFIG_DIR env var for non-standard setups.
  */
@@ -27,9 +30,24 @@ function resolveConfigDir(): string {
   if (process.env["CONFIG_DIR"]) {
     return process.env["CONFIG_DIR"];
   }
-  // In dev (tsx) and prod (bundled), the process cwd is the package dir.
-  // From artifacts/api-server/ → ../../config/ = workspace root config/
-  return resolve(process.cwd(), "../../config");
+
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(process.cwd(), "config"),
+    resolve(process.cwd(), "../../config"),
+    resolve(moduleDir, "../../config"),
+    resolve(moduleDir, "../../../../config"),
+  ];
+  const configDir = candidates.find((candidate) =>
+    existsSync(resolve(candidate, "markets.yaml")),
+  );
+
+  if (!configDir) {
+    throw new Error(
+      `Config directory not found. Checked: ${candidates.join(", ")}`,
+    );
+  }
+  return configDir;
 }
 
 function loadYaml<T>(
