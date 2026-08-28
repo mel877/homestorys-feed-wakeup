@@ -1,0 +1,754 @@
+# Correction complète des flux produits Google Merchant Center + Meta Catalog
+
+Le projet Homestorys génère actuellement des flux produits destinés à :
+
+* Google Merchant Center
+* Google Shopping / Performance Max
+* Meta Commerce Manager / Meta Catalog
+
+Le domaine public utilisé est :
+
+`https://homestorys-flux.eteamsys.be`
+
+Exemple d'endpoint actuellement concerné :
+
+`https://homestorys-flux.eteamsys.be/api/feeds/meta/fr.csv`
+
+Certains endpoints retournent actuellement des erreurs HTTP, notamment 500/505, ce qui empêche Google Merchant Center et Meta Catalog de récupérer les flux.
+
+Ta mission est de **diagnostiquer, corriger et fiabiliser l'ensemble des endpoints de flux Google et Meta**.
+
+Ne corrige pas uniquement l'URL d'exemple.
+
+Audite et corrige TOUS les endpoints concernés.
+
+---
+
+# 1. OBJECTIF FINAL
+
+Tous les flux doivent être accessibles publiquement via une requête HTTP GET standard depuis un service tiers externe.
+
+Ils doivent fonctionner :
+
+* depuis un navigateur privé ;
+* via curl ;
+* via Google Merchant Center ;
+* via Meta Commerce Manager ;
+* sans session Replit ;
+* sans authentification ;
+* sans cookie ;
+* sans token dans l'URL ;
+* sans URL de preview ou workspace.
+
+Les URLs doivent être stables après redeployment.
+
+---
+
+# 2. ENDPOINTS À AUDITER
+
+Identifier automatiquement tous les endpoints existants correspondant notamment à :
+
+```text
+/api/feeds/meta/*
+/api/feeds/google/*
+```
+
+Exemples possibles :
+
+```text
+/api/feeds/meta/fr.csv
+/api/feeds/meta/de.csv
+/api/feeds/meta/en.csv
+/api/feeds/meta/it.csv
+
+/api/feeds/google/fr.xml
+/api/feeds/google/de.xml
+/api/feeds/google/en.xml
+/api/feeds/google/it.xml
+```
+
+ou leurs variantes CSV / TSV / XML actuellement utilisées.
+
+Ne pas supposer les noms exacts : inspecter le code.
+
+---
+
+# 3. DIAGNOSTIC OBLIGATOIRE
+
+Pour chaque endpoint :
+
+1. effectuer une requête GET externe ;
+2. relever le status HTTP ;
+3. relever le Content-Type ;
+4. vérifier les éventuelles redirections ;
+5. vérifier le temps de réponse ;
+6. vérifier si la réponse contient réellement le flux ;
+7. vérifier si une authentification/session est requise ;
+8. vérifier si le comportement diffère entre environnement dev et production.
+
+Identifier précisément toute cause pouvant produire :
+
+```text
+HTTP 500
+HTTP 502
+HTTP 503
+HTTP 504
+HTTP 505
+HTTP 401
+HTTP 403
+HTTP 404
+```
+
+Analyser notamment :
+
+* erreurs serveur non catchées ;
+* chemins fichiers invalides ;
+* fichiers présents en développement mais absents en production ;
+* variables d'environnement manquantes ;
+* appels Shopify qui échouent ;
+* timeout pendant la génération ;
+* problème de streaming ;
+* problème de headers HTTP ;
+* problème proxy / custom domain ;
+* middleware d'authentification ;
+* route protégée ;
+* dépendance à une session Replit ;
+* redirect ;
+* dépendance à localhost ;
+* génération de feed trop lourde pendant la requête ;
+* erreur CSV/XML ;
+* caractères spéciaux mal encodés.
+
+---
+
+# 4. LOGS
+
+Ajouter des logs structurés autour des routes de feed.
+
+Logger :
+
+```text
+request_id
+feed_type
+channel
+language
+market
+start_time
+end_time
+duration_ms
+product_count
+file_size
+generation_mode
+http_status
+error_type
+```
+
+En cas d'erreur :
+
+logger l'exception complète côté serveur.
+
+NE JAMAIS logger :
+
+* Shopify token ;
+* Meta token ;
+* Google credentials ;
+* cookies ;
+* secrets ;
+* variables sensibles.
+
+---
+
+# 5. ARCHITECTURE À PRIVILÉGIER
+
+Éviter si possible cette architecture :
+
+```text
+Meta/Google appelle l'URL
+↓
+requête Shopify complète
+↓
+transformation de tout le catalogue
+↓
+génération du CSV/XML
+↓
+réponse HTTP
+```
+
+Cette architecture peut provoquer timeout et erreurs serveur.
+
+Privilégier :
+
+```text
+Shopify
+↓
+job de génération périodique
+↓
+feed généré et validé
+↓
+fichier stocké
+↓
+endpoint public
+↓
+lecture/stream du fichier déjà prêt
+↓
+Google / Meta
+```
+
+Le endpoint public doit être extrêmement simple et robuste.
+
+---
+
+# 6. GÉNÉRATION DES FEEDS
+
+Si les feeds sont actuellement générés à la volée, refactorer pour :
+
+1. générer les feeds en arrière-plan ;
+2. valider le résultat ;
+3. sauvegarder le fichier ;
+4. conserver la dernière version valide ;
+5. exposer ce fichier via URL publique.
+
+En cas d'échec d'une nouvelle génération :
+
+NE PAS remplacer le dernier feed valide par un fichier vide ou corrompu.
+
+Conserver le dernier feed sain.
+
+---
+
+# 7. PUBLICATION ATOMIQUE
+
+Utiliser une stratégie similaire à :
+
+```text
+feed-fr-new.csv
+↓
+validation
+↓
+rename/swap
+↓
+feed-fr.csv
+```
+
+ou une méthode atomique adaptée au système de stockage utilisé.
+
+Le but est d'éviter qu'un crawler lise un fichier pendant sa génération.
+
+---
+
+# 8. META — FORMAT HTTP
+
+Pour les feeds CSV Meta :
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/csv; charset=utf-8
+Cache-Control: public, max-age=300
+```
+
+Pour TSV :
+
+```http
+Content-Type: text/tab-separated-values; charset=utf-8
+```
+
+Pour XML :
+
+```http
+Content-Type: application/xml; charset=utf-8
+```
+
+Content-Disposition peut être :
+
+```http
+Content-Disposition: inline; filename="meta-fr.csv"
+```
+
+Ne pas forcer un téléchargement incompatible.
+
+---
+
+# 9. GOOGLE — FORMAT HTTP
+
+Pour les flux Google XML :
+
+```http
+Content-Type: application/xml; charset=utf-8
+```
+
+Pour TSV :
+
+```http
+Content-Type: text/tab-separated-values; charset=utf-8
+```
+
+Pour CSV :
+
+```http
+Content-Type: text/csv; charset=utf-8
+```
+
+Ajouter :
+
+```http
+Cache-Control: public, max-age=300
+```
+
+---
+
+# 10. AUCUNE REDIRECTION
+
+Les URLs finales de feed ne doivent idéalement pas faire :
+
+```text
+301
+302
+307
+308
+```
+
+La requête :
+
+```text
+GET https://homestorys-flux.eteamsys.be/api/feeds/meta/fr.csv
+```
+
+doit retourner directement :
+
+```text
+200
+```
+
+et le feed.
+
+Même règle pour Google.
+
+---
+
+# 11. AUCUNE AUTHENTIFICATION
+
+Les routes feeds doivent être explicitement exclues des protections :
+
+* auth middleware ;
+* admin session ;
+* CSRF login requirements ;
+* cookie session ;
+* Replit authentication.
+
+Ces routes sont des endpoints publics machine-to-machine.
+
+---
+
+# 12. CUSTOM DOMAIN
+
+Vérifier que :
+
+```text
+homestorys-flux.eteamsys.be
+```
+
+est correctement relié au deployment production.
+
+Tester :
+
+```bash
+curl -I https://homestorys-flux.eteamsys.be/
+```
+
+Puis chaque endpoint.
+
+Vérifier qu'il n'existe pas une différence de comportement entre :
+
+```text
+*.replit.app
+```
+
+et :
+
+```text
+homestorys-flux.eteamsys.be
+```
+
+Le domaine custom doit fonctionner correctement.
+
+---
+
+# 13. COMPATIBILITÉ HTTP
+
+Le serveur doit accepter normalement les clients utilisant :
+
+* HTTP/1.1
+* HTTP/2
+
+Ne pas effectuer de rejet manuel basé sur :
+
+```text
+req.httpVersion
+User-Agent
+Protocol
+```
+
+Ne jamais retourner volontairement 505 pour un crawler.
+
+---
+
+# 14. TEST USER AGENT
+
+Tester avec plusieurs User-Agent :
+
+```text
+curl
+browser
+Googlebot-like
+Meta-like
+```
+
+Ne pas bloquer les crawlers par User-Agent.
+
+---
+
+# 15. TEST META
+
+Tester :
+
+```bash
+curl -v \
+  -A "facebookexternalhit/1.1" \
+  https://homestorys-flux.eteamsys.be/api/feeds/meta/fr.csv
+```
+
+Résultat attendu :
+
+```text
+HTTP 200
+```
+
+---
+
+# 16. TEST GOOGLE
+
+Tester :
+
+```bash
+curl -v \
+  -A "Googlebot" \
+  https://homestorys-flux.eteamsys.be/api/feeds/google/fr.xml
+```
+
+ou l'URL Google réelle détectée.
+
+Résultat attendu :
+
+```text
+HTTP 200
+```
+
+---
+
+# 17. VALIDATION META CSV
+
+Pour chaque feed Meta CSV :
+
+Vérifier :
+
+* UTF-8 ;
+* header valide ;
+* séparateur cohérent ;
+* pas de colonnes décalées ;
+* pas de lignes cassées ;
+* guillemets échappés ;
+* URLs absolues ;
+* prix correctement formatés ;
+* disponibilité correcte ;
+* ID unique ;
+* liens images publics.
+
+Vérifier les champs Meta réellement utilisés dans le projet.
+
+---
+
+# 18. VALIDATION GOOGLE
+
+Pour chaque flux Google :
+
+Vérifier au minimum selon le format et les champs existants :
+
+```text
+id
+title
+description
+link
+image_link
+availability
+price
+brand
+```
+
+Selon les produits :
+
+```text
+gtin
+mpn
+identifier_exists
+sale_price
+item_group_id
+additional_image_link
+google_product_category
+product_type
+```
+
+Vérifier :
+
+* ID stable ;
+* UTF-8 ;
+* URLs absolues ;
+* URLs images publiques ;
+* prix avec devise ;
+* disponibilité conforme ;
+* GTIN non inventé ;
+* XML correctement fermé si XML ;
+* CSV/TSV correctement échappé.
+
+---
+
+# 19. TEST URL PRODUIT
+
+Sur un échantillon de produits de chaque feed :
+
+tester :
+
+```text
+link
+image_link
+additional_image_link
+```
+
+Status attendu :
+
+```text
+200
+```
+
+Ne pas bloquer toute la génération pour un échec réseau ponctuel.
+
+Mais produire un warning.
+
+---
+
+# 20. SANTÉ DU FEED
+
+Créer une fonction de validation avant publication.
+
+Un feed ne doit être remplacé que si :
+
+```text
+file_not_empty = true
+valid_header = true
+product_count > 0
+format_valid = true
+critical_error_count = 0
+```
+
+Ajouter un seuil de sécurité :
+
+si le nombre de produits chute de plus de 20 % par rapport au feed précédent sans raison identifiée :
+
+NE PAS publier le nouveau feed.
+
+Logger une erreur critique.
+
+---
+
+# 21. DERNIER FEED VALIDE
+
+Conserver pour chaque feed :
+
+```text
+current
+previous
+```
+
+ou une stratégie versionnée équivalente.
+
+En cas de problème :
+
+continuer de servir `current`.
+
+---
+
+# 22. ENDPOINT HEALTH
+
+Créer :
+
+```text
+GET /api/feeds/health
+```
+
+Réponse JSON :
+
+```json
+{
+  "status": "ok",
+  "feeds": [
+    {
+      "channel": "meta",
+      "language": "fr",
+      "httpStatus": 200,
+      "productCount": 1234,
+      "generatedAt": "...",
+      "fileSize": 123456,
+      "valid": true
+    }
+  ]
+}
+```
+
+Cet endpoint peut être protégé si nécessaire.
+
+---
+
+# 23. FEED METADATA
+
+Conserver :
+
+```text
+generated_at
+product_count
+file_size
+checksum
+status
+last_error
+```
+
+---
+
+# 24. AUTOMATISATION
+
+Configurer les flux pour être régénérés automatiquement.
+
+Fréquence recommandée :
+
+```text
+stock/prices:
+toutes les 1 à 2 heures
+
+catalogue complet:
+1 fois par nuit
+```
+
+Si le projet possède déjà un scheduler correct, l'utiliser.
+
+Ne pas introduire une solution plus complexe sans bénéfice.
+
+---
+
+# 25. TESTS À EXÉCUTER À LA FIN
+
+Pour CHAQUE endpoint :
+
+Exécuter :
+
+```bash
+curl -I URL
+```
+
+puis :
+
+```bash
+curl -L URL -o /tmp/feed
+```
+
+Vérifier :
+
+```text
+status = 200
+redirects = 0
+file_size > 0
+content-type correct
+```
+
+Puis parser le fichier.
+
+---
+
+# 26. RAPPORT FINAL
+
+À la fin, afficher un tableau :
+
+```text
+Channel | Language | URL | HTTP | Content-Type | Products | Size | Valid
+```
+
+Exemple :
+
+```text
+Meta | FR | https://.../meta/fr.csv | 200 | text/csv | 1234 | 4.2 MB | YES
+Meta | DE | ... | 200 | text/csv | 1218 | 4.1 MB | YES
+
+Google | FR | ... | 200 | application/xml | 1234 | 6.8 MB | YES
+Google | DE | ... | 200 | application/xml | 1218 | 6.7 MB | YES
+```
+
+---
+
+# 27. RAPPORT DE DIAGNOSTIC
+
+Afficher également :
+
+```text
+Cause initiale de l'erreur
+Correction effectuée
+Fichiers modifiés
+Endpoints modifiés
+Nouvelle architecture
+Tests réalisés
+```
+
+---
+
+# 28. CONTRAINTE IMPORTANTE
+
+Ne considère PAS la tâche terminée simplement parce que les routes fonctionnent dans l'aperçu Replit.
+
+Les URLs doivent fonctionner depuis l'Internet public sur :
+
+```text
+https://homestorys-flux.eteamsys.be
+```
+
+et être utilisables directement par :
+
+* Google Merchant Center ;
+* Meta Commerce Manager.
+
+---
+
+# 29. ENDPOINT D'EXEMPLE À CORRIGER OBLIGATOIREMENT
+
+Ce endpoint doit être testé et corrigé :
+
+```text
+https://homestorys-flux.eteamsys.be/api/feeds/meta/fr.csv
+```
+
+Mais la correction doit être appliquée à l'ensemble des flux Google et Meta.
+
+---
+
+# 30. CRITÈRE DE FIN
+
+La tâche est terminée uniquement lorsque :
+
+* tous les feeds détectés répondent en HTTP 200 ;
+* aucun ne retourne 500/505 ;
+* aucun feed public ne demande une authentification ;
+* aucun feed ne dépend d'une session Replit ;
+* Meta feeds sont parseables ;
+* Google feeds sont parseables ;
+* Content-Type est correct ;
+* aucune redirection inutile ;
+* URLs production stables ;
+* feeds restent disponibles après redeployment ;
+* dernière version valide reste servie si la génération suivante échoue.
+
+Corrige directement le code, teste en production, puis fournis-moi les URLs finales utilisables dans Google Merchant Center et Meta Commerce Manager.
