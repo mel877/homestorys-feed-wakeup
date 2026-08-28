@@ -17,7 +17,7 @@
 
 import { Storage } from "@google-cloud/storage";
 import { createHash } from "crypto";
-import { Transform } from "stream";
+import { Transform, type Readable } from "stream";
 import { logger as rootLogger } from "./logger";
 import { sendFeedBlockAlert, resolveAlertWebhookUrl } from "./alerting";
 
@@ -141,6 +141,45 @@ export async function downloadFeedFile(storagePath: string): Promise<Buffer | nu
   if (!exists) return null;
   const [content] = await file.download();
   return content;
+}
+
+export interface FeedFileReadStream {
+  stream: Readable;
+  size: number | null;
+}
+
+function isStorageNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === 404 || code === "404";
+}
+
+/**
+ * Open a feed file for incremental download.
+ *
+ * Metadata is fetched before opening the body stream so routes can return a
+ * proper 404/503 before committing response headers. The file body itself is
+ * never materialized in server memory.
+ */
+export async function openFeedFileReadStream(
+  storagePath: string,
+): Promise<FeedFileReadStream | null> {
+  const file = getBucket().file(storagePath);
+
+  try {
+    const [metadata] = await file.getMetadata();
+    const parsedSize = Number(metadata.size);
+    const readFile = metadata.generation
+      ? getBucket().file(storagePath, { generation: metadata.generation })
+      : file;
+    return {
+      stream: readFile.createReadStream(),
+      size: Number.isSafeInteger(parsedSize) && parsedSize >= 0 ? parsedSize : null,
+    };
+  } catch (error) {
+    if (isStorageNotFound(error)) return null;
+    throw error;
+  }
 }
 
 /**

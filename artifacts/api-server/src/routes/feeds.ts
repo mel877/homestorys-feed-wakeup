@@ -13,7 +13,7 @@
  */
 
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { downloadFeedFile } from "../lib/storage";
+import { openFeedFileReadStream } from "../lib/storage";
 import { logger as rootLogger } from "../lib/logger";
 import { requireInternalAuth } from "../middlewares/internal-auth";
 import { requireDashboardAuth } from "./dashboard/auth";
@@ -31,16 +31,118 @@ async function serveFeedFile(
   storagePath: string,
   contentType: string,
   res: Response,
+  cacheControl = "public, max-age=300",
 ): Promise<void> {
-  const buf = await downloadFeedFile(storagePath);
-  if (!buf) {
+  res.setHeader("Cache-Control", cacheControl);
+  let clientDisconnected = res.destroyed || res.req.aborted;
+  const handleDisconnectWhileOpening = () => {
+    clientDisconnected = true;
+  };
+  res.once("close", handleDisconnectWhileOpening);
+
+  let feedFile;
+  try {
+    feedFile = await openFeedFileReadStream(storagePath);
+  } catch (error) {
+    res.off("close", handleDisconnectWhileOpening);
+    if (clientDisconnected || res.destroyed) {
+      logger.info({ storagePath }, "Client disconnected while feed file was opening");
+      return;
+    }
+    logger.error({ err: error, storagePath }, "Failed to open feed file from App Storage");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Retry-After", "60");
+    res.status(503).json({ error: "Feed temporarily unavailable" });
+    return;
+  }
+
+  if (!feedFile) {
+    res.off("close", handleDisconnectWhileOpening);
+    if (clientDisconnected || res.destroyed) return;
     res.status(404).json({ error: "Feed file not found", storagePath });
     return;
   }
+
+  if (clientDisconnected || res.destroyed) {
+    feedFile.stream.once("error", (error) => {
+      logger.info({ err: error, storagePath }, "Feed stream errored while cancelling open");
+    });
+    feedFile.stream.destroy();
+    res.off("close", handleDisconnectWhileOpening);
+    logger.info({ storagePath }, "Feed stream cancelled after client disconnected while opening");
+    return;
+  }
+
   res.setHeader("Content-Type", contentType);
-  res.setHeader("Content-Length", buf.length);
-  res.setHeader("Cache-Control", "public, max-age=300"); // 5-min cache for Meta crawlers
-  res.send(buf);
+  if (feedFile.size !== null) {
+    res.setHeader("Content-Length", feedFile.size);
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+
+    const cleanupResponse = () => {
+      res.off("error", handleResponseError);
+      res.off("finish", handleFinish);
+      res.off("close", handleClientDisconnect);
+    };
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      cleanupResponse();
+      resolve();
+    };
+    const handleSourceError = (error: Error) => {
+      if (settled) {
+        logger.info({ err: error, storagePath }, "Feed stream errored while closing");
+        return;
+      }
+      feedFile.stream.unpipe(res);
+      logger.error({ err: error, storagePath }, "Feed stream failed");
+
+      if (!res.headersSent && !res.destroyed) {
+        res.removeHeader("Content-Length");
+        res.removeHeader("Content-Type");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Retry-After", "60");
+        res.status(503).json({ error: "Feed temporarily unavailable" });
+      } else if (!res.destroyed) {
+        res.destroy();
+      }
+      settle();
+    };
+    const handleSourceClose = () => {
+      feedFile.stream.off("error", handleSourceError);
+    };
+    const handleResponseError = (error: Error) => {
+      feedFile.stream.destroy();
+      logger.info({ err: error, storagePath }, "Feed stream stopped after response error");
+      settle();
+    };
+    const handleFinish = () => {
+      settle();
+    };
+    const handleClientDisconnect = () => {
+      if (!res.writableEnded) {
+        feedFile.stream.destroy();
+        logger.info({ storagePath }, "Feed stream stopped after client disconnected");
+      }
+      settle();
+    };
+
+    feedFile.stream.once("error", handleSourceError);
+    feedFile.stream.once("close", handleSourceClose);
+    res.once("error", handleResponseError);
+    res.once("finish", handleFinish);
+    res.once("close", handleClientDisconnect);
+    res.off("close", handleDisconnectWhileOpening);
+
+    if (clientDisconnected || res.destroyed) {
+      handleClientDisconnect();
+    } else {
+      feedFile.stream.pipe(res);
+    }
+  });
 }
 
 // ── Meta feed routes ──────────────────────────────────────────────────────────
@@ -240,17 +342,12 @@ router.get(
       res.status(400).json({ error: "Invalid feed filename" });
       return;
     }
-    // Authenticated endpoint — must not be cached by shared proxies or CDNs.
-    // Do NOT reuse serveFeedFile() which sets Cache-Control: public.
-    const buf = await downloadFeedFile(`feeds/google/${file}`);
-    if (!buf) {
-      res.status(404).json({ error: "Feed file not found", storagePath: `feeds/google/${file}` });
-      return;
-    }
-    res.setHeader("Content-Type", "text/tab-separated-values; charset=utf-8");
-    res.setHeader("Content-Length", buf.length);
-    res.setHeader("Cache-Control", "private, no-store");
-    res.send(buf);
+    await serveFeedFile(
+      `feeds/google/${file}`,
+      "text/tab-separated-values; charset=utf-8",
+      res,
+      "private, no-store",
+    );
   },
 );
 
