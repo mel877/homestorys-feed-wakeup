@@ -20,15 +20,18 @@ process.env["INTERNAL_API_SECRET"] = "test-secret-for-diagnostics";
 // ── Hoisted spy declarations ──────────────────────────────────────────────────
 
 const {
-  mockRunFullSync,
-  mockRunGoogleExport,
-  mockRunMetaExport,
+  mockRunFullSyncPipeline,
   mockFetchAndStoreDiagnostics,
   mockRunJobWithLock,
 } = vi.hoisted(() => ({
-  mockRunFullSync: vi.fn().mockResolvedValue("run-001"),
-  mockRunGoogleExport: vi.fn().mockResolvedValue(undefined),
-  mockRunMetaExport: vi.fn().mockResolvedValue(undefined),
+  mockRunFullSyncPipeline: vi.fn().mockResolvedValue({
+    runId: "run-001",
+    status: "completed",
+    channels: {
+      google: { ok: true, status: "ok", issues: [], snapshots: [] },
+      meta: { ok: true, status: "ok", issues: [], snapshots: [] },
+    },
+  }),
   mockFetchAndStoreDiagnostics: vi.fn().mockResolvedValue({ total: 0, critical: 0, errors: 0, warnings: 0 }),
   // runJobWithLock: immediately executes the job function inline (no async delay)
   mockRunJobWithLock: vi.fn().mockImplementation(
@@ -67,22 +70,13 @@ vi.mock("drizzle-orm", () => ({
 
 // Mock the modules that internal.ts dynamically imports
 vi.mock("../src/shopify/index", () => ({
-  runFullSync: mockRunFullSync,
   runInventorySync: vi.fn().mockResolvedValue("run-inv"),
   runPriceSync: vi.fn().mockResolvedValue("run-price"),
   syncProduct: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("../src/exporters/google/runner", () => ({
-  runGoogleExport: mockRunGoogleExport,
-}));
-
-vi.mock("../src/exporters/meta/generator", () => ({
-  runMetaExport: mockRunMetaExport,
-}));
-
-vi.mock("../src/exporters/meta/fresh-process", () => ({
-  runMetaExportInFreshProcess: mockRunMetaExport,
+vi.mock("../src/jobs/full-sync-pipeline", () => ({
+  runFullSyncPipeline: mockRunFullSyncPipeline,
 }));
 
 vi.mock("../src/exporters/google/diagnostics", () => ({
@@ -153,9 +147,8 @@ describe("POST /api/internal/sync/full — diagnostics reconciliation", () => {
     expect(res.body).toMatchObject({ status: "started", type: "full" });
   });
 
-  it("calls runFullSync, runGoogleExport, and fetchAndStoreDiagnostics in order", async () => {
-    mockRunFullSync.mockClear();
-    mockRunGoogleExport.mockClear();
+  it("calls the shared Full Sync pipeline and then reconciles diagnostics", async () => {
+    mockRunFullSyncPipeline.mockClear();
     mockFetchAndStoreDiagnostics.mockClear();
 
     await request(app)
@@ -166,15 +159,24 @@ describe("POST /api/internal/sync/full — diagnostics reconciliation", () => {
     // resolves.  Poll until all three mocks have been called (vi.waitFor retries
     // for up to 1 s by default, which is more than enough for the micro-task chain).
     await vi.waitFor(() => {
-      expect(mockRunFullSync).toHaveBeenCalledOnce();
+      expect(mockRunFullSyncPipeline).toHaveBeenCalledOnce();
     });
-    expect(mockRunGoogleExport).toHaveBeenCalledWith({ syncRunId: "run-001" });
     expect(mockFetchAndStoreDiagnostics).toHaveBeenCalledOnce();
   });
 
-  it("fetchAndStoreDiagnostics is called AFTER runGoogleExport (call order)", async () => {
+  it("fetchAndStoreDiagnostics is called AFTER the shared pipeline (call order)", async () => {
     const callOrder: string[] = [];
-    mockRunGoogleExport.mockImplementation(async () => { callOrder.push("google"); });
+    mockRunFullSyncPipeline.mockImplementationOnce(async () => {
+      callOrder.push("pipeline");
+      return {
+        runId: "run-001",
+        status: "completed",
+        channels: {
+          google: { ok: true, status: "ok", issues: [], snapshots: [] },
+          meta: { ok: true, status: "ok", issues: [], snapshots: [] },
+        },
+      };
+    });
     mockFetchAndStoreDiagnostics.mockImplementation(async () => { callOrder.push("diagnostics"); });
 
     await request(app)
@@ -186,25 +188,32 @@ describe("POST /api/internal/sync/full — diagnostics reconciliation", () => {
       expect(callOrder.length).toBeGreaterThanOrEqual(2);
     });
 
-    const googleIdx = callOrder.indexOf("google");
+    const googleIdx = callOrder.indexOf("pipeline");
     const diagIdx = callOrder.indexOf("diagnostics");
     expect(googleIdx).toBeGreaterThanOrEqual(0);
     expect(diagIdx).toBeGreaterThan(googleIdx);
 
     // Restore
-    mockRunGoogleExport.mockResolvedValue(undefined);
     mockFetchAndStoreDiagnostics.mockResolvedValue({ total: 0, critical: 0, errors: 0, warnings: 0 });
   });
 
-  it("fetchAndStoreDiagnostics is still called even when runGoogleExport throws", async () => {
-    mockRunGoogleExport.mockRejectedValueOnce(new Error("Google API down"));
+  it("fetchAndStoreDiagnostics is still called when the pipeline records a degraded export", async () => {
+    mockRunFullSyncPipeline.mockResolvedValueOnce({
+      runId: "run-001",
+      status: "degraded",
+      channels: {
+        google: { ok: false, status: "fallback", issues: ["Google API down"], snapshots: [] },
+        meta: { ok: true, status: "ok", issues: [], snapshots: [] },
+      },
+    });
     mockFetchAndStoreDiagnostics.mockClear();
 
     await request(app)
       .post("/api/internal/sync/full")
       .set(AUTH);
 
-    // Google export failure is caught (.catch) — diagnostics must still run
-    expect(mockFetchAndStoreDiagnostics).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(mockFetchAndStoreDiagnostics).toHaveBeenCalledOnce();
+    });
   });
 });

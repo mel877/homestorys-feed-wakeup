@@ -147,26 +147,10 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
         logger.info({ job: job.jobName }, "Dashboard trigger: job starting");
 
         if (runType === "full") {
-          const { runFullSync } = await import("../../shopify/index");
-          const { runGoogleExport } = await import("../../exporters/google/runner");
-          const { runMetaExportInFreshProcess } = await import("../../exporters/meta/fresh-process");
+          const { runFullSyncPipeline } = await import("../../jobs/full-sync-pipeline");
           const { fetchAndStoreDiagnostics } = await import("../../exporters/google/diagnostics");
-          const { withExportLock } = await import("../../exporters/export-lock");
-          // Complete full-sync pipeline, matching the scheduler exactly.
-          runId = await runFullSync();
-          // Serialized behind the shared feed-export lock (never overlaps a
-          // standalone export publish).
-          const capturedFullRunId = runId;
-          await withExportLock(async () => {
-            await runGoogleExport({ syncRunId: capturedFullRunId }).catch((err: unknown) =>
-              logger.error({ err, runId: capturedFullRunId }, "Dashboard trigger: Google export failed"),
-            );
-            await runMetaExportInFreshProcess({ syncRunId: capturedFullRunId }).catch((err: unknown) =>
-              logger.error({ err, runId: capturedFullRunId }, "Dashboard trigger: Meta export failed"),
-            );
-          }).catch((err: unknown) =>
-            logger.error({ err, runId }, "Dashboard trigger: feed export lock not acquired"),
-          );
+          const pipelineResult = await runFullSyncPipeline();
+          runId = pipelineResult.runId;
           await fetchAndStoreDiagnostics().catch((err: unknown) =>
             logger.error({ err, runId }, "Dashboard trigger: Google diagnostics reconciliation failed"),
           );

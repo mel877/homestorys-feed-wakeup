@@ -57,23 +57,9 @@ router.post("/sync/full", (req, res) => {
   getRunJobWithLock()
     .then((withLock) =>
       withLock("full-sync", "full", async () => {
-        const { runGoogleExport } = await import("../exporters/google/runner");
-        const { runMetaExportInFreshProcess } = await import("../exporters/meta/fresh-process");
+        const { runFullSyncPipeline } = await import("../jobs/full-sync-pipeline");
         const { fetchAndStoreDiagnostics } = await import("../exporters/google/diagnostics");
-        const { withExportLock } = await import("../exporters/export-lock");
-        const runId = await runFullSync();
-        // Serialized behind the shared feed-export lock (never overlaps a
-        // standalone export publish).
-        await withExportLock(async () => {
-          await runGoogleExport({ syncRunId: runId }).catch((err) =>
-            logger.error({ err }, "Google re-export failed after full sync"),
-          );
-          await runMetaExportInFreshProcess({ syncRunId: runId }).catch((err) =>
-            logger.error({ err }, "Meta re-export failed after full sync"),
-          );
-        }).catch((err) =>
-          logger.error({ err }, "Feed export lock not acquired after full sync"),
-        );
+        const { runId } = await runFullSyncPipeline();
         // Reconcile Merchant Center diagnostics after Google export
         // (identical to the scheduler path — all trigger paths must behave the same)
         await fetchAndStoreDiagnostics().catch((err) =>

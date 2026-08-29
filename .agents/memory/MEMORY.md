@@ -16,3 +16,4 @@
 - [Language feed market aliases](language-feed-market-aliases.md) — Swiss French uses the Swiss commercial price source with French content/URLs; preserve country data per row in grouped feeds.
 - [Artifact production working directory](artifact-production-cwd.md) — published artifact commands start from the workspace root; config loading must not assume the package working directory.
 - [Large feed HTTP streaming](large-feed-http-streaming.md) — pin object generation and stream with backpressure; omit Content-Length above 32 MiB on the published frontend.
+- [Full Sync terminal status](full-sync-terminal-status.md) — keep Full Sync running until locked Google/Meta export provenance is verified; stale current snapshots must produce degraded, never completed.

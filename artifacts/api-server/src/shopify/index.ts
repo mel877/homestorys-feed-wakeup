@@ -39,7 +39,9 @@ const REQUIRED_SCOPES = [
  * Creates a sync_run record and updates it as each phase completes.
  * Returns the sync run ID.
  */
-export async function runFullSync(): Promise<string> {
+export async function runFullSync(
+  options: { deferCompletion?: boolean } = {},
+): Promise<string> {
   const client = getShopifyClient();
   const tracker = new SyncRunTracker();
   const runId = await tracker.start("full");
@@ -72,8 +74,13 @@ export async function runFullSync(): Promise<string> {
     const classifyResult = await classifyStoredImages();
     logger.info({ runId, ...classifyResult }, "Image classification drain complete");
 
-    await tracker.complete();
-    logger.info({ runId }, "Full sync complete");
+    if (options.deferCompletion) {
+      await tracker.handoff();
+      logger.info({ runId }, "Catalog sync complete; run remains pending feed verification");
+    } else {
+      await tracker.complete();
+      logger.info({ runId }, "Full sync complete");
+    }
   } catch (err) {
     logger.error({ err, runId }, "Full sync failed");
     await tracker.fail(err);

@@ -318,6 +318,25 @@ describe("validateMetaFeed — country layer (meta-country-BE.csv)", () => {
     ]));
   });
 
+  it("rejects a promotional row when sale_price is equal to price", async () => {
+    const csv = [
+      "id,price,sale_price,sale_price_effective_date,availability,shipping",
+      "uuid-1_CH_DE,341.00 CHF,341.00 CHF,,in stock,CH::Standard:19.50 CHF",
+    ].join("\n");
+    mockDownload.mockResolvedValue(Buffer.from(csv));
+
+    const result = await validateMetaFeed(
+      "feeds/meta/meta-country-CH.csv",
+      { expectedCurrency: "CHF" },
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      field: "sale_price",
+      message: expect.stringContaining("strictly lower"),
+    }));
+  });
+
   it("uses meta-country schema for all country codes", async () => {
     for (const cc of ["FR", "DE", "AT"]) {
       mockDownload.mockResolvedValue(Buffer.from(VALID_META_COUNTRY_CSV, "utf-8"));

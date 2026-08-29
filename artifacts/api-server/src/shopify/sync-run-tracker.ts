@@ -128,6 +128,14 @@ export class SyncRunTracker {
     return { ...this.stats };
   }
 
+  async handoff(): Promise<SyncStats> {
+    if (!this.runId) throw new Error("Sync run not started");
+    if (this.flushInterval) clearInterval(this.flushInterval);
+    this.flushInterval = null;
+    await this.flush();
+    return { ...this.stats };
+  }
+
   async fail(error: Error | unknown): Promise<void> {
     if (!this.runId) return;
     if (this.flushInterval) clearInterval(this.flushInterval);

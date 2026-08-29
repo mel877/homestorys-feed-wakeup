@@ -353,6 +353,53 @@ function findUnexpectedCurrencies(
   return errors;
 }
 
+function parseMoney(value: string | undefined): {
+  amount: number;
+  currency: string;
+} | null {
+  const match = value?.trim().match(/^(-?\d+(?:\.\d+)?)\s+([A-Z]{3})$/);
+  if (!match) return null;
+  return {
+    amount: Number(match[1]),
+    currency: match[2]!,
+  };
+}
+
+function findInvalidPromotions(
+  rows: Record<string, string>[],
+): ValidationError[] {
+  const errors: ValidationError[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    const rawSalePrice = row["sale_price"]?.trim();
+    if (!rawSalePrice) continue;
+
+    const price = parseMoney(row["price"]);
+    const salePrice = parseMoney(rawSalePrice);
+    if (!price || !salePrice) continue;
+
+    if (price.currency !== salePrice.currency) {
+      errors.push({
+        row: i + 2,
+        field: "sale_price",
+        message: `Sale price currency ${salePrice.currency} must match price currency ${price.currency}`,
+        value: rawSalePrice,
+      });
+      continue;
+    }
+
+    if (salePrice.amount >= price.amount) {
+      errors.push({
+        row: i + 2,
+        field: "sale_price",
+        message: "Sale price must be strictly lower than price",
+        value: rawSalePrice,
+      });
+    }
+  }
+  return errors;
+}
+
 /**
  * Validate a Google TSV feed file from App Storage.
  * Returns the validation result with all errors.
@@ -373,6 +420,7 @@ export async function validateGoogleFeed(
     ...decoded.errors,
     ...findDuplicateIds(rows),
     ...findUnexpectedCurrencies(rows, options.expectedCurrency),
+    ...findInvalidPromotions(rows),
   ];
 
   for (let i = 0; i < rows.length; i++) {
@@ -417,6 +465,7 @@ export async function validateMetaFeed(
     ...decoded.errors,
     ...findDuplicateIds(rows),
     ...findUnexpectedCurrencies(rows, options.expectedCurrency),
+    ...findInvalidPromotions(rows),
   ];
 
   for (let i = 0; i < rows.length; i++) {
