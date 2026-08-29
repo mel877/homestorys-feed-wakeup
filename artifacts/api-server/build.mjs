@@ -73,6 +73,7 @@ async function buildAll() {
       path.resolve(artifactDir, "src/cli/sync-full.ts"),
       path.resolve(artifactDir, "src/cli/sync-inventory.ts"),
       path.resolve(artifactDir, "src/cli/sync-prices.ts"),
+      path.resolve(artifactDir, "src/cli/repair-swiss-prices.ts"),
     ],
     platform: "node",
     bundle: true,

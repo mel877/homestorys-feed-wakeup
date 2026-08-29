@@ -16,7 +16,8 @@
     "feed:validate": "node --enable-source-maps ./dist/cli/validate-feeds.mjs",
     "sync:full": "node --enable-source-maps ./dist/cli/sync-full.mjs",
     "sync:inventory": "node --enable-source-maps ./dist/cli/sync-inventory.mjs",
-    "sync:prices": "node --enable-source-maps ./dist/cli/sync-prices.mjs"
+    "sync:prices": "node --enable-source-maps ./dist/cli/sync-prices.mjs",
+    "repair:swiss-prices": "node --enable-source-maps ./dist/cli/repair-swiss-prices.mjs"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.22.0",
