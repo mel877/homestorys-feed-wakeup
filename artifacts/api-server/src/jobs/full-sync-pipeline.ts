@@ -79,6 +79,10 @@ export interface FullSyncSnapshotVerificationDependencies {
   };
 }
 
+export interface FullSyncMarketsConfig {
+  markets: Record<string, { country: string; language: string }>;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -158,22 +162,26 @@ export async function runFullSyncPipeline(
   return result;
 }
 
-function expectedSnapshotPaths(): { google: string[]; meta: string[] } {
-  const config = loadConfig();
-  const markets = Object.entries(config.markets.markets);
-  const languages = [...new Set(markets.map(([, market]) => market.language))].sort();
+export function expectedFullSyncSnapshotPaths(
+  config: FullSyncMarketsConfig = loadConfig().markets,
+): { google: string[]; meta: string[] } {
+  const markets = Object.entries(config.markets);
+  const publicLanguages = ["de", "fr"];
+  const layerLanguages = publicLanguages.filter((language) =>
+    markets.some(([, market]) => market.language === language),
+  );
   const countries = [...new Set(markets.map(([, market]) => market.country))].sort();
 
   return {
     google: [
       ...markets.map(([marketCode, market]) => googleFeedPath(market.language, marketCode)),
-      ...languages.map((language) => googleLanguageFeedPath(language)),
+      ...publicLanguages.map((language) => googleLanguageFeedPath(language)),
     ],
     meta: [
       metaFeedPath("meta-base.csv"),
-      ...languages.map((language) => metaFeedPath(`meta-language-${language}.csv`)),
+      ...layerLanguages.map((language) => metaFeedPath(`meta-language-${language}.csv`)),
       ...countries.map((country) => metaFeedPath(`meta-country-${country}.csv`)),
-      ...languages.map((language) => metaLanguageFeedPath(language)),
+      ...publicLanguages.map((language) => metaLanguageFeedPath(language)),
     ],
   };
 }
@@ -285,7 +293,7 @@ const defaultSnapshotVerificationDependencies: FullSyncSnapshotVerificationDepen
       .from(feedSnapshotsTable)
       .where(eq(feedSnapshotsTable.isCurrent, true)),
   loadManifest: downloadManifest,
-  expectedPaths: expectedSnapshotPaths,
+  expectedPaths: expectedFullSyncSnapshotPaths,
 };
 
 const defaultDependencies: FullSyncPipelineDependencies = {
