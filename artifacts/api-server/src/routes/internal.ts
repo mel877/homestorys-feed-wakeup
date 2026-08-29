@@ -11,17 +11,65 @@
  */
 
 import { Router, type IRouter } from "express";
+import { z } from "zod/v4";
 import { requireInternalAuth } from "../middlewares/internal-auth";
 import { db } from "@workspace/db";
 import { syncRunsTable } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import {
-  runFullSync,
   runInventorySync,
   runPriceSync,
   syncProduct,
 } from "../shopify/index";
+import { tryAcquireLock, releaseLock } from "../jobs/scheduler";
+import { SyncRunTracker } from "../shopify/sync-run-tracker";
+import { SwissPriceValidationError } from "../shopify/swiss-price-repair";
+import { tryAcquireMarketPriceWriteLock } from "../shopify/market-price-write-lock";
+
+const SWISS_PRICE_REPAIR_JOB_NAME = "swiss-price-repair";
+const SWISS_PRICE_REPAIR_OPERATION = "repair:swiss-prices";
+const SWISS_PRICE_REPAIR_CONFIRMATION = "APPLY_SWISS_PRICE_REPAIR";
+
+const SwissPriceRepairBody = z.object({
+  /**
+   * Preview is the safe default. Applying requires the exact confirmation
+   * phrase below; this keeps a copied request from becoming a write request.
+   */
+  apply: z.boolean().default(false),
+  confirmation: z.string().optional(),
+}).strict().superRefine((body, ctx) => {
+  if (body.apply && body.confirmation !== SWISS_PRICE_REPAIR_CONFIRMATION) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["confirmation"],
+      message: `Applying requires confirmation "${SWISS_PRICE_REPAIR_CONFIRMATION}"`,
+    });
+  }
+  if (!body.apply && body.confirmation !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["confirmation"],
+      message: "Confirmation is only accepted when apply is true",
+    });
+  }
+});
+
+function isProductionEnvironment(): boolean {
+  return process.env["APP_ENV"] === "production";
+}
+
+async function mergeSwissRepairMetadata(
+  runId: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  await db
+    .update(syncRunsTable)
+    .set({
+      metadata: sql`COALESCE(${syncRunsTable.metadata}, '{}'::jsonb) || ${JSON.stringify(metadata)}::jsonb`,
+    })
+    .where(sql`${syncRunsTable.id} = ${runId}`);
+}
 
 // Lazy imports to avoid loading heavy modules at startup
 async function getRunRecommendationsSync(): Promise<() => Promise<string>> {
@@ -45,6 +93,142 @@ const router: IRouter = Router();
 router.use(requireInternalAuth);
 
 // ── Sync trigger routes ────────────────────────────────────────────────────────
+
+/**
+ * POST /api/internal/repair/swiss-prices
+ *
+ * Production-only, targeted repair trigger. This route intentionally does not
+ * accept a run type or a job name: it can only invoke repair:swiss-prices.
+ *
+ * The default request is a read-only preview. Database writes additionally
+ * require `apply: true` and the exact confirmation phrase. The full report is
+ * stored in sync_runs.metadata and is available from the internal run list and
+ * the dashboard run detail endpoint.
+ */
+router.post("/repair/swiss-prices", async (req, res): Promise<void> => {
+  if (!isProductionEnvironment()) {
+    res.status(403).json({ error: "Swiss price repair is available only in production" });
+    return;
+  }
+
+  const parsed = SwissPriceRepairBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const { apply } = parsed.data;
+  const lock = await tryAcquireLock(
+    SWISS_PRICE_REPAIR_JOB_NAME,
+    "swiss-price-repair",
+  );
+  if (!lock.acquired) {
+    res.status(409).json({ error: "A Swiss price repair is already running" });
+    return;
+  }
+
+  let marketPriceLease;
+  try {
+    marketPriceLease = await tryAcquireMarketPriceWriteLock();
+  } catch (error) {
+    releaseLock(SWISS_PRICE_REPAIR_JOB_NAME);
+    req.log.error({ err: error }, "Failed to acquire Swiss price repair database lock");
+    res.status(503).json({ error: "Could not acquire Swiss price repair database lock" });
+    return;
+  }
+  if (!marketPriceLease) {
+    releaseLock(SWISS_PRICE_REPAIR_JOB_NAME);
+    res.status(409).json({ error: "A market price writer is already running" });
+    return;
+  }
+
+  const tracker = new SyncRunTracker();
+  let runId: string;
+  try {
+    runId = await tracker.start("swiss-price-repair", {
+      operation: SWISS_PRICE_REPAIR_OPERATION,
+      trigger: "internal-api",
+      mode: apply ? "apply" : "preview",
+      authorization: apply ? "explicit-confirmation" : "read-only",
+    });
+  } catch (error) {
+    try {
+      await marketPriceLease.release();
+    } finally {
+      releaseLock(SWISS_PRICE_REPAIR_JOB_NAME);
+    }
+    req.log.error({ err: error }, "Failed to create Swiss price repair run");
+    res.status(500).json({ error: "Could not create Swiss price repair run" });
+    return;
+  }
+
+  res.status(202).json({
+    operation: SWISS_PRICE_REPAIR_OPERATION,
+    mode: apply ? "apply" : "preview",
+    status: "started",
+    runId,
+    report: `/api/internal/runs/${encodeURIComponent(runId)}`,
+  });
+
+  setImmediate(() => {
+    const runBackground = async (): Promise<void> => {
+      try {
+        const { loadConfig } = await import("../config");
+        const { getShopifyClient } = await import("../shopify/client");
+        const { runSwissPriceRepair } = await import("../shopify/swiss-price-repair");
+        const report = await runSwissPriceRepair({
+          config: loadConfig(),
+          client: getShopifyClient(),
+          apply,
+        });
+
+        await mergeSwissRepairMetadata(runId, {
+          report,
+          reportStatus: "completed",
+        });
+        await tracker.complete();
+        logger.info(
+          { runId, mode: apply ? "apply" : "preview", targetedVariants: report.targetedVariants },
+          "Swiss price repair completed",
+        );
+      } catch (error) {
+        // Validation errors are persisted in full, including every issue, so a
+        // failed apply can be audited without rerunning Shopify or the repair.
+        const validation = error instanceof SwissPriceValidationError
+          ? {
+              status: "aborted-before-write",
+              issueCount: error.issues.length,
+              issues: error.issues,
+              noCurrencyConversionPerformed: true,
+            }
+          : undefined;
+        try {
+          await tracker.fail(error);
+          await mergeSwissRepairMetadata(runId, {
+            ...(validation ? { validation } : {}),
+            reportStatus: validation ? "validation-failed" : "failed",
+          });
+        } catch (recordingError) {
+          req.log.error(
+            { err: recordingError, runId },
+            "Failed to persist Swiss price repair failure report",
+          );
+        }
+        req.log.error({ err: error, runId }, "Swiss price repair failed");
+      } finally {
+        try {
+          await marketPriceLease.release();
+        } finally {
+          releaseLock(SWISS_PRICE_REPAIR_JOB_NAME);
+        }
+      }
+    };
+
+    runBackground().catch((error) =>
+      req.log.error({ err: error, runId }, "Unexpected Swiss price repair failure"),
+    );
+  });
+});
 
 /**
  * POST /api/internal/sync/full
@@ -217,6 +401,37 @@ router.get("/runs", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to fetch sync runs");
     res.status(500).json({ error: "Failed to fetch sync runs" });
+  }
+});
+
+/**
+ * GET /api/internal/runs/:runId
+ * Fetch one complete run, including a persisted Swiss repair report.
+ */
+router.get("/runs/:runId", async (req, res) => {
+  const rawRunId = Array.isArray(req.params["runId"])
+    ? req.params["runId"][0]
+    : req.params["runId"];
+  const parsed = z.uuid().safeParse(rawRunId);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid run ID" });
+    return;
+  }
+
+  try {
+    const [run] = await db
+      .select()
+      .from(syncRunsTable)
+      .where(eq(syncRunsTable.id, parsed.data))
+      .limit(1);
+    if (!run) {
+      res.status(404).json({ error: "Run not found" });
+      return;
+    }
+    res.json({ run });
+  } catch (err) {
+    req.log.error({ err }, "Failed to fetch sync run");
+    res.status(500).json({ error: "Failed to fetch sync run" });
   }
 });
 

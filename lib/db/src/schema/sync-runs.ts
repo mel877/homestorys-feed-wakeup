@@ -14,7 +14,7 @@ export const syncRunsTable = pgTable(
   "sync_runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    runType: text("run_type").notNull(), // full | inventory | prices | recommendations | webhook
+    runType: text("run_type").notNull(), // full | inventory | prices | recommendations | webhook | swiss-price-repair
     status: text("status").notNull().default("running"), // running | completed | failed | cancelled
     startedAt: timestamp("started_at", { withTimezone: true })
       .notNull()

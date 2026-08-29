@@ -19,6 +19,7 @@ import { syncTranslations, syncProductTranslations } from "./sync-translations";
 import { classifyStoredImages, reclassifyProductImages } from "../images/classify-stored";
 import { db, productsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { withMarketPriceWriteLock } from "./market-price-write-lock";
 
 const logger = rootLogger.child({ module: "shopify-sync" });
 
@@ -58,7 +59,7 @@ export async function runFullSync(
 
     // Phase 2: Market pricing
     logger.info({ runId }, "Phase 2: market pricing");
-    await syncMarketPricing(client, tracker);
+    await withMarketPriceWriteLock(() => syncMarketPricing(client, tracker));
 
     // Phase 3: Inventory
     logger.info({ runId }, "Phase 3: inventory");
@@ -122,7 +123,7 @@ export async function runPriceSync(): Promise<string> {
   logger.info({ runId }, "Starting price sync");
 
   try {
-    await syncMarketPricing(client, tracker);
+    await withMarketPriceWriteLock(() => syncMarketPricing(client, tracker));
     await tracker.complete();
     logger.info({ runId }, "Price sync complete");
   } catch (err) {

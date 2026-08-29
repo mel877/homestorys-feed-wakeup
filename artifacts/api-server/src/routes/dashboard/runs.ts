@@ -57,6 +57,7 @@ router.get("/dashboard/sync-runs", requireDashboardAuth, async (req, res): Promi
       recordsChanged: r.recordsChanged ?? 0,
       errors: r.errors ?? 0,
       warnings: r.warnings ?? 0,
+      metadata: r.metadata ?? null,
     })),
     total: countRows[0]?.count ?? 0,
   });
@@ -98,6 +99,7 @@ router.get("/dashboard/sync-runs/:id", requireDashboardAuth, async (req, res): P
       recordsChanged: run.recordsChanged ?? 0,
       errors: run.errors ?? 0,
       warnings: run.warnings ?? 0,
+      metadata: run.metadata ?? null,
     },
     errors: errors.map((e) => ({
       id: e.id,

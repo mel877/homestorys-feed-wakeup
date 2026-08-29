@@ -30,7 +30,8 @@ export type SyncRunType =
   | "product"
   | "export"
   | "showroom"
-  | "google-export";
+  | "google-export"
+  | "swiss-price-repair";
 
 export class SyncRunTracker {
   private runId: string | null = null;
