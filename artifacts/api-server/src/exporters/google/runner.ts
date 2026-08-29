@@ -180,7 +180,9 @@ export async function runGoogleExport(options: {
 
       let schemaValid = true;
       if (snapshot_gate.require_zero_schema_errors) {
-        const validation = await validateGoogleFeed(versioned);
+        const validation = await validateGoogleFeed(versioned, {
+          expectedCurrency: market.currency,
+        });
         schemaValid = validation.valid;
         if (!schemaValid) {
           logger.error(
@@ -285,7 +287,9 @@ export async function runGoogleExport(options: {
         config,
         { markets, channel: "google", persistFeedItems: false },
         (canonical) => {
-          const row = mapToGoogleRow(canonical, config);
+          const row = mapToGoogleRow(canonical, config, {
+            qualifyIdWithMarket: true,
+          });
           if (row) rows.push(row);
         },
       );

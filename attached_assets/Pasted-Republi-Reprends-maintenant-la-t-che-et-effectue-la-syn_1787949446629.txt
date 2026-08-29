@@ -1,0 +1,123 @@
+Republié. Reprends maintenant la tâche et effectue la synchronisation complète ainsi que la validation production prévue.
+
+1. Validation des exclusions de produits
+
+Concernant les 5 076 exclusions de marques et les 475 exclusions de types de produits :
+
+vérifie une dernière fois qu'elles correspondent exactement aux règles métier d'exclusion initialement définies dans ce projet.
+
+Compare les marques et types de produits actuellement exclus avec les règles/configurations historiques prévues à cet effet.
+
+Si tu confirmes que les 5 076 exclusions de marques et les 475 exclusions de types de produits sont bien la conséquence des règles initialement définies dans ce projet et que ces règles doivent toujours être conservées, alors ces exclusions sont légitimes et ne constituent pas une anomalie.
+
+Dans ce cas :
+
+conserve les règles telles quelles ;
+ne réintègre pas ces produits ;
+considère la baisse correspondante du nombre de produits comme expliquée ;
+documente simplement cette conclusion dans le rapport final.
+
+En revanche, si une partie des exclusions ne correspond pas aux règles métier initiales, signale précisément l'écart avant toute modification de ces règles.
+
+Ne modifie, ne supprime et n'élargis aucune règle métier d'exclusion sans preuve qu'elle est incorrecte.
+
+2. Prix suisses nuls
+
+Pour les 4 172 prix nuls par marché, détermine précisément leur cause et distingue :
+
+les cas légitimes, par exemple un produit réellement indisponible sur le marché suisse ;
+les erreurs de récupération Shopify / contextualPricing ;
+les erreurs de mapping ;
+les variantes sans prix contextualisé ;
+toute autre cause technique.
+
+Ne publie pas un produit CH sans prix valide.
+
+Les produits légitimement indisponibles en Suisse peuvent être exclus du flux CH, mais cette exclusion doit être identifiable et documentée.
+
+3. Synchronisation Suisse
+
+Effectue ensuite la synchronisation complète nécessaire et vérifie que :
+
+CH_DE utilise les prix Shopify contextualisés pour la Suisse ;
+CH_FR utilise les prix Shopify contextualisés pour la Suisse ;
+la devise est CHF ;
+aucun prix EUR ne subsiste dans les flux suisses ;
+price est valide ;
+sale_price, lorsqu'il existe, est valide et en CHF ;
+les éventuelles données de shipping utilisent la devise attendue ;
+les URLs /de-ch/ et /fr-ch/ correspondent bien au marché suisse ;
+les variantes des URLs correspondent bien aux variantes envoyées dans les flux.
+
+N'effectue aucune conversion EUR → CHF interne si Shopify fournit le prix contextualisé CHF.
+
+4. Validation réelle en production
+
+Refais ensuite l'audit depuis Internet sur le domaine :
+
+https://homestorys-flux.eteamsys.be
+
+Il ne suffit pas que les tests internes ou les requêtes HEAD réussissent.
+
+Effectue des GET complets réels des flux, notamment des gros fichiers.
+
+Vérifie particulièrement :
+
+Google CH_DE ;
+Google CH_FR ;
+les autres gros flux Google ;
+Meta base ;
+Meta DE ;
+les flux Meta Suisse ;
+et les autres endpoints Google/Meta concernés.
+
+Pour chaque flux, valide :
+
+HTTP 200 ;
+téléchargement complet ;
+aucun HTTP 500 ;
+accès public et anonyme ;
+Content-Type correct ;
+Cache-Control correct ;
+taille cohérente ;
+parsing réussi ;
+UTF-8 valide ;
+IDs uniques ;
+nombre de produits cohérent ;
+devise conforme au marché ;
+fichier complet et non tronqué ;
+fonctionnement avec User-Agent Google et Meta lorsque pertinent.
+
+Pour les gros snapshots servis via le dérivé gzip atomique, vérifie que le téléchargement intégral depuis le domaine public fonctionne réellement et que le contenu obtenu correspond au snapshot attendu.
+
+5. Sécurité de publication
+
+Conserve les garde-fous existants.
+
+En particulier :
+
+ne relève pas artificiellement le seuil de variation du nombre de produits ;
+ne force aucun snapshot invalide ;
+conserve le dernier snapshot valide lorsqu'une nouvelle génération échoue ;
+bloque un flux suisse contenant une devise autre que CHF ;
+bloque/exclus correctement les produits CH sans prix valide selon la logique prévue.
+6. Rapport final
+
+À la fin, fournis-moi un tableau contenant :
+
+Plateforme | Marché | Langue | URL finale | HTTP | Devise | Produits | Taille | Validation
+
+Je veux également une conclusion explicite sur :
+
+la confirmation ou non que les 5 076 exclusions de marques correspondent aux règles métier historiques ;
+la confirmation ou non que les 475 exclusions de types de produits correspondent aux règles métier historiques ;
+la cause des 4 172 prix nuls par marché ;
+le nombre de produits CH finalement exclus pour absence légitime de prix ;
+la confirmation qu'il reste 0 prix EUR dans CH_DE et CH_FR ;
+le résultat du téléchargement complet du gros flux Google CH_DE qui retournait précédemment HTTP 500 ;
+le résultat des téléchargements complets des gros flux Meta ;
+la liste exacte des URLs Google et Meta réellement validées et prêtes à être utilisées en production.
+
+Ne déclare aucun flux prêt à être utilisé dans Google Merchant Center ou Meta Commerce Manager s'il n'a pas passé la validation réelle en production.
+
+Si une nouvelle modification de code nécessite encore un Publish manuel, arrête-toi avant de considérer la tâche comme terminée et indique-moi explicitement qu'une nouvelle publication est nécessaire.

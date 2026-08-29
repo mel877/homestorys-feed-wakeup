@@ -13,6 +13,8 @@ A Shopify → Google Merchant Center + Meta Catalog feed engine that replaces Ch
 - `pnpm --filter @workspace/scripts run audit:shopify` — discover Shopify store structure
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas
+- Production feed audit: `docs/production-feed-validation-2026-08-28.md`
+- Protected per-file feed health: `GET /api/dashboard/feed-health/files`
 
 ## Stack
 

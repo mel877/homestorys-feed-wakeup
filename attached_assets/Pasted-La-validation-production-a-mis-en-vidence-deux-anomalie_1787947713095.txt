@@ -1,0 +1,104 @@
+La validation production a mis en évidence deux anomalies qui doivent être résolues avant toute bascule vers les nouveaux flux.
+
+1. Écart de nombre de produits
+
+Les nouveaux flux Google contiennent 21 482 produits contre environ 26 995 auparavant, soit une baisse de 20,4 %.
+
+Ne modifie PAS le seuil de sécurité de 10 % et ne force PAS la publication.
+
+Effectue une analyse différentielle précise entre le dernier snapshot valide et le nouveau snapshot.
+
+Je veux savoir exactement pourquoi environ 5 500 produits/IDs ont disparu.
+
+Classe les différences par cause, par exemple :
+
+produit supprimé de Shopify ;
+produit non publié ;
+produit non disponible sur le marché concerné ;
+variante supprimée ;
+stock ;
+prix manquant ;
+prix/devise invalide ;
+traduction manquante ;
+URL manquante/invalide ;
+image manquante/invalide ;
+GTIN/MPN ;
+règle d'exclusion ;
+erreur de mapping ;
+changement d'ID ;
+problème de pagination Shopify ;
+problème lié au marché ;
+autre.
+
+Compare les IDs exacts entre ancien et nouveau flux afin de distinguer :
+
+IDs présents dans ancien mais absents du nouveau
+
+IDs nouveaux
+
+IDs identiques
+
+Vérifie particulièrement qu'il n'existe aucune régression liée à la récupération des 38 399 variantes Shopify ou à la logique de marché.
+
+Produis un tableau :
+
+Cause | Nombre de produits | % de l'écart | Légitime/Anormal | Action
+
+Ne publie le nouveau snapshot que lorsque la différence est entièrement expliquée et que les exclusions légitimes sont distinguées des régressions.
+
+2. HTTP 500 sur Google CH_DE
+
+Le téléchargement intégral du flux Google CH_DE de 76 Mo retourne encore HTTP 500 depuis le frontal public.
+
+Diagnostique et corrige cette erreur en production.
+
+Vérifie notamment :
+
+streaming ;
+timeout ;
+mémoire ;
+taille des chunks ;
+compression ;
+proxy/front Replit ;
+fermeture prématurée de connexion ;
+accès au snapshot ;
+fallback ;
+headers ;
+comportement GET vs HEAD.
+
+Ne considère pas un test HEAD réussi comme preuve suffisante.
+
+Le test final doit effectuer un GET complet du fichier depuis Internet et confirmer :
+
+HTTP 200 ;
+téléchargement intégral ;
+taille attendue ;
+checksum cohérent ;
+fichier parseable ;
+aucune coupure de connexion ;
+devise CHF ;
+contenu Google valide.
+
+Effectue également ce test de téléchargement intégral sur les autres gros feeds Google et Meta afin de vérifier qu'il ne s'agit pas d'un problème général de taille.
+
+Important :
+
+Les derniers snapshots valides doivent continuer à être servis pendant toute cette investigation.
+
+Ne force aucune publication dangereuse.
+
+Ne relève aucun seuil de sécurité pour contourner le problème.
+
+À la fin, donne-moi :
+
+la cause exacte de la baisse de 20,4 % ;
+la répartition détaillée des ~5 500 produits manquants ;
+les éventuelles corrections appliquées ;
+la cause exacte du HTTP 500 CH_DE ;
+la correction appliquée ;
+le résultat des téléchargements complets Internet ;
+le nombre final de produits par flux ;
+la confirmation que les flux CH utilisent CHF ;
+la liste des flux pouvant être publiés en toute sécurité.
+
+Si une nouvelle modification de code nécessite un nouveau Publish manuel, arrête-toi après avoir terminé et testé les corrections localement et indique-moi explicitement qu'une nouvelle publication est nécessaire.

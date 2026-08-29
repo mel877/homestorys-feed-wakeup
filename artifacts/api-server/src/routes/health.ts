@@ -1,5 +1,7 @@
 import { Router, type IRouter } from "express";
 import { HealthCheckResponse } from "@workspace/api-zod";
+import { loadConfig } from "../config";
+import { getBuildInfo } from "../lib/build-info";
 
 const router: IRouter = Router();
 
@@ -10,7 +12,10 @@ const payload = HealthCheckResponse.parse({ status: "ok" });
  * Primary health check endpoint — required by spec §8.
  */
 router.get("/health", (_req, res) => {
-  res.json(payload);
+  res.json({
+    ...payload,
+    ...getBuildInfo(loadConfig()),
+  });
 });
 
 /**

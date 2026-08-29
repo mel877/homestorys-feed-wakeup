@@ -12,9 +12,16 @@
  * Spec reference: §1366-1379 (URL patterns), §1329-1362 (Meta architecture).
  */
 
-import { Router, type Request, type Response, type NextFunction } from "express";
-import { openFeedFileReadStream } from "../lib/storage";
+import { Router, type Request, type Response } from "express";
+import {
+  compressedFeedPath,
+  getFeedFileMetadata,
+  googleFeedPath,
+  openFeedFileReadStream,
+  type FeedFileMetadata,
+} from "../lib/storage";
 import { logger as rootLogger } from "../lib/logger";
+import { loadConfig } from "../config";
 import { requireInternalAuth } from "../middlewares/internal-auth";
 import { requireDashboardAuth } from "./dashboard/auth";
 import { db, feedSnapshotsTable } from "@workspace/db";
@@ -24,42 +31,173 @@ import { eq, desc, sql, and } from "drizzle-orm";
 const logger = rootLogger.child({ module: "feed-routes" });
 
 const router = Router();
+const MAX_ADVERTISED_CONTENT_LENGTH = 32 * 1024 * 1024;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function setFeedHeaders(
+  res: Response,
+  contentType: string,
+  rawSize: number | null,
+  representation?: { compressed: boolean; size: number | null },
+): void {
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Disposition", "inline");
+  if (rawSize !== null) res.setHeader("X-Feed-Size", rawSize);
+
+  const transferSize = representation?.size ?? rawSize;
+  if (representation?.compressed) {
+    res.setHeader("Content-Encoding", "gzip");
+    res.setHeader("Vary", "Accept-Encoding");
+    if (transferSize !== null) {
+      res.setHeader("X-Feed-Compressed-Size", transferSize);
+    }
+  }
+  if (transferSize !== null && transferSize <= MAX_ADVERTISED_CONTENT_LENGTH) {
+    res.setHeader("Content-Length", transferSize);
+  }
+}
+
+async function selectFeedRepresentation(
+  storagePath: string,
+): Promise<{
+  storagePath: string;
+  metadata: FeedFileMetadata;
+  rawSize: number | null;
+  compressed: boolean;
+} | null> {
+  const metadata = await getFeedFileMetadata(storagePath);
+  if (!metadata) return null;
+  if (metadata.size === null || metadata.size <= MAX_ADVERTISED_CONTENT_LENGTH) {
+    return { storagePath, metadata, rawSize: metadata.size, compressed: false };
+  }
+
+  const gzipPath = compressedFeedPath(storagePath);
+  const gzipMetadata = await getFeedFileMetadata(gzipPath);
+  if (!gzipMetadata) {
+    throw Object.assign(
+      new Error(`Compressed derivative missing for large feed: ${storagePath}`),
+      { code: "COMPRESSED_FEED_MISSING" },
+    );
+  }
+  return {
+    storagePath: gzipPath,
+    metadata: gzipMetadata,
+    rawSize: metadata.size,
+    compressed: true,
+  };
+}
 
 async function serveFeedFile(
   storagePath: string,
   contentType: string,
+  req: Request,
   res: Response,
   cacheControl = "public, max-age=300",
+  context: {
+    channel: "google" | "meta" | "showroom";
+    language?: string;
+    market?: string;
+    generationMode?: "stable" | "snapshot";
+  },
 ): Promise<void> {
+  const startedAt = Date.now();
+  const requestId = String(req.id ?? req.headers["x-request-id"] ?? "");
+  if (requestId) res.setHeader("X-Request-Id", requestId);
+  res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Cache-Control", cacheControl);
+  const logResult = (
+    statusCode: number,
+    extra: { bytes?: number | null; errorType?: string } = {},
+  ) => {
+    logger.info(
+      {
+        requestId: requestId || undefined,
+        method: req.method,
+        channel: context.channel,
+        language: context.language,
+        market: context.market,
+        generationMode: context.generationMode ?? "stable",
+        statusCode,
+        durationMs: Date.now() - startedAt,
+        bytes: extra.bytes,
+        errorType: extra.errorType,
+      },
+      "Feed request completed",
+    );
+  };
   let clientDisconnected = res.destroyed || res.req.aborted;
   const handleDisconnectWhileOpening = () => {
     clientDisconnected = true;
   };
   res.once("close", handleDisconnectWhileOpening);
 
+  if (req.method === "HEAD") {
+    try {
+      const representation = await selectFeedRepresentation(storagePath);
+      res.off("close", handleDisconnectWhileOpening);
+      if (clientDisconnected || res.destroyed) return;
+      if (!representation) {
+        res.status(404).json({ error: "Feed file not found" });
+        logResult(404, { errorType: "file_not_found" });
+        return;
+      }
+      setFeedHeaders(res, contentType, representation.rawSize, {
+        compressed: representation.compressed,
+        size: representation.metadata.size,
+      });
+      res.status(200).end();
+      logResult(200, { bytes: representation.rawSize });
+    } catch {
+      res.off("close", handleDisconnectWhileOpening);
+      if (clientDisconnected || res.destroyed) return;
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Retry-After", "60");
+      res.status(503).json({ error: "Feed temporarily unavailable" });
+      logResult(503, { errorType: "storage_metadata_failed" });
+    }
+    return;
+  }
+
   let feedFile;
+  let representation;
   try {
-    feedFile = await openFeedFileReadStream(storagePath);
+    representation = await selectFeedRepresentation(storagePath);
+    feedFile = representation
+      ? await openFeedFileReadStream(
+          representation.storagePath,
+          representation.metadata,
+        )
+      : null;
   } catch (error) {
     res.off("close", handleDisconnectWhileOpening);
     if (clientDisconnected || res.destroyed) {
-      logger.info({ storagePath }, "Client disconnected while feed file was opening");
+      logger.info({ requestId: requestId || undefined }, "Client disconnected while feed file was opening");
       return;
     }
-    logger.error({ err: error, storagePath }, "Failed to open feed file from App Storage");
+    logger.error(
+      {
+        requestId: requestId || undefined,
+        channel: context.channel,
+        errorType:
+          error instanceof Error && "code" in error && error.code === "COMPRESSED_FEED_MISSING"
+            ? "compressed_derivative_missing"
+            : "storage_open_failed",
+      },
+      "Failed to open feed file from App Storage",
+    );
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Retry-After", "60");
     res.status(503).json({ error: "Feed temporarily unavailable" });
+    logResult(503, { errorType: "storage_open_failed" });
     return;
   }
 
   if (!feedFile) {
     res.off("close", handleDisconnectWhileOpening);
     if (clientDisconnected || res.destroyed) return;
-    res.status(404).json({ error: "Feed file not found", storagePath });
+    res.status(404).json({ error: "Feed file not found" });
+    logResult(404, { errorType: "file_not_found" });
     return;
   }
 
@@ -69,14 +207,17 @@ async function serveFeedFile(
     });
     feedFile.stream.destroy();
     res.off("close", handleDisconnectWhileOpening);
-    logger.info({ storagePath }, "Feed stream cancelled after client disconnected while opening");
+    logger.info({ requestId: requestId || undefined }, "Feed stream cancelled after client disconnected while opening");
     return;
   }
 
-  res.setHeader("Content-Type", contentType);
-  if (feedFile.size !== null) {
-    res.setHeader("Content-Length", feedFile.size);
-  }
+  // The published Google Frontend rejects large dynamically-served bodies
+  // when their full Content-Length is announced. Keep small files explicit,
+  // but let large feeds use progressive/chunked transfer.
+  setFeedHeaders(res, contentType, representation?.rawSize ?? feedFile.size, {
+    compressed: representation?.compressed ?? false,
+    size: feedFile.size,
+  });
 
   await new Promise<void>((resolve) => {
     let settled = false;
@@ -98,7 +239,10 @@ async function serveFeedFile(
         return;
       }
       feedFile.stream.unpipe(res);
-      logger.error({ err: error, storagePath }, "Feed stream failed");
+      logger.error(
+        { requestId: requestId || undefined, channel: context.channel, errorType: "storage_stream_failed" },
+        "Feed stream failed",
+      );
 
       if (!res.headersSent && !res.destroyed) {
         res.removeHeader("Content-Length");
@@ -106,6 +250,7 @@ async function serveFeedFile(
         res.setHeader("Cache-Control", "no-store");
         res.setHeader("Retry-After", "60");
         res.status(503).json({ error: "Feed temporarily unavailable" });
+        logResult(503, { errorType: "storage_stream_failed" });
       } else if (!res.destroyed) {
         res.destroy();
       }
@@ -120,6 +265,7 @@ async function serveFeedFile(
       settle();
     };
     const handleFinish = () => {
+      logResult(res.statusCode, { bytes: feedFile.size });
       settle();
     };
     const handleClientDisconnect = () => {
@@ -149,15 +295,15 @@ async function serveFeedFile(
 
 /** Stable flat catalog URLs for Meta. */
 router.get("/feeds/meta/fr.csv", async (_req: Request, res: Response) => {
-  await serveFeedFile("feeds/meta/meta-fr.csv", "text/csv; charset=utf-8", res);
+  await serveFeedFile("feeds/meta/meta-fr.csv", "text/csv; charset=utf-8", _req, res, undefined, { channel: "meta", language: "fr" });
 });
 router.get("/feeds/meta/de.csv", async (_req: Request, res: Response) => {
-  await serveFeedFile("feeds/meta/meta-de.csv", "text/csv; charset=utf-8", res);
+  await serveFeedFile("feeds/meta/meta-de.csv", "text/csv; charset=utf-8", _req, res, undefined, { channel: "meta", language: "de" });
 });
 
 /** GET /feeds/meta/base.csv */
 router.get("/feeds/meta/base.csv", async (_req: Request, res: Response) => {
-  await serveFeedFile("feeds/meta/meta-base.csv", "text/csv; charset=utf-8", res);
+  await serveFeedFile("feeds/meta/meta-base.csv", "text/csv; charset=utf-8", _req, res, undefined, { channel: "meta" });
 });
 
 /** GET /feeds/meta/lang/:lang — e.g. /feeds/meta/lang/fr.csv */
@@ -171,7 +317,10 @@ router.get("/feeds/meta/lang/:lang", async (req: Request, res: Response) => {
   await serveFeedFile(
     `feeds/meta/meta-language-${lang}.csv`,
     "text/csv; charset=utf-8",
+    req,
     res,
+    undefined,
+    { channel: "meta", language: lang },
   );
 });
 
@@ -186,7 +335,10 @@ router.get("/feeds/meta/country/:cc", async (req: Request, res: Response) => {
   await serveFeedFile(
     `feeds/meta/meta-country-${cc}.csv`,
     "text/csv; charset=utf-8",
+    req,
     res,
+    undefined,
+    { channel: "meta", market: cc },
   );
 });
 
@@ -197,24 +349,24 @@ router.get("/feeds/meta/country/:cc", async (req: Request, res: Response) => {
 router.get("/feeds/meta/:file", async (req: Request, res: Response) => {
   const rawFile = req.params["file"];
   const file = Array.isArray(rawFile) ? rawFile[0] : rawFile;
-  if (!file || !/^[\w\-\.]+\.csv$/.test(file)) {
+  if (!file || !/^[\w.-]+\.csv$/.test(file)) {
     res.status(400).json({ error: "Invalid feed filename" });
     return;
   }
 
   // Normalise: strip leading "meta-" if provided directly in path
   const storageName = file.startsWith("meta-") ? file : `meta-${file}`;
-  await serveFeedFile(`feeds/meta/${storageName}`, "text/csv; charset=utf-8", res);
+  await serveFeedFile(`feeds/meta/${storageName}`, "text/csv; charset=utf-8", req, res, undefined, { channel: "meta" });
 });
 
 // ── Google feed routes (public — for GMC file-fetch) ─────────────────────────
 
 /** Stable language URLs for Google Merchant Center. */
 router.get("/feeds/google/fr.tsv", async (_req: Request, res: Response) => {
-  await serveFeedFile("feeds/google/google-fr.tsv", "text/tab-separated-values; charset=utf-8", res);
+  await serveFeedFile("feeds/google/google-fr.tsv", "text/tab-separated-values; charset=utf-8", _req, res, undefined, { channel: "google", language: "fr" });
 });
 router.get("/feeds/google/de.tsv", async (_req: Request, res: Response) => {
-  await serveFeedFile("feeds/google/google-de.tsv", "text/tab-separated-values; charset=utf-8", res);
+  await serveFeedFile("feeds/google/google-de.tsv", "text/tab-separated-values; charset=utf-8", _req, res, undefined, { channel: "google", language: "de" });
 });
 
 /**
@@ -232,22 +384,41 @@ router.get("/feeds/google/market/:market", async (req: Request, res: Response): 
     res.status(400).json({ error: "Invalid market code" });
     return;
   }
-  const snapshot = await db
-    .select({ storagePath: feedSnapshotsTable.storagePath })
-    .from(feedSnapshotsTable)
-    .where(
-      and(
-        eq(feedSnapshotsTable.channel, "google"),
-        eq(feedSnapshotsTable.marketCode, market),
-        eq(feedSnapshotsTable.isCurrent, true),
-      ),
-    )
-    .limit(1);
-  if (!snapshot[0]) {
-    res.status(404).json({ error: "No current Google feed for this market. Run an export first.", market });
+
+  const config = loadConfig();
+  const configuredMarket = config.markets.markets[market];
+  if (!configuredMarket) {
+    res.status(404).json({ error: "Unknown Google market", market });
     return;
   }
-  await serveFeedFile(snapshot[0].storagePath, "text/tab-separated-values; charset=utf-8", res);
+
+  let snapshotStoragePath: string | undefined;
+  try {
+    const snapshot = await db
+      .select({ storagePath: feedSnapshotsTable.storagePath })
+      .from(feedSnapshotsTable)
+      .where(
+        and(
+          eq(feedSnapshotsTable.channel, "google"),
+          eq(feedSnapshotsTable.marketCode, market),
+          eq(feedSnapshotsTable.isCurrent, true),
+        ),
+      )
+      .limit(1);
+    snapshotStoragePath = snapshot[0]?.storagePath;
+  } catch {
+    logger.warn(
+      { requestId: String(req.id ?? ""), channel: "google", market, errorType: "snapshot_lookup_failed" },
+      "Google snapshot lookup failed; using deterministic current path",
+    );
+  }
+
+  // Current Google objects have deterministic paths and are replaced only
+  // after validation. Falling back to that path keeps the last valid object
+  // available when snapshot metadata is missing or its database is unavailable.
+  const storagePath = snapshotStoragePath
+    ?? googleFeedPath(configuredMarket.language, market);
+  await serveFeedFile(storagePath, "text/tab-separated-values; charset=utf-8", req, res, undefined, { channel: "google", market, generationMode: "snapshot" });
 });
 
 // ── Showroom feed routes (public — for GMC and Meta file-fetch) ──────────────
@@ -262,7 +433,10 @@ router.get("/feeds/google/showroom/eupen.tsv", async (_req: Request, res: Respon
   await serveFeedFile(
     "feeds/showroom/google-eupen.tsv",
     "text/tab-separated-values; charset=utf-8",
+    _req,
     res,
+    undefined,
+    { channel: "showroom", language: "de", market: "EUPEN" },
   );
 });
 
@@ -276,7 +450,10 @@ router.get("/feeds/meta/showroom/eupen.csv", async (_req: Request, res: Response
   await serveFeedFile(
     "feeds/showroom/meta-eupen.csv",
     "text/csv; charset=utf-8",
+    _req,
     res,
+    undefined,
+    { channel: "showroom", language: "de", market: "EUPEN_META" },
   );
 });
 
@@ -288,7 +465,7 @@ router.get("/feeds/meta/showroom/eupen.csv", async (_req: Request, res: Response
 router.get("/feeds/showroom/:file", async (req: Request, res: Response) => {
   const rawFile = req.params["file"];
   const file = Array.isArray(rawFile) ? rawFile[0] : rawFile;
-  if (!file || !/^[\w\-\.]+\.(tsv|csv)$/.test(file)) {
+  if (!file || !/^[\w.-]+\.(tsv|csv)$/.test(file)) {
     res.status(400).json({ error: "Invalid showroom feed filename" });
     return;
   }
@@ -296,7 +473,10 @@ router.get("/feeds/showroom/:file", async (req: Request, res: Response) => {
   await serveFeedFile(
     `feeds/showroom/${file}`,
     isTsv ? "text/tab-separated-values; charset=utf-8" : "text/csv; charset=utf-8",
+    req,
     res,
+    undefined,
+    { channel: "showroom" },
   );
 });
 
@@ -313,14 +493,17 @@ router.get(
   async (req: Request, res: Response) => {
     const rawFile = req.params["file"];
     const file = Array.isArray(rawFile) ? rawFile[0] : rawFile;
-    if (!file || !/^[\w\-\.]+\.tsv$/.test(file)) {
+    if (!file || !/^[\w.-]+\.tsv$/.test(file)) {
       res.status(400).json({ error: "Invalid feed filename" });
       return;
     }
     await serveFeedFile(
       `feeds/google/${file}`,
       "text/tab-separated-values; charset=utf-8",
+      req,
       res,
+      undefined,
+      { channel: "google", generationMode: "snapshot" },
     );
   },
 );
@@ -338,15 +521,17 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     const rawFile = req.params["file"];
     const file = Array.isArray(rawFile) ? rawFile[0] : rawFile;
-    if (!file || !/^[\w\-\.]+\.tsv$/.test(file)) {
+    if (!file || !/^[\w.-]+\.tsv$/.test(file)) {
       res.status(400).json({ error: "Invalid feed filename" });
       return;
     }
     await serveFeedFile(
       `feeds/google/${file}`,
       "text/tab-separated-values; charset=utf-8",
+      req,
       res,
       "private, no-store",
+      { channel: "google", generationMode: "snapshot" },
     );
   },
 );

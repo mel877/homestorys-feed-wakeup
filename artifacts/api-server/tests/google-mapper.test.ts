@@ -239,7 +239,9 @@ describe("Google product API identifier contract", () => {
 
   it("TSV row id adds the market so a language feed can carry multiple prices", () => {
     const canonical = makeCanonical({ variantId: "var-uuid-999" });
-    const row = mapToGoogleRow(canonical, makeConfig())!;
+    const row = mapToGoogleRow(canonical, makeConfig(), {
+      qualifyIdWithMarket: true,
+    })!;
     const resource = mapToGoogleResource(canonical, makeConfig())!;
 
     expect(row.id).toBe(`${resource.offerId}:BE_FR`);
@@ -421,6 +423,25 @@ describe("mapToGoogleResource", () => {
 });
 
 describe("mapToGoogleRow", () => {
+  it("keeps the historical variant ID in a per-market feed", () => {
+    const row = mapToGoogleRow(
+      makeCanonical({ variantId: "variant-uuid-123", market: "BE_FR" }),
+      makeConfig(),
+    )!;
+
+    expect(row.id).toBe("variant-uuid-123");
+  });
+
+  it("qualifies IDs by market only in a combined language feed", () => {
+    const row = mapToGoogleRow(
+      makeCanonical({ variantId: "variant-uuid-123", market: "BE_FR" }),
+      makeConfig(),
+      { qualifyIdWithMarket: true },
+    )!;
+
+    expect(row.id).toBe("variant-uuid-123:BE_FR");
+  });
+
   it("returns a flat row with all required headers", () => {
     const row = mapToGoogleRow(makeCanonical(), makeConfig());
     expect(row).not.toBeNull();

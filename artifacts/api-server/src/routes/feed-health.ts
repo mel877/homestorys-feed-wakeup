@@ -18,11 +18,64 @@ import {
   feedSnapshotsTable,
   syncErrorsTable,
 } from "@workspace/db";
-import { eq, desc, count, and, gte, inArray } from "drizzle-orm";
+import { eq, desc, count, inArray } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { getActiveAlerts } from "../observability/alerts";
+import { getFeedFileMetadata } from "../lib/storage";
+import { requireDashboardAuth } from "./dashboard/auth";
 
 const router: IRouter = Router();
+
+type CurrentFeedSnapshot = {
+  channel: string;
+  language: string | null;
+  marketCode: string | null;
+  storagePath: string;
+  itemCount: number;
+  generatedAt: Date;
+  sha256: string | null;
+};
+
+export function publicFeedPathForSnapshot(snapshot: CurrentFeedSnapshot): string | null {
+  const filename = snapshot.storagePath.split("/").pop() ?? "";
+
+  if (snapshot.channel === "showroom") {
+    if (filename === "google-eupen.tsv") return "/api/feeds/google/showroom/eupen.tsv";
+    if (filename === "meta-eupen.csv") return "/api/feeds/meta/showroom/eupen.csv";
+    return `/api/feeds/showroom/${filename}`;
+  }
+
+  if (snapshot.channel === "google") {
+    if (/^google-[a-z]{2}\.tsv$/i.test(filename) && snapshot.language) {
+      return `/api/feeds/google/${snapshot.language.toLowerCase()}.tsv`;
+    }
+    if (snapshot.marketCode && !snapshot.marketCode.startsWith("LANG_")) {
+      return `/api/feeds/google/market/${snapshot.marketCode}.tsv`;
+    }
+    return null;
+  }
+
+  if (snapshot.channel === "meta") {
+    if (filename === "meta-base.csv") return "/api/feeds/meta/base.csv";
+    const languageMatch = filename.match(/^meta-language-([a-z]{2})\.csv$/i);
+    if (languageMatch?.[1]) return `/api/feeds/meta/lang/${languageMatch[1].toLowerCase()}.csv`;
+    const countryMatch = filename.match(/^meta-country-([a-z]{2})\.csv$/i);
+    if (countryMatch?.[1]) return `/api/feeds/meta/country/${countryMatch[1].toUpperCase()}.csv`;
+    const stableLanguageMatch = filename.match(/^meta-([a-z]{2})\.csv$/i);
+    if (stableLanguageMatch?.[1]) return `/api/feeds/meta/${stableLanguageMatch[1].toLowerCase()}.csv`;
+    return `/api/feeds/meta/${filename}`;
+  }
+
+  return null;
+}
+
+function requestOrigin(req: Parameters<Parameters<typeof router.get>[1]>[0]): string {
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const proto = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)
+    ?.split(",")[0]
+    ?.trim() || req.protocol;
+  return `${proto}://${req.get("host")}`;
+}
 
 /**
  * GET /api/feed-health
@@ -168,5 +221,113 @@ router.get("/feed-health", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch feed health" });
   }
 });
+
+/**
+ * GET /api/dashboard/feed-health/files
+ *
+ * Protected per-file operational status. File bodies remain public, while
+ * storage diagnostics and error messages require a dashboard session.
+ */
+router.get(
+  "/dashboard/feed-health/files",
+  requireDashboardAuth,
+  async (req, res): Promise<void> => {
+    try {
+      const [snapshots, recentErrors] = await Promise.all([
+        db
+          .select({
+            channel: feedSnapshotsTable.channel,
+            language: feedSnapshotsTable.language,
+            marketCode: feedSnapshotsTable.marketCode,
+            storagePath: feedSnapshotsTable.storagePath,
+            itemCount: feedSnapshotsTable.itemCount,
+            generatedAt: feedSnapshotsTable.generatedAt,
+            sha256: feedSnapshotsTable.sha256,
+          })
+          .from(feedSnapshotsTable)
+          .where(eq(feedSnapshotsTable.isCurrent, true))
+          .orderBy(feedSnapshotsTable.channel, feedSnapshotsTable.marketCode),
+        db
+          .select({
+            errorType: syncErrorsTable.errorType,
+            entityType: syncErrorsTable.entityType,
+            entityId: syncErrorsTable.entityId,
+            message: syncErrorsTable.message,
+            createdAt: syncErrorsTable.createdAt,
+          })
+          .from(syncErrorsTable)
+          .where(inArray(syncErrorsTable.entityType, ["channel", "feed"]))
+          .orderBy(desc(syncErrorsTable.createdAt))
+          .limit(100),
+      ]);
+
+      const origin = requestOrigin(req);
+      const feeds = await Promise.all(
+        snapshots.map(async (snapshot) => {
+          const publicPath = publicFeedPathForSnapshot(snapshot);
+          const matchingError = recentErrors.find((error) =>
+            error.entityId === snapshot.channel
+            || (snapshot.channel === "showroom" && error.entityId === "showroom")
+            || error.entityId === snapshot.marketCode
+            || error.entityId === snapshot.storagePath,
+          );
+
+          try {
+            const metadata = await getFeedFileMetadata(snapshot.storagePath);
+            const exists = metadata !== null;
+            return {
+              channel: snapshot.channel,
+              language: snapshot.language,
+              marketCode: snapshot.marketCode,
+              format: snapshot.storagePath.endsWith(".tsv") ? "tsv" : "csv",
+              publicUrl: publicPath ? new URL(publicPath, origin).toString() : null,
+              status: exists ? "healthy" : "missing",
+              itemCount: snapshot.itemCount,
+              generatedAt: snapshot.generatedAt.toISOString(),
+              sizeBytes: metadata?.size ?? null,
+              valid: exists && Boolean(snapshot.sha256),
+              validationStatus: snapshot.sha256 ? "passed_at_publish" : "unknown",
+              lastError: matchingError
+                ? {
+                    type: matchingError.errorType,
+                    message: matchingError.message.slice(0, 500),
+                    occurredAt: matchingError.createdAt.toISOString(),
+                  }
+                : null,
+            };
+          } catch {
+            return {
+              channel: snapshot.channel,
+              language: snapshot.language,
+              marketCode: snapshot.marketCode,
+              format: snapshot.storagePath.endsWith(".tsv") ? "tsv" : "csv",
+              publicUrl: publicPath ? new URL(publicPath, origin).toString() : null,
+              status: "storage_error",
+              itemCount: snapshot.itemCount,
+              generatedAt: snapshot.generatedAt.toISOString(),
+              sizeBytes: null,
+              valid: null,
+              validationStatus: snapshot.sha256 ? "passed_at_publish" : "unknown",
+              lastError: {
+                type: "storage_metadata_failed",
+                message: "Unable to read feed object metadata",
+                occurredAt: new Date().toISOString(),
+              },
+            };
+          }
+        }),
+      );
+
+      res.json({
+        status: feeds.every((feed) => feed.status === "healthy") ? "healthy" : "degraded",
+        generatedAt: new Date().toISOString(),
+        feeds,
+      });
+    } catch (err) {
+      logger.error({ err }, "Failed to fetch per-file feed health");
+      res.status(500).json({ error: "Failed to fetch feed file health" });
+    }
+  },
+);
 
 export default router;

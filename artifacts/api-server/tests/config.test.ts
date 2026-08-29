@@ -70,6 +70,8 @@ describe("Config loader", () => {
     const { markets } = loadConfig().markets;
 
     expect(markets["FR"]?.currency).toBe("EUR");
+    expect(markets["CH_DE"]?.base_url).toBe("https://shop.homestorys.com/de-ch/");
+    expect(markets["CH_FR"]?.base_url).toBe("https://shop.homestorys.com/fr-ch/");
     expect(markets["DE"]?.currency).toBe("EUR");
     expect(markets["CH_DE"]?.currency).toBe("CHF");
     expect(markets["CH_FR"]?.currency).toBe("CHF");

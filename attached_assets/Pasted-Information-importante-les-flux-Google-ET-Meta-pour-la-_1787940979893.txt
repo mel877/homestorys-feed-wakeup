@@ -1,0 +1,73 @@
+Information importante : les flux Google ET Meta pour la Suisse sont actuellement utilisés en production.
+
+Le problème identifié concernant les prix suisses en EUR au lieu de CHF doit donc être considéré comme bloquant et doit être corrigé avant de considérer la mise en production comme validée.
+
+Intègre cette correction à l'exécution actuelle.
+
+Pour le marché suisse :
+
+Identifie la source de vérité des prix suisses dans Shopify / Shopify Markets.
+Vérifie si Shopify expose directement les prix contextualisés pour le marché suisse en CHF.
+Si oui, utilise obligatoirement ces prix contextualisés CHF pour les flux :
+Google Suisse ;
+Meta Suisse.
+Ne réalise aucune conversion EUR → CHF interne au moteur de flux si Shopify fournit déjà les prix CHF du marché suisse.
+Ne remplace jamais simplement EUR par CHF sans modifier la valeur numérique du prix.
+Vérifie également les sale_price, compare_at_price et autres champs tarifaires éventuels afin qu'ils utilisent tous le prix contextualisé suisse.
+Vérifie que les URLs produits utilisées dans les feeds correspondent bien au marché suisse et affichent au visiteur un prix cohérent avec celui transmis à Google/Meta.
+Vérifie que Google et Meta reçoivent exactement la même logique tarifaire pour un même produit/marché.
+
+Avant publication, sélectionne au minimum 10 produits suisses comprenant :
+
+produits à prix normal ;
+produits en promotion ;
+produits avec variantes ;
+produits Outlet si présents.
+
+Compare pour chacun :
+
+Prix Shopify CH → Prix landing page CH → Google CH → Meta CH
+
+Les prix et devises doivent être cohérents.
+
+La validation Suisse doit notamment confirmer :
+
+currency = CHF
+
+et aucun produit du flux suisse ne doit contenir par erreur un prix EUR.
+
+Ajoute un contrôle automatique empêchant à l'avenir la publication d'un feed CH contenant une devise inattendue.
+
+Par exemple, le moteur doit connaître la devise attendue par marché :
+
+CH = CHF
+
+BE = EUR
+
+DE = EUR
+
+FR = EUR
+
+AT = EUR
+
+Si la devise d'un produit ne correspond pas à celle du marché, le feed ne doit pas être publié et le dernier feed valide doit rester disponible.
+
+Ensuite :
+
+publie les corrections de la Task #78 ;
+publie la correction des flux suisses ;
+refais les tests Internet réels après déploiement ;
+valide tous les endpoints Google et Meta ;
+teste particulièrement les gros fichiers en production.
+
+Dans le rapport final, ajoute :
+
+Plateforme | Marché | Langue | URL | Devise attendue | Devise détectée | HTTP | Content-Type | Produits | Taille | Validation
+
+Pour la Suisse, je veux explicitement voir :
+
+Google | CH | ... | CHF | CHF | 200 | ... | PASS
+
+Meta | CH | ... | CHF | CHF | 200 | ... | PASS
+
+Ne considère pas le déploiement comme validé tant que les flux Google CH et Meta CH ne sont pas confirmés en CHF et accessibles publiquement.

@@ -503,6 +503,7 @@ export function mapToGoogleResource(
 export function mapToGoogleRow(
   canonical: CanonicalProduct,
   config: AppConfig,
+  options: { qualifyIdWithMarket?: boolean } = {},
 ): GoogleFeedRow | null {
   const resource = mapToGoogleResource(canonical, config);
   if (!resource) return null;
@@ -517,9 +518,12 @@ export function mapToGoogleRow(
   const productHighlights = (resource.productHighlights ?? []).join(",");
 
   return {
-    // A language feed contains several commercial markets, so one variant must
-    // remain unique per market even when CHF/EUR prices differ.
-    id: `${resource.offerId}:${canonical.market}`,
+    // Per-market feeds keep the historical offer ID used by Merchant Center.
+    // Combined language feeds opt into a market suffix because they contain
+    // several commercial rows for the same variant.
+    id: options.qualifyIdWithMarket
+      ? `${resource.offerId}:${canonical.market}`
+      : resource.offerId,
     title: resource.title,
     description: resource.description,
     link: resource.link,

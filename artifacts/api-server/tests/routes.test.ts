@@ -11,6 +11,8 @@ const CONFIG_DIR = resolve(__dir, "../../../config");
 process.env["CONFIG_DIR"] = CONFIG_DIR;
 const originalDashboardSecret = process.env["DASHBOARD_SECRET"];
 const originalSessionSecret = process.env["SESSION_SECRET"];
+const originalBuildGitCommit = process.env["BUILD_GIT_COMMIT"];
+const originalBuildVersion = process.env["BUILD_VERSION"];
 
 // ── DB mock (feed-health and recommendations require @workspace/db) ───────────
 vi.mock("@workspace/db", () => {
@@ -92,6 +94,8 @@ let app: Express;
 beforeAll(async () => {
   process.env["DASHBOARD_SECRET"] = "test-dashboard-access-key";
   process.env["SESSION_SECRET"] = "test-dashboard-session-secret";
+  process.env["BUILD_GIT_COMMIT"] = "59a3545333720796c90bcbccbeb50c1aa6275001";
+  process.env["BUILD_VERSION"] = "api-server@59a354533372";
   app = await buildApp();
 });
 
@@ -100,6 +104,10 @@ afterAll(() => {
   else process.env["DASHBOARD_SECRET"] = originalDashboardSecret;
   if (originalSessionSecret === undefined) delete process.env["SESSION_SECRET"];
   else process.env["SESSION_SECRET"] = originalSessionSecret;
+  if (originalBuildGitCommit === undefined) delete process.env["BUILD_GIT_COMMIT"];
+  else process.env["BUILD_GIT_COMMIT"] = originalBuildGitCommit;
+  if (originalBuildVersion === undefined) delete process.env["BUILD_VERSION"];
+  else process.env["BUILD_VERSION"] = originalBuildVersion;
 });
 
 describe("Dashboard session", () => {
@@ -134,10 +142,25 @@ describe("Dashboard session", () => {
 // ── Health routes ─────────────────────────────────────────────────────────────
 
 describe("GET /api/health", () => {
-  it("returns 200 with status ok", async () => {
+  it("returns 200 with the compiled build identity and Swiss currency guard", async () => {
     const res = await request(app).get("/api/health");
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ status: "ok" });
+    expect(res.body).toEqual({
+      status: "ok",
+      buildVersion: "api-server@59a354533372",
+      gitCommit: "59a3545333720796c90bcbccbeb50c1aa6275001",
+      swissCurrencyGuard: true,
+      marketCurrencies: {
+        AT: "EUR",
+        BE_DE: "EUR",
+        BE_FR: "EUR",
+        CH_DE: "CHF",
+        CH_FR: "CHF",
+        DE: "EUR",
+        FR: "EUR",
+        LU_DE: "EUR",
+      },
+    });
   });
 
   it("responds with JSON content-type", async () => {
@@ -150,7 +173,7 @@ describe("GET /api/healthz (alias)", () => {
   it("returns 200 with status ok (backwards-compatible alias)", async () => {
     const res = await request(app).get("/api/healthz");
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ status: "ok" });
+    expect(res.body).toEqual({ status: "ok" });
   });
 });
 
@@ -169,6 +192,28 @@ describe("GET /api/feed-health", () => {
 
   it("generatedAt is a valid ISO timestamp", async () => {
     const res = await request(app).get("/api/feed-health");
+    expect(() => new Date(res.body.generatedAt as string).toISOString()).not.toThrow();
+  });
+});
+
+describe("GET /api/dashboard/feed-health/files", () => {
+  it("requires a dashboard session", async () => {
+    const res = await request(app).get("/api/dashboard/feed-health/files");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns the protected per-file health summary", async () => {
+    const agent = request.agent(app);
+    await agent
+      .post("/api/dashboard/auth/login")
+      .send({ password: "test-dashboard-access-key" });
+
+    const res = await agent.get("/api/dashboard/feed-health/files");
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      status: "healthy",
+      feeds: [],
+    });
     expect(() => new Date(res.body.generatedAt as string).toISOString()).not.toThrow();
   });
 });

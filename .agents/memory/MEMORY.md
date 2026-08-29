@@ -15,4 +15,4 @@
 - [Meta export heap accumulation](meta-export-heap-accumulation.md) — repeated runMetaExport in same process OOMs; restart server before retrying; fresh process peak ≈ 760 MB (vs 4 GB accumulated).
 - [Language feed market aliases](language-feed-market-aliases.md) — Swiss French uses the Swiss commercial price source with French content/URLs; preserve country data per row in grouped feeds.
 - [Artifact production working directory](artifact-production-cwd.md) — published artifact commands start from the workspace root; config loading must not assume the package working directory.
-- [Large feed HTTP streaming](large-feed-http-streaming.md) — stream large mutable objects with generation pinning; observe disconnects before metadata and never buffer the full response.
+- [Large feed HTTP streaming](large-feed-http-streaming.md) — pin object generation and stream with backpressure; omit Content-Length above 32 MiB on the published frontend.

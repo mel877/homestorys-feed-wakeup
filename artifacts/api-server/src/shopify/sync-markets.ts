@@ -9,10 +9,11 @@
  * 5. Upserting market_variants rows (availability is set separately by inventory sync)
  */
 
-import { db, variantsTable, productsTable, marketVariantsTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { db, variantsTable, marketVariantsTable } from "@workspace/db";
+import { sql } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config";
+import { buildShopifyProductUrl } from "../markets/resolver";
 import type { ShopifyClient } from "./client";
 import type { SyncRunTracker } from "./sync-run-tracker";
 import type { ShopifyMarket, ShopifyPriceList, PageInfo } from "./types";
@@ -97,6 +98,10 @@ const BASE_PRICES_QUERY = `
           id
           price
           compareAtPrice
+          contextualPricing(context: { country: CH }) {
+            price { amount currencyCode }
+            compareAtPrice { amount currencyCode }
+          }
           product { id handle }
         }
       }
@@ -186,6 +191,70 @@ interface VariantPrice {
   currency: string;
 }
 
+interface BaseVariantPrice {
+  price: string;
+  compareAtPrice: string | null;
+  productHandle: string;
+  swissPrice: {
+    price: string;
+    compareAtPrice: string | null;
+    currency: string;
+  } | null;
+}
+
+export function assertShopifyMarketCurrencies(
+  markets: Record<string, { country: string; currency: string }>,
+): void {
+  for (const [marketCode, market] of Object.entries(markets)) {
+    if (market.country === "CH" && market.currency !== "CHF") {
+      throw new Error(
+        `Swiss market ${marketCode} must be configured with CHF, received ${market.currency}`,
+      );
+    }
+  }
+}
+
+export function selectShopifyMarketPrice({
+  marketCode,
+  country,
+  configuredCurrency,
+  base,
+  override,
+}: {
+  marketCode: string;
+  country: string;
+  configuredCurrency: string;
+  base: BaseVariantPrice;
+  override: VariantPrice | undefined;
+}): Pick<VariantPrice, "price" | "compareAtPrice" | "currency"> {
+  if (country === "CH") {
+    if (!base.swissPrice || base.swissPrice.currency !== configuredCurrency) {
+      throw new Error(
+        `Shopify contextual pricing for ${marketCode} must use ${configuredCurrency}`,
+      );
+    }
+    return base.swissPrice;
+  }
+
+  const selected = override
+    ? {
+        price: override.price,
+        compareAtPrice: override.compareAtPrice,
+        currency: override.currency,
+      }
+    : {
+        price: base.price,
+        compareAtPrice: base.compareAtPrice,
+        currency: configuredCurrency,
+      };
+  if (selected.currency !== configuredCurrency) {
+    throw new Error(
+      `Shopify pricing for ${marketCode} must use ${configuredCurrency}`,
+    );
+  }
+  return selected;
+}
+
 async function fetchAllPriceListPrices(
   client: ShopifyClient,
   priceListId: string,
@@ -236,8 +305,8 @@ async function fetchAllPriceListPrices(
 async function fetchAllBasePrices(
   client: ShopifyClient,
   tracker: SyncRunTracker,
-): Promise<Map<string, { price: string; compareAtPrice: string | null; productHandle: string }>> {
-  const prices = new Map<string, { price: string; compareAtPrice: string | null; productHandle: string }>();
+): Promise<Map<string, BaseVariantPrice>> {
+  const prices = new Map<string, BaseVariantPrice>();
   let cursor: string | null = null;
 
   type BasePricesResult = {
@@ -247,6 +316,10 @@ async function fetchAllBasePrices(
           id: string;
           price: string;
           compareAtPrice: string | null;
+          contextualPricing: {
+            price: { amount: string; currencyCode: string };
+            compareAtPrice: { amount: string; currencyCode: string } | null;
+          } | null;
           product: { id: string; handle: string };
         };
       }>;
@@ -266,6 +339,13 @@ async function fetchAllBasePrices(
         price: node.price,
         compareAtPrice: node.compareAtPrice,
         productHandle: node.product.handle,
+        swissPrice: node.contextualPricing
+          ? {
+              price: node.contextualPricing.price.amount,
+              compareAtPrice: node.contextualPricing.compareAtPrice?.amount ?? null,
+              currency: node.contextualPricing.price.currencyCode,
+            }
+          : null,
       });
     }
 
@@ -284,6 +364,7 @@ export async function syncMarketPricing(
   logger.info("Starting market pricing sync");
   const config = loadConfig();
   const ourMarkets = config.markets.markets;
+  assertShopifyMarketCurrencies(ourMarkets);
 
   // 1. Fetch Shopify markets
   const marketsResult = await client.request<{ markets: { nodes: ShopifyMarket[] } }>(
@@ -313,6 +394,22 @@ export async function syncMarketPricing(
   logger.info("Fetching base variant prices...");
   const basePrices = await fetchAllBasePrices(client, tracker);
   logger.info({ count: basePrices.size }, "Base prices fetched");
+
+  // Validate the Shopify buyer-facing Swiss price source before any DB writes.
+  // Raw PriceList entries can be expressed in the shop currency even when the
+  // market itself is CHF; contextualPricing is the final price shown in CH.
+  const swissMarkets = Object.entries(ourMarkets).filter(([, market]) => market.country === "CH");
+  for (const [marketCode, market] of swissMarkets) {
+    for (const base of basePrices.values()) {
+      selectShopifyMarketPrice({
+        marketCode,
+        country: market.country,
+        configuredCurrency: market.currency,
+        base,
+        override: undefined,
+      });
+    }
+  }
 
   // 3. Fetch price lists and build override maps per market
   const priceListOverrides = new Map<string, Map<string, VariantPrice>>();
@@ -396,27 +493,30 @@ export async function syncMarketPricing(
     for (const marketCode of marketCodes) {
       const marketEntry = marketEntryByCode.get(marketCode);
       const override = priceListOverrides.get(marketCode)?.get(variantGid);
+      const marketConfig = ourMarkets[marketCode]!;
+      const selectedPrice = selectShopifyMarketPrice({
+        marketCode,
+        country: marketConfig.country,
+        configuredCurrency: marketConfig.currency,
+        base,
+        override,
+      });
 
-      const finalPrice = override?.price ?? base.price;
-      const finalCompareAt = override?.compareAtPrice ?? base.compareAtPrice;
-      const currency =
-        override?.currency ??
-        marketEntry?.market.currencySettings.baseCurrency.currencyCode ??
-        "EUR";
-
-      // Construct product URL if market base URL is available
-      let productUrl: string | null = null;
-      if (marketEntry) {
-        const baseUrl = getMarketBaseUrl(marketEntry.market);
-        if (baseUrl) productUrl = `${baseUrl}products/${base.productHandle}`;
-      }
+      // Use the exact localized Shopify market presence and deep-link the
+      // variant so the landing-page price matches the feed row.
+      const baseUrl = marketEntry
+        ? getMarketBaseUrl(marketEntry.market)
+        : marketConfig.base_url;
+      const productUrl = baseUrl
+        ? buildShopifyProductUrl(baseUrl, base.productHandle, variantGid)
+        : null;
 
       rows.push({
         variantId: variantDbId,
         marketCode,
-        priceAmount: finalPrice,
-        priceCurrency: currency,
-        compareAtPriceAmount: finalCompareAt,
+        priceAmount: selectedPrice.price,
+        priceCurrency: selectedPrice.currency,
+        compareAtPriceAmount: selectedPrice.compareAtPrice,
         availability: "out_of_stock", // Will be updated by inventory sync
         productUrl,
         isEligible: true,

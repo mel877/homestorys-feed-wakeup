@@ -39,7 +39,7 @@ markets:
     language: de
     currency: CHF
     label: Switzerland (German)
-    base_url: https://shop-de.homestorys.com/
+    base_url: https://shop.homestorys.com/de-ch/
 
   # Shopify exposes Swiss commercial data once. The French storefront uses the
   # same Swiss CHF price and eligibility, but French product content and links.
@@ -48,7 +48,7 @@ markets:
     language: fr
     currency: CHF
     label: Switzerland (French)
-    base_url: https://shop-fr.homestorys.com/
+    base_url: https://shop.homestorys.com/fr-ch/
     pricing_market: CH_DE
 
   LU_DE:

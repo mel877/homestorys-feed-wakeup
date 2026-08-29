@@ -182,13 +182,13 @@ describe("Language market aliases", () => {
       country: "CH",
       language: "de",
       currency: "CHF",
-      base_url: "https://shop-de.homestorys.com/",
+      base_url: "https://shop.homestorys.com/de-ch/",
     };
     config.markets.markets["CH_FR"] = {
       country: "CH",
       language: "fr",
       currency: "CHF",
-      base_url: "https://shop-fr.homestorys.com/",
+      base_url: "https://shop.homestorys.com/fr-ch/",
       pricing_market: "CH_DE",
     };
 
@@ -212,7 +212,9 @@ describe("Language market aliases", () => {
     expect(canonical!.market).toBe("CH_FR");
     expect(canonical!.language).toBe("fr");
     expect(canonical!.price).toMatchObject({ amount: 999, currency: "CHF" });
-    expect(canonical!.productUrl).toMatch(/^https:\/\/shop-fr\.homestorys\.com\/products\//);
+    expect(canonical!.productUrl).toMatch(
+      /^https:\/\/shop\.homestorys\.com\/fr-ch\/products\/.*\?variant=\d+$/,
+    );
   });
 });
 

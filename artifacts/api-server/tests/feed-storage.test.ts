@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   googleFeedPath,
   metaFeedPath,
+  compressedFeedPath,
   versionedPath,
   formatVersionTs,
 } from "../src/lib/storage";
@@ -38,6 +39,13 @@ describe("metaFeedPath", () => {
 
   it("returns correct path for country CSV", () => {
     expect(metaFeedPath("meta-country-BE.csv")).toBe("feeds/meta/meta-country-BE.csv");
+  });
+});
+
+describe("compressedFeedPath", () => {
+  it("keeps the original extension and appends .gz", () => {
+    expect(compressedFeedPath("feeds/google/google-de-CH_DE.tsv"))
+      .toBe("feeds/google/google-de-CH_DE.tsv.gz");
   });
 });
 

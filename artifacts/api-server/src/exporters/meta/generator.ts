@@ -232,7 +232,20 @@ export async function runMetaExport(options: {
     const { snapshot_gate } = config.feedPolicy;
     let schemaValid = true;
     if (snapshot_gate.require_zero_schema_errors) {
-      const validation = streamedValidation ?? await validateMetaFeed(versioned);
+      const expectedCurrencies = feedCountry
+        ? new Set(
+            Object.values(config.markets.markets)
+              .filter((market) => market.country === feedCountry)
+              .map((market) => market.currency),
+          )
+        : new Set<string>();
+      if (expectedCurrencies.size > 1) {
+        throw new Error(`Conflicting configured currencies for country ${feedCountry}`);
+      }
+      const expectedCurrency = expectedCurrencies.values().next().value as string | undefined;
+      const validation = streamedValidation ?? await validateMetaFeed(versioned, {
+        expectedCurrency,
+      });
       schemaValid = validation.valid;
       if (!schemaValid) {
         logger.error(
@@ -581,7 +594,6 @@ export async function runMetaExport(options: {
         }
 
         // Persist to feed_items (batched)
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { generatedAt: _omit, ...stableForChecksum } = canonical;
         const checksum = computeChecksum(stableForChecksum);
         upsertBatch.push({

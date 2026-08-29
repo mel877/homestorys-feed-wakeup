@@ -1,4 +1,7 @@
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
@@ -9,9 +12,55 @@ import { rm } from "node:fs/promises";
 globalThis.require = createRequire(import.meta.url);
 
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
+const workspaceDir = path.resolve(artifactDir, "../..");
+
+function resolveBuildIdentity() {
+  const gitCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: workspaceDir,
+    encoding: "utf8",
+  }).trim();
+
+  if (!/^[0-9a-f]{40}$/.test(gitCommit)) {
+    throw new Error(`Unable to resolve a full Git commit SHA for this build: "${gitCommit}"`);
+  }
+
+  const workspaceDiff = execFileSync("git", ["diff", "--binary", "HEAD", "--"], {
+    cwd: workspaceDir,
+    encoding: "utf8",
+    maxBuffer: 50 * 1024 * 1024,
+  });
+  const untrackedFiles = execFileSync(
+    "git",
+    ["ls-files", "--others", "--exclude-standard"],
+    {
+      cwd: workspaceDir,
+      encoding: "utf8",
+    },
+  )
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+
+  const workspaceHash = createHash("sha256").update(workspaceDiff);
+  for (const relativePath of untrackedFiles) {
+    workspaceHash.update(relativePath);
+    workspaceHash.update(readFileSync(path.resolve(workspaceDir, relativePath)));
+  }
+
+  const hasWorkspaceChanges = workspaceDiff.length > 0 || untrackedFiles.length > 0;
+  const workspaceVersionSuffix = hasWorkspaceChanges
+    ? `+workspace.${workspaceHash.digest("hex").slice(0, 12)}`
+    : "";
+
+  return {
+    gitCommit,
+    buildVersion: `api-server@${gitCommit.slice(0, 12)}${workspaceVersionSuffix}`,
+  };
+}
 
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
+  const { gitCommit, buildVersion } = resolveBuildIdentity();
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
@@ -31,6 +80,10 @@ async function buildAll() {
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
     logLevel: "info",
+    define: {
+      "process.env.BUILD_GIT_COMMIT": JSON.stringify(gitCommit),
+      "process.env.BUILD_VERSION": JSON.stringify(buildVersion),
+    },
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
     // Examples of unbundleable packages:

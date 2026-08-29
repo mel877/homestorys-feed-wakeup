@@ -46,7 +46,12 @@ import { computeInventory } from "../inventory/index";
 import { mapCategory } from "../categories/mapper";
 import { computeCustomLabels } from "./labels";
 import { determineBestsellerClass } from "../enrichment/bestseller";
-import { resolveMarket, resolveContent, resolvePricing } from "../markets/resolver";
+import {
+  buildShopifyProductUrl,
+  resolveMarket,
+  resolveContent,
+  resolvePricing,
+} from "../markets/resolver";
 import { selectGoogleImages, selectMetaImages } from "../images/classifier";
 import { computeQualityScore, computeExclusionReasons } from "../validation/quality";
 
@@ -275,8 +280,9 @@ export function buildCanonical(
   // A language alias must use its own storefront URL, not the source
   // commercial market's URL (for example Swiss French reuses CH pricing).
   const productUrl = market.pricing_market
-    ? `${marketBaseUrl}products/${localizedHandle}`
-    : pricing.productUrl ?? `${marketBaseUrl}products/${localizedHandle}`;
+    ? buildShopifyProductUrl(marketBaseUrl, localizedHandle, variant.shopifyGid)
+    : pricing.productUrl
+      ?? buildShopifyProductUrl(marketBaseUrl, localizedHandle, variant.shopifyGid);
 
   // ── Weight ────────────────────────────────────────────────────────────────
   const weightNorm = normaliseWeight(variant.weight, variant.weightUnit);

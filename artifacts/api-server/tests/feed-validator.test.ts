@@ -14,7 +14,7 @@ vi.mock("../src/lib/storage", () => ({
 }));
 
 import { validateGoogleFeed, validateMetaFeed } from "../src/validation/feed-validator";
-import { downloadFeedFile, listFeedFiles } from "../src/lib/storage";
+import { downloadFeedFile } from "../src/lib/storage";
 
 const mockDownload = downloadFeedFile as ReturnType<typeof vi.fn>;
 
@@ -72,8 +72,6 @@ const INVALID_META_COUNTRY_CSV_BAD_PRICE = [
   `uuid-2_FR,349 euros,,,in stock`,
 ].join("\n");
 
-const INVALID_META_CSV_MISSING_REQUIRED = INVALID_META_BASE_CSV_MISSING_IMAGE;
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("validateGoogleFeed", () => {
@@ -124,6 +122,54 @@ describe("validateGoogleFeed", () => {
     mockDownload.mockResolvedValue(Buffer.from(twoRowTsv, "utf-8"));
     const result = await validateGoogleFeed("feeds/google/google-fr-BE_FR.tsv");
     expect(result.rowCount).toBe(2);
+  });
+
+  it("rejects invalid UTF-8", async () => {
+    mockDownload.mockResolvedValue(Buffer.from([0xc3, 0x28]));
+    const result = await validateGoogleFeed("feeds/google/google-fr-BE_FR.tsv");
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ field: "encoding" }));
+  });
+
+  it("rejects duplicate product IDs", async () => {
+    const duplicate = VALID_GOOGLE_TSV + "\n" + VALID_GOOGLE_TSV.split("\n")[1];
+    mockDownload.mockResolvedValue(Buffer.from(duplicate, "utf-8"));
+    const result = await validateGoogleFeed("feeds/google/google-fr-BE_FR.tsv");
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ field: "id", message: expect.stringContaining("Duplicate") }));
+  });
+
+  it("blocks a Swiss Google feed containing EUR prices", async () => {
+    mockDownload.mockResolvedValue(Buffer.from(VALID_GOOGLE_TSV, "utf-8"));
+    const result = await validateGoogleFeed(
+      "feeds/google/google-de-CH_DE.tsv",
+      { expectedCurrency: "CHF" },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      field: "price",
+      message: expect.stringContaining("CHF"),
+    }));
+  });
+
+  it("checks sale price and shipping currency as part of the market gate", async () => {
+    const lines = VALID_GOOGLE_TSV.split("\n");
+    const headers = lines[0]!.split("\t");
+    const values = lines[1]!.split("\t");
+    values[headers.indexOf("price")] = "599.00 CHF";
+    values[headers.indexOf("sale_price")] = "499.00 EUR";
+    headers.push("shipping");
+    values.push("CH::Standard:10.00 EUR");
+    mockDownload.mockResolvedValue(Buffer.from([headers.join("\t"), values.join("\t")].join("\n")));
+
+    const result = await validateGoogleFeed(
+      "feeds/google/google-de-CH_DE.tsv",
+      { expectedCurrency: "CHF" },
+    );
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "sale_price" }),
+      expect.objectContaining({ field: "shipping" }),
+    ]));
   });
 });
 
@@ -214,6 +260,14 @@ describe("validateMetaFeed — multiline descriptions in language layer", () => 
     expect(result.rowCount).toBe(2);
     expect(result.valid).toBe(true);
   });
+
+  it("rejects duplicate Meta IDs", async () => {
+    const csvContent = VALID_META_LANGUAGE_CSV + "\n" + VALID_META_LANGUAGE_CSV.split("\n")[1];
+    mockDownload.mockResolvedValue(Buffer.from(csvContent, "utf-8"));
+    const result = await validateMetaFeed("feeds/meta/meta-language-fr.csv");
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ field: "id", message: expect.stringContaining("Duplicate") }));
+  });
 });
 
 describe("validateMetaFeed — country layer (meta-country-BE.csv)", () => {
@@ -232,6 +286,36 @@ describe("validateMetaFeed — country layer (meta-country-BE.csv)", () => {
     expect(result.valid).toBe(false);
     const priceErrors = result.errors.filter((e) => e.field === "price");
     expect(priceErrors.length).toBeGreaterThan(0);
+  });
+
+  it("blocks a Swiss Meta feed containing EUR prices", async () => {
+    mockDownload.mockResolvedValue(Buffer.from(VALID_META_COUNTRY_CSV, "utf-8"));
+    const result = await validateMetaFeed(
+      "feeds/meta/meta-country-CH.csv",
+      { expectedCurrency: "CHF" },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      field: "price",
+      message: expect.stringContaining("CHF"),
+    }));
+  });
+
+  it("checks Meta sale price and shipping currency as part of the market gate", async () => {
+    const csv = [
+      "id,price,sale_price,sale_price_effective_date,availability,shipping",
+      "uuid-1_FR,349.00 CHF,299.00 EUR,,in stock,CH::Standard:10.00 EUR",
+    ].join("\n");
+    mockDownload.mockResolvedValue(Buffer.from(csv));
+
+    const result = await validateMetaFeed(
+      "feeds/meta/meta-country-CH.csv",
+      { expectedCurrency: "CHF" },
+    );
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "sale_price" }),
+      expect.objectContaining({ field: "shipping" }),
+    ]));
   });
 
   it("uses meta-country schema for all country codes", async () => {

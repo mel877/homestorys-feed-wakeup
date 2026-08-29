@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { getBuildInfo } from "./lib/build-info";
 import { loadConfig } from "./config";
 import { startWebhookWorker } from "./jobs/webhook-worker";
 
@@ -49,8 +50,13 @@ try {
   const config = loadConfig();
   const marketCount = Object.keys(config.markets.markets).length;
   const languageCount = config.languages.languages.length;
+  const buildInfo = getBuildInfo(config);
   logger.info(
-    { markets: marketCount, languages: languageCount },
+    {
+      markets: marketCount,
+      languages: languageCount,
+      ...buildInfo,
+    },
     "Config loaded",
   );
 } catch (err) {

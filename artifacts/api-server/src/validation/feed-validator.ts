@@ -13,9 +13,7 @@
  */
 
 import { readFileSync } from "fs";
-import { resolve, join } from "path";
-import type { GoogleFeedRow } from "../exporters/google/mapper";
-import type { MetaBaseRow } from "../exporters/meta/mapper";
+import { resolve } from "path";
 import { downloadFeedFile, listFeedFiles } from "../lib/storage";
 import { logger as rootLogger } from "../lib/logger";
 
@@ -272,37 +270,6 @@ function parseCsv(content: string): Record<string, string>[] {
   return rows;
 }
 
-/** Minimal RFC-4180 CSV line parser (handles quoted fields with embedded commas). */
-function parseCsvLine(line: string): string[] {
-  const fields: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  let i = 0;
-
-  while (i < line.length) {
-    const ch = line[i]!;
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i += 2;
-        continue;
-      }
-      inQuotes = !inQuotes;
-    } else if (ch === "," && !inQuotes) {
-      fields.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-    i++;
-  }
-  fields.push(current);
-  return fields;
-}
-// NOTE: parseCsvLine is kept only for single-line use. The full CSV parser
-// (parseCsv) scans character-by-character so it never splits on newlines
-// inside quoted fields.
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export interface FeedValidationResult {
@@ -314,19 +281,99 @@ export interface FeedValidationResult {
   schema: string;
 }
 
+export interface FeedValidationOptions {
+  expectedCurrency?: string;
+}
+
+function decodeUtf8(buf: Buffer, storagePath: string): {
+  content: string;
+  errors: ValidationError[];
+} {
+  try {
+    return {
+      content: new TextDecoder("utf-8", { fatal: true }).decode(buf),
+      errors: [],
+    };
+  } catch {
+    return {
+      content: "",
+      errors: [{
+        row: 0,
+        field: "encoding",
+        message: "File is not valid UTF-8",
+        value: storagePath,
+      }],
+    };
+  }
+}
+
+function findDuplicateIds(rows: Record<string, string>[]): ValidationError[] {
+  const seen = new Set<string>();
+  const errors: ValidationError[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const id = rows[i]?.["id"]?.trim();
+    if (!id) continue;
+    if (seen.has(id)) {
+      errors.push({
+        row: i + 2,
+        field: "id",
+        message: `Duplicate ID "${id}"`,
+        value: id,
+      });
+    } else {
+      seen.add(id);
+    }
+  }
+  return errors;
+}
+
+function findUnexpectedCurrencies(
+  rows: Record<string, string>[],
+  expectedCurrency: string | undefined,
+): ValidationError[] {
+  if (!expectedCurrency) return [];
+
+  const errors: ValidationError[] = [];
+  const currencyFields = ["price", "sale_price", "shipping"];
+  for (let i = 0; i < rows.length; i++) {
+    for (const field of currencyFields) {
+      const value = rows[i]?.[field]?.trim();
+      if (!value) continue;
+      const currency = value.match(/\b([A-Z]{3})$/)?.[1];
+      if (currency && currency !== expectedCurrency) {
+        errors.push({
+          row: i + 2,
+          field,
+          message: `Expected currency ${expectedCurrency}, received ${currency}`,
+          value,
+        });
+      }
+    }
+  }
+  return errors;
+}
+
 /**
  * Validate a Google TSV feed file from App Storage.
  * Returns the validation result with all errors.
  */
-export async function validateGoogleFeed(storagePath: string): Promise<FeedValidationResult> {
+export async function validateGoogleFeed(
+  storagePath: string,
+  options: FeedValidationOptions = {},
+): Promise<FeedValidationResult> {
   const buf = await downloadFeedFile(storagePath);
   if (!buf) {
     return { file: storagePath, rowCount: 0, errorCount: 1, errors: [{ row: 0, field: "file", message: "File not found in storage", value: storagePath }], valid: false, schema: "google-product" };
   }
 
   const schema = loadSchema("google-product") as JsonSchemaNode;
-  const rows = parseTsv(buf.toString("utf-8"));
-  const allErrors: ValidationError[] = [];
+  const decoded = decodeUtf8(buf, storagePath);
+  const rows = decoded.errors.length ? [] : parseTsv(decoded.content);
+  const allErrors: ValidationError[] = [
+    ...decoded.errors,
+    ...findDuplicateIds(rows),
+    ...findUnexpectedCurrencies(rows, options.expectedCurrency),
+  ];
 
   for (let i = 0; i < rows.length; i++) {
     const errors = validateRow(rows[i]!, schema, i + 2); // +2 for 1-indexed + header row
@@ -352,7 +399,10 @@ export async function validateGoogleFeed(storagePath: string): Promise<FeedValid
  *   meta-country-*.csv    → meta-country schema
  *   anything else         → meta-product schema (full)
  */
-export async function validateMetaFeed(storagePath: string): Promise<FeedValidationResult> {
+export async function validateMetaFeed(
+  storagePath: string,
+  options: FeedValidationOptions = {},
+): Promise<FeedValidationResult> {
   const schemaName = detectMetaSchema(storagePath);
 
   const buf = await downloadFeedFile(storagePath);
@@ -361,8 +411,13 @@ export async function validateMetaFeed(storagePath: string): Promise<FeedValidat
   }
 
   const schema = loadSchema(schemaName) as JsonSchemaNode;
-  const rows = parseCsv(buf.toString("utf-8"));
-  const allErrors: ValidationError[] = [];
+  const decoded = decodeUtf8(buf, storagePath);
+  const rows = decoded.errors.length ? [] : parseCsv(decoded.content);
+  const allErrors: ValidationError[] = [
+    ...decoded.errors,
+    ...findDuplicateIds(rows),
+    ...findUnexpectedCurrencies(rows, options.expectedCurrency),
+  ];
 
   for (let i = 0; i < rows.length; i++) {
     const errors = validateRow(rows[i]!, schema, i + 2);

@@ -38,6 +38,21 @@ export interface ResolvedPricing {
   isEligible: boolean;
 }
 
+export function buildShopifyProductUrl(
+  baseUrl: string,
+  handle: string,
+  variantGid: string,
+): string {
+  const variantId = variantGid.split("/").pop();
+  if (!variantId) {
+    throw new Error(`Invalid Shopify variant GID: ${variantGid}`);
+  }
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  const url = new URL(`products/${handle}`, normalizedBase);
+  url.searchParams.set("variant", variantId);
+  return url.toString();
+}
+
 /**
  * Resolve market configuration for a market code.
  * Returns null if the market code is not configured.

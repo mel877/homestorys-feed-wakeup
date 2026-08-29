@@ -18,10 +18,13 @@
 import { Storage } from "@google-cloud/storage";
 import { createHash } from "crypto";
 import { Transform, type Readable } from "stream";
+import { pipeline } from "stream/promises";
+import { createGzip } from "zlib";
 import { logger as rootLogger } from "./logger";
 import { sendFeedBlockAlert, resolveAlertWebhookUrl } from "./alerting";
 
 const logger = rootLogger.child({ module: "feed-storage" });
+const LARGE_FEED_THRESHOLD_BYTES = 32 * 1024 * 1024;
 
 // ── GCS client (Replit sidecar auth) ─────────────────────────────────────────
 
@@ -148,10 +151,40 @@ export interface FeedFileReadStream {
   size: number | null;
 }
 
+export interface FeedFileMetadata {
+  size: number | null;
+  generation: string | null;
+  contentType: string | null;
+  updatedAt: string | null;
+}
+
 function isStorageNotFound(error: unknown): boolean {
   if (!error || typeof error !== "object" || !("code" in error)) return false;
   const code = (error as { code?: unknown }).code;
   return code === 404 || code === "404";
+}
+
+/**
+ * Read feed object metadata without downloading its body.
+ */
+export async function getFeedFileMetadata(
+  storagePath: string,
+): Promise<FeedFileMetadata | null> {
+  const file = getBucket().file(storagePath);
+
+  try {
+    const [metadata] = await file.getMetadata();
+    const parsedSize = Number(metadata.size);
+    return {
+      size: Number.isSafeInteger(parsedSize) && parsedSize >= 0 ? parsedSize : null,
+      generation: metadata.generation ? String(metadata.generation) : null,
+      contentType: metadata.contentType ? String(metadata.contentType) : null,
+      updatedAt: metadata.updated ? String(metadata.updated) : null,
+    };
+  } catch (error) {
+    if (isStorageNotFound(error)) return null;
+    throw error;
+  }
 }
 
 /**
@@ -163,17 +196,20 @@ function isStorageNotFound(error: unknown): boolean {
  */
 export async function openFeedFileReadStream(
   storagePath: string,
+  knownMetadata?: FeedFileMetadata,
 ): Promise<FeedFileReadStream | null> {
   const file = getBucket().file(storagePath);
 
   try {
-    const [metadata] = await file.getMetadata();
+    const metadata = knownMetadata ?? (await file.getMetadata())[0];
     const parsedSize = Number(metadata.size);
     const readFile = metadata.generation
       ? getBucket().file(storagePath, { generation: metadata.generation })
       : file;
     return {
-      stream: readFile.createReadStream(),
+      stream: storagePath.endsWith(".gz")
+        ? readFile.createReadStream({ decompress: false })
+        : readFile.createReadStream(),
       size: Number.isSafeInteger(parsedSize) && parsedSize >= 0 ? parsedSize : null,
     };
   } catch (error) {
@@ -220,6 +256,43 @@ export async function downloadManifest(feedPath: string): Promise<FeedManifest |
 }
 
 // ── Atomic publish ─────────────────────────────────────────────────────────────
+
+export async function createCompressedDerivativeIfLarge(
+  storagePath: string,
+): Promise<string | null> {
+  const bucket = getBucket();
+  const sourceFile = bucket.file(storagePath);
+  const [metadata] = await sourceFile.getMetadata();
+  const size = Number(metadata.size);
+  if (!Number.isSafeInteger(size) || size <= LARGE_FEED_THRESHOLD_BYTES) {
+    return null;
+  }
+
+  const gzipPath = compressedFeedPath(storagePath);
+  const pinnedSource = metadata.generation
+    ? bucket.file(storagePath, { generation: metadata.generation })
+    : sourceFile;
+  const destination = bucket.file(gzipPath);
+  const output = destination.createWriteStream({
+    metadata: {
+      contentEncoding: "gzip",
+      contentType: metadata.contentType ?? "application/octet-stream",
+      metadata: {
+        sourceGeneration: metadata.generation ? String(metadata.generation) : "",
+        sourceSize: String(size),
+      },
+    },
+    resumable: false,
+  });
+
+  await pipeline(
+    pinnedSource.createReadStream(),
+    createGzip({ level: 6 }),
+    output,
+  );
+  logger.info({ storagePath, gzipPath, sourceBytes: size }, "Large feed compressed");
+  return gzipPath;
+}
 
 /**
  * Atomic feed publish gate.
@@ -277,8 +350,17 @@ export async function atomicPublish(params: {
     }
   }
 
-  // Copy versioned → current (overwrites)
+  // Prepare the compressed representation before touching the current pointer.
+  // A compression/storage error therefore retains the previous valid snapshot.
   const bucket = getBucket();
+  const compressedVersioned = await createCompressedDerivativeIfLarge(versionedPath);
+  if (compressedVersioned) {
+    await bucket
+      .file(compressedVersioned)
+      .copy(bucket.file(compressedFeedPath(currentPath)));
+  }
+
+  // Copy versioned → current (overwrites)
   await bucket.file(versionedPath).copy(bucket.file(currentPath));
   await bucket.file(`${versionedPath}.manifest.json`).copy(bucket.file(`${currentPath}.manifest.json`));
 
@@ -307,6 +389,10 @@ export function metaFeedPath(suffix: string): string {
 /** Stable public language feed; overwritten atomically after every export. */
 export function metaLanguageFeedPath(language: string): string {
   return `feeds/meta/meta-${language}.csv`;
+}
+
+export function compressedFeedPath(feedPath: string): string {
+  return `${feedPath}.gz`;
 }
 
 export function versionedPath(basePath: string, versionTs: string): string {

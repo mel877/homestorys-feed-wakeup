@@ -11,17 +11,21 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PassThrough, Readable } from "stream";
 
 // ── GCS mock ──────────────────────────────────────────────────────────────────
 //
 // atomicPublish calls getBucket() → storageClient.bucket().
 // Use vi.hoisted() so the variables are available inside the vi.mock factory.
 
-const { mockCopy, mockFile, mockBucket } = vi.hoisted(() => {
+const { mockCopy, mockFile, mockBucket, mockGetMetadata, mockCreateReadStream, mockCreateWriteStream } = vi.hoisted(() => {
   const mockCopy = vi.fn().mockResolvedValue(undefined);
-  const mockFile = vi.fn().mockReturnValue({ copy: mockCopy });
+  const mockGetMetadata = vi.fn();
+  const mockCreateReadStream = vi.fn();
+  const mockCreateWriteStream = vi.fn();
+  const mockFile = vi.fn();
   const mockBucket = vi.fn().mockReturnValue({ file: mockFile });
-  return { mockCopy, mockFile, mockBucket };
+  return { mockCopy, mockFile, mockBucket, mockGetMetadata, mockCreateReadStream, mockCreateWriteStream };
 });
 
 vi.mock("@google-cloud/storage", () => ({
@@ -62,7 +66,23 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Re-wire the file mock after clearAllMocks resets mockCopy's implementation
   mockCopy.mockResolvedValue(undefined);
-  mockFile.mockReturnValue({ copy: mockCopy });
+  mockGetMetadata.mockResolvedValue([{
+    size: "1024",
+    generation: "version-generation",
+    contentType: "text/csv",
+  }]);
+  mockCreateReadStream.mockReturnValue(Readable.from([Buffer.from("feed")]));
+  mockCreateWriteStream.mockImplementation(() => {
+    const stream = new PassThrough();
+    stream.resume();
+    return stream;
+  });
+  mockFile.mockReturnValue({
+    copy: mockCopy,
+    getMetadata: mockGetMetadata,
+    createReadStream: mockCreateReadStream,
+    createWriteStream: mockCreateWriteStream,
+  });
   mockBucket.mockReturnValue({ file: mockFile });
 });
 
@@ -193,5 +213,31 @@ describe("atomicPublish — GCS copy behaviour", () => {
 
     expect(fileArgs).toContain(versioned);
     expect(fileArgs).toContain(`${versioned}.manifest.json`);
+  });
+
+  it("creates and copies a gzip derivative before publishing a large feed", async () => {
+    mockGetMetadata.mockResolvedValue([{
+      size: String(64 * 1024 * 1024),
+      generation: "version-generation",
+      contentType: "text/csv",
+    }]);
+
+    await atomicPublish({
+      ...BASE_PARAMS,
+      manifest: makeManifest(100),
+      previousItemCount: 100,
+      maxDropPct: 10,
+    });
+
+    const fileArgs = mockFile.mock.calls.map((c) => c[0] as string);
+    expect(fileArgs).toContain(`${BASE_PARAMS.versionedPath}.gz`);
+    expect(fileArgs).toContain(`${BASE_PARAMS.currentPath}.gz`);
+    expect(mockCreateWriteStream).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        contentEncoding: "gzip",
+        contentType: "text/csv",
+      }),
+      resumable: false,
+    }));
   });
 });
