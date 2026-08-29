@@ -1,0 +1,28 @@
+name: Wake durable feed pump
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  feed-pump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Advance one durable feed slice
+        env:
+          FEED_PUMP_URL: ${{ vars.FEED_PUMP_URL }}
+          INTERNAL_API_SECRET: ${{ secrets.INTERNAL_API_SECRET }}
+        run: |
+          set -eu
+          test -n "$FEED_PUMP_URL"
+          test -n "$INTERNAL_API_SECRET"
+          curl --fail-with-body --silent --show-error \
+            --max-time 45 \
+            --retry 1 \
+            --retry-delay 2 \
+            -X POST "$FEED_PUMP_URL" \
+            -H "Authorization: Bearer $INTERNAL_API_SECRET" \
+            -H "Content-Type: application/json" \
+            --data '{"budgetMs":30000,"maxSteps":4}'

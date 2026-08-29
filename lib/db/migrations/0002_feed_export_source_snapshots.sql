@@ -54,20 +54,18 @@ END $$;
 CREATE INDEX IF NOT EXISTS "feed_export_source_rows_batch_idx"
  ON "feed_export_source_rows" ("source_batch_id","market_code");
 --> statement-breakpoint
-WITH ranked_current_snapshots AS (
-  SELECT
-    "id",
-    row_number() OVER (
-      PARTITION BY "channel", coalesce("language", ''), coalesce("market_code", '')
-      ORDER BY "generated_at" DESC, "created_at" DESC, "id" DESC
-    ) AS current_rank
-  FROM "feed_snapshots"
-  WHERE "is_current" = true
-)
-UPDATE "feed_snapshots" AS snapshots
-SET "is_current" = false
-FROM ranked_current_snapshots AS ranked
-WHERE snapshots."id" = ranked."id" AND ranked.current_rank > 1;
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM "feed_snapshots"
+    WHERE "is_current" = true
+    GROUP BY "channel", coalesce("language", ''), coalesce("market_code", '')
+    HAVING count(*) > 1
+  ) THEN
+    RAISE EXCEPTION
+      'Cannot create current snapshot uniqueness index: duplicate current snapshots exist';
+  END IF;
+END $$;
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "feed_snapshots_one_current_target_unique"
  ON "feed_snapshots" ("channel", coalesce("language", ''), coalesce("market_code", ''))

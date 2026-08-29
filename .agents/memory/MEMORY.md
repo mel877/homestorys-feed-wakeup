@@ -21,3 +21,4 @@
 - [Deployment secret visibility](deployment-secret-visibility.md) — Deployment secrets may authenticate the live app while remaining unavailable to the agent's local execution environment.
 - [Production export proxy timeout](production-export-proxy-timeout.md) — public dashboard requests abort near 300s while export may continue; never retry without checking the persisted run.
 - [Durable feed pump boundaries](durable-feed-pump-boundaries.md) — build deterministic versioned parts in bounded calls; only a complete-file barrier may validate and publish.
+- [Production migration baseline](production-migration-baseline.md) — production has no Drizzle journal; use a reviewed Publish schema diff until migration history is deliberately baselined.

@@ -2,10 +2,11 @@ import {
   db,
   pool,
   feedExportStepsTable,
+  syncRunsTable,
   type FeedExportStep,
   type InsertFeedExportStep,
 } from "@workspace/db";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import {
   claimStep,
   completeStep,
@@ -101,6 +102,55 @@ export async function ensureFeedExportSteps(
         feedExportStepsTable.batchIndex,
       ],
     });
+}
+
+export interface DurableFeedRunPlanInput {
+  runId: string;
+  metadata: Record<string, unknown>;
+  specs: FeedExportStepSpec[];
+}
+
+export async function persistDurableFeedRunPlan(
+  input: DurableFeedRunPlanInput,
+): Promise<{ status: "planned" | "conflict"; insertedSteps: number }> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      SELECT pg_advisory_xact_lock(hashtext('durable-feed-plan'))
+    `);
+
+    const [active] = await tx
+      .select({ id: feedExportStepsTable.id })
+      .from(feedExportStepsTable)
+      .where(inArray(feedExportStepsTable.status, ["pending", "running"]))
+      .limit(1);
+    if (active) {
+      return { status: "conflict", insertedSteps: 0 };
+    }
+
+    await tx.insert(syncRunsTable).values({
+      id: input.runId,
+      runType: "export",
+      status: "running",
+      metadata: input.metadata,
+    });
+
+    if (input.specs.length > 0) {
+      await tx.insert(feedExportStepsTable).values(input.specs.map((spec) => ({
+        syncRunId: spec.syncRunId,
+        channel: spec.channel,
+        stage: spec.stage,
+        marketCode: spec.marketCode ?? "",
+        language: spec.language ?? "",
+        batchIndex: spec.batchIndex,
+        cursor: spec.cursor ?? null,
+        checkpoint: spec.checkpoint ?? null,
+        status: "pending",
+        attempts: 0,
+        availableAt: new Date(),
+      })));
+    }
+    return { status: "planned", insertedSteps: input.specs.length };
+  });
 }
 
 /**
