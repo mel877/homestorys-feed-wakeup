@@ -1,0 +1,49 @@
+Parfait. Continue avec l’étape suivante.
+
+Implémente maintenant les batches déterministes Google/Meta et les barrières de finalisation, en réutilisant au maximum les mappers, validateurs, règles métier et mécanismes de publication existants.
+
+Contraintes impératives :
+
+ne lance aucun Full Sync réel ;
+ne lance aucun export Google/Meta complet ;
+n’applique pas encore la migration en production ;
+ne modifie aucun snapshot actuel ;
+ne change aucune URL publique ;
+ne modifie aucune exclusion ;
+conserve strictement les règles CHF Suisse ;
+conserve sale_price < price et devise identique ;
+conserve le guardrail actuel sans modifier son seuil ;
+conserve le fallback vers le dernier snapshot valide.
+
+Pour Google et Meta :
+
+définir des batches déterministes basés sur un ordre stable ;
+chaque batch doit être idempotent et rejouable ;
+persister son checkpoint et son résultat dans feed_export_steps ;
+éviter tout état critique uniquement en mémoire ;
+ne finaliser un fichier que lorsque tous ses batches obligatoires sont terminés ;
+empêcher toute publication partielle ;
+séparer clairement :
+production des données,
+assemblage/finalisation du fichier,
+validation,
+publication atomique.
+
+La barrière de finalisation doit garantir qu’un snapshot ne peut devenir courant que si tous les batches requis pour le marché/canal concerné sont complets et valides.
+
+Si une étape est rejouée après interruption, elle ne doit produire ni doublon ni snapshot incohérent.
+
+Travaille d’abord sur Google, puis Meta, ou sur une abstraction commune si cela réduit réellement le risque sans complexifier inutilement l’implémentation.
+
+À la fin, donne-moi :
+
+les fichiers modifiés ;
+les nouvelles fonctions/abstractions ajoutées ;
+comment les batches sont découpés ;
+comment la finalisation détecte qu’un flux est complet ;
+comment les retries restent idempotents ;
+les tests ajoutés et leur résultat ;
+le nombre total de tests passés ;
+ce qui reste avant l’ajout de /api/internal/feed-pump.
+
+Ne passe pas encore à l’endpoint feed-pump tant que cette couche n’est pas complètement testée.
