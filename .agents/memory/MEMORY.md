@@ -18,3 +18,4 @@
 - [Large feed HTTP streaming](large-feed-http-streaming.md) — pin object generation and stream with backpressure; omit Content-Length above 32 MiB on the published frontend.
 - [Full Sync terminal status](full-sync-terminal-status.md) — keep Full Sync running until locked Google/Meta export provenance is verified; stale current snapshots must produce degraded, never completed.
 - [Market price freshness](market-price-freshness.md) — market_variants.updated_at is also touched by inventory availability updates, so it cannot prove when pricing was refreshed.
+- [Deployment secret visibility](deployment-secret-visibility.md) — Deployment secrets may authenticate the live app while remaining unavailable to the agent's local execution environment.
