@@ -5,7 +5,7 @@ import { ListSyncRunsQueryParams, GetSyncRunParams, TriggerSyncBody } from "@wor
 import { eq, desc, and, sql } from "drizzle-orm";
 import { logger } from "../../lib/logger";
 import { tryAcquireLock, releaseLock } from "../../jobs/scheduler";
-import type { SyncRunType } from "../../shopify/sync-run-tracker";
+import type { SyncRunTracker as SyncRunTrackerType, SyncRunType } from "../../shopify/sync-run-tracker";
 
 /** Map dashboard runType to scheduler job name and SyncRunType. */
 const JOB_MAP: Record<string, { jobName: string; runType: SyncRunType }> = {
@@ -138,6 +138,126 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
     return;
   }
 
+  if (runType === "export") {
+    let runId: string | null = null;
+    let tracker: SyncRunTrackerType | null = null;
+    let finalResponse: {
+      statusCode: number;
+      body: Record<string, unknown>;
+    };
+
+    try {
+      logger.info({ job: job.jobName }, "Dashboard trigger: job starting");
+      const { runGoogleExport } = await import("../../exporters/google/runner");
+      const { runMetaExportInFreshProcess } = await import("../../exporters/meta/fresh-process");
+      const { SyncRunTracker } = await import("../../shopify/sync-run-tracker");
+      tracker = new SyncRunTracker();
+      runId = await tracker.start("export", { trigger: "dashboard" });
+
+      let googleResult: unknown = null;
+      const channelErrors: Record<string, string> = {};
+
+      try {
+        googleResult = await runGoogleExport({ syncRunId: runId });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        channelErrors.google = message;
+        await tracker.logError({
+          errorType: "export_failed",
+          entityType: "channel",
+          entityId: "google",
+          message,
+        });
+        logger.error({ err, runId }, "Dashboard trigger: Google export failed");
+      }
+
+      try {
+        await runMetaExportInFreshProcess({ syncRunId: runId });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        channelErrors.meta = message;
+        await tracker.logError({
+          errorType: "export_failed",
+          entityType: "channel",
+          entityId: "meta",
+          message,
+        });
+        logger.error({ err, runId }, "Dashboard trigger: Meta export failed");
+      }
+
+      const result = {
+        google: googleResult,
+        meta: { completed: !channelErrors.meta },
+      };
+      const errorMessages = Object.entries(channelErrors)
+        .map(([channel, message]) => `${channel}: ${message}`)
+        .join("; ");
+
+      if (errorMessages) {
+        await tracker.fail(new Error(errorMessages));
+        finalResponse = {
+          statusCode: 500,
+          body: {
+            runType,
+            status: "failed",
+            runId,
+            error: errorMessages,
+            errors: channelErrors,
+            result,
+          },
+        };
+      } else {
+        await tracker.complete();
+        finalResponse = {
+          statusCode: 200,
+          body: {
+            runType,
+            status: "completed",
+            runId,
+            result,
+          },
+        };
+      }
+    } catch (err: unknown) {
+      const cause = err instanceof Error ? err.message : String(err);
+      if (tracker && runId) {
+        try {
+          await tracker.fail(err);
+        } catch (trackerError: unknown) {
+          logger.error(
+            { err: trackerError, runId },
+            "Dashboard trigger: failed to mark export run as failed",
+          );
+        }
+      }
+      logger.error({ err, runType, job: job.jobName, runId }, "Dashboard trigger: export failed");
+      finalResponse = {
+        statusCode: 500,
+        body: {
+          runType,
+          status: "failed",
+          runId,
+          error: cause,
+        },
+      };
+    } finally {
+      releaseLock(job.jobName);
+      const capturedRunId = runId;
+      try {
+        const { checkAlerts } = await import("../../observability/alerts");
+        await checkAlerts(capturedRunId);
+      } catch (alertErr: unknown) {
+        logger.error(
+          { err: alertErr, runId: capturedRunId },
+          "Dashboard trigger: post-run alert check failed",
+        );
+      }
+    }
+
+    res.status(finalResponse.statusCode).json(finalResponse.body);
+    return;
+  }
+
   // Lock acquired — respond 202 immediately and run the job in the background.
   // The background job owns the already-held lock and MUST release it in finally.
   res.status(202).json({ runType, status: "dispatched" });
@@ -165,35 +285,6 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
         } else if (runType === "recommendations") {
           const { runRecommendationsSync } = await import("../../jobs/sync-recommendations");
           runId = await runRecommendationsSync();
-        } else if (runType === "export") {
-          const { runGoogleExport } = await import("../../exporters/google/runner");
-          const { runMetaExportInFreshProcess } = await import("../../exporters/meta/fresh-process");
-          const { SyncRunTracker } = await import("../../shopify/sync-run-tracker");
-          const tracker = new SyncRunTracker();
-          runId = await tracker.start("export", { trigger: "dashboard" });
-          try {
-            await runGoogleExport({ syncRunId: runId });
-          } catch (err: unknown) {
-            await tracker.logError({
-              errorType: "export_failed",
-              entityType: "channel",
-              entityId: "google",
-              message: err instanceof Error ? err.message : String(err),
-            });
-            logger.error({ err, runId }, "Dashboard trigger: Google export failed");
-          }
-          try {
-            await runMetaExportInFreshProcess({ syncRunId: runId });
-          } catch (err: unknown) {
-            await tracker.logError({
-              errorType: "export_failed",
-              entityType: "channel",
-              entityId: "meta",
-              message: err instanceof Error ? err.message : String(err),
-            });
-            logger.error({ err, runId }, "Dashboard trigger: Meta export failed");
-          }
-          await tracker.complete();
         } else if (runType === "showroom") {
           const { runShowroomExport } = await import("../../exporters/showroom/runner");
           const { SyncRunTracker } = await import("../../shopify/sync-run-tracker");
