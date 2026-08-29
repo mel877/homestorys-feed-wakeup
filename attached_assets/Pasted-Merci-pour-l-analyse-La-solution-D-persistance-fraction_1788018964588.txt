@@ -1,0 +1,41 @@
+Merci pour l'analyse.
+
+La solution D — persistance + fractionnement + reprise — me convient en principe.
+
+Mon objectif reste cependant impératif : obtenir des flux Google et Meta fonctionnels, automatiquement actualisés et prêts à l'emploi, sans Reserved VM et sans coût supplémentaire par rapport à notre offre Replit actuelle.
+
+Avant toute modification du code, vérifie précisément notre environnement Replit actuel et réponds à ce dernier point :
+
+Peut-on mettre en œuvre cette architecture avec notre Autoscale actuel sans ajouter de Scheduled Deployment payant ni aucun autre service entraînant un coût supplémentaire ?
+
+Je n'ai pas besoin que les flux soient reconstruits à une heure précise.
+
+Il est acceptable que les mises à jour soient déclenchées par les webhooks Shopify et qu'un traitement interrompu reprenne au prochain réveil de l'application, à condition que :
+
+les URLs publiques Google et Meta restent toujours disponibles ;
+elles servent toujours le dernier snapshot complètement valide ;
+les modifications Shopify finissent automatiquement par être intégrées ;
+aucun bouton Export manuel ne soit nécessaire dans le dashboard ;
+aucun traitement ne puisse rester définitivement bloqué après un redémarrage Autoscale ;
+Google Merchant Center et Meta Commerce Manager puissent récupérer les URLs automatiquement ;
+aucune Reserved VM, nouvelle base ou infrastructure externe ne soit nécessaire.
+
+Vérifie également si les requêtes périodiques de Google Merchant Center et Meta Commerce Manager vers les URLs publiques peuvent réveiller Autoscale et permettre opportunément la reprise des jobs, sans que la génération du feed dépende de la durée de cette requête.
+
+Si les webhooks Shopify + réveil Autoscale + reprise persistante suffisent pour garantir une actualisation éventuelle fiable, je préfère cette solution et je ne souhaite pas ajouter de Scheduled Deployment.
+
+En revanche, si tu identifies un scénario concret dans lequel un job pourrait rester définitivement bloqué sans Scheduled Deployment ou autre déclencheur externe, explique-moi précisément ce scénario avant toute implémentation.
+
+Ne modifie encore aucun fichier.
+Ne crée aucune tâche.
+Ne lance aucun Full Sync ou génération.
+
+Réponds simplement avec :
+
+OPTION 1 — POSSIBLE SANS COÛT SUPPLÉMENTAIRE
+
+ou
+
+OPTION 2 — UN MÉCANISME PAYANT EST NÉCESSAIRE
+
+puis explique brièvement pourquoi.
