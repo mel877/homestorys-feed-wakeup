@@ -26,6 +26,7 @@ import { tryAcquireLock, releaseLock } from "../jobs/scheduler";
 import { SyncRunTracker } from "../shopify/sync-run-tracker";
 import { SwissPriceValidationError } from "../shopify/swiss-price-repair";
 import { tryAcquireMarketPriceWriteLock } from "../shopify/market-price-write-lock";
+import feedPumpRouter from "./feed-pump";
 
 const SWISS_PRICE_REPAIR_JOB_NAME = "swiss-price-repair";
 const SWISS_PRICE_REPAIR_OPERATION = "repair:swiss-prices";
@@ -91,6 +92,7 @@ const router: IRouter = Router();
 
 // All internal routes require INTERNAL_API_SECRET
 router.use(requireInternalAuth);
+router.use(feedPumpRouter);
 
 // ── Sync trigger routes ────────────────────────────────────────────────────────
 

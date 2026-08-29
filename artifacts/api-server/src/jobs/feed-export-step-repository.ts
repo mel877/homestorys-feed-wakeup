@@ -117,18 +117,46 @@ export async function claimNextFeedExportStep(
     const result = await tx.execute(sql`
       WITH candidate AS (
         SELECT id
-        FROM feed_export_steps
+        FROM feed_export_steps AS candidate_step
         WHERE
-          (
-            status = 'pending'
-            AND (available_at IS NULL OR available_at <= ${now})
+          candidate_step.stage IN ('build', 'finalize')
+          AND (
+            (
+              candidate_step.status = 'pending'
+              AND (
+                candidate_step.available_at IS NULL
+                OR candidate_step.available_at <= ${now}
+              )
+            )
+            OR (
+              candidate_step.status = 'running'
+              AND candidate_step.lease_expires_at IS NOT NULL
+              AND candidate_step.lease_expires_at <= ${now}
+            )
           )
-          OR (
-            status = 'running'
-            AND lease_expires_at IS NOT NULL
-            AND lease_expires_at <= ${now}
+          AND (
+            candidate_step.stage <> 'finalize'
+            OR NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements_text(
+                candidate_step.checkpoint->'requiredBatchIndexes'
+              ) AS required(batch_index)
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM feed_export_steps AS build_step
+                WHERE build_step.sync_run_id = candidate_step.sync_run_id
+                  AND build_step.channel = candidate_step.channel
+                  AND build_step.stage = 'build'
+                  AND build_step.market_code = candidate_step.market_code
+                  AND build_step.language = candidate_step.language
+                  AND build_step.batch_index = required.batch_index::integer
+                  AND build_step.checkpoint->>'fileKey'
+                    = candidate_step.checkpoint->>'fileKey'
+                  AND build_step.status = 'completed'
+              )
+            )
           )
-        ORDER BY updated_at ASC, created_at ASC
+        ORDER BY candidate_step.updated_at ASC, candidate_step.created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       )
@@ -221,13 +249,13 @@ export async function failFeedExportStep(
   workerId: string,
   error: unknown,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
-): Promise<boolean> {
+): Promise<"retry" | "failed" | "conflict"> {
   const [current] = await db
     .select()
     .from(feedExportStepsTable)
     .where(eq(feedExportStepsTable.id, stepId))
     .limit(1);
-  if (!current) return false;
+  if (!current) return "conflict";
   const next = failStep(
     toState(current),
     workerId,
@@ -245,6 +273,33 @@ export async function failFeedExportStep(
       completedAt: null,
       lastError: next.lastError,
       updatedAt: new Date(),
+    })
+    .where(and(
+      eq(feedExportStepsTable.id, stepId),
+      eq(feedExportStepsTable.status, "running"),
+      eq(feedExportStepsTable.leaseOwner, workerId),
+    ))
+    .returning({ id: feedExportStepsTable.id });
+  if (rows.length !== 1) return "conflict";
+  return next.status === "failed" ? "failed" : "retry";
+}
+
+export async function deferFeedExportStep(
+  stepId: string,
+  workerId: string,
+  delayMs = 1_000,
+): Promise<boolean> {
+  const now = new Date();
+  const rows = await db
+    .update(feedExportStepsTable)
+    .set({
+      status: "pending",
+      attempts: sql`GREATEST(${feedExportStepsTable.attempts} - 1, 0)`,
+      availableAt: new Date(now.getTime() + delayMs),
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastError: null,
+      updatedAt: now,
     })
     .where(and(
       eq(feedExportStepsTable.id, stepId),
