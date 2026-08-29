@@ -152,82 +152,119 @@ router.post("/repair/swiss-prices", async (req, res): Promise<void> => {
       authorization: apply ? "explicit-confirmation" : "read-only",
     });
   } catch (error) {
+    let releaseError: unknown;
     try {
       await marketPriceLease.release();
+    } catch (caughtReleaseError) {
+      releaseError = caughtReleaseError;
+      req.log.error(
+        { err: caughtReleaseError },
+        "Failed to release Swiss price repair database lock after run creation failure",
+      );
     } finally {
       releaseLock(SWISS_PRICE_REPAIR_JOB_NAME);
     }
     req.log.error({ err: error }, "Failed to create Swiss price repair run");
-    res.status(500).json({ error: "Could not create Swiss price repair run" });
+    res.status(500).json({
+      error: releaseError
+        ? "Could not create Swiss price repair run; PostgreSQL lock release also failed"
+        : "Could not create Swiss price repair run",
+    });
     return;
   }
 
-  res.status(202).json({
-    operation: SWISS_PRICE_REPAIR_OPERATION,
-    mode: apply ? "apply" : "preview",
-    status: "started",
-    runId,
-    report: `/api/internal/runs/${encodeURIComponent(runId)}`,
-  });
+  const mode = apply ? "apply" : "preview";
+  let finalResponse: {
+    statusCode: number;
+    body: Record<string, unknown>;
+  };
+  try {
+    const { loadConfig } = await import("../config");
+    const { getShopifyClient } = await import("../shopify/client");
+    const { runSwissPriceRepair } = await import("../shopify/swiss-price-repair");
+    const report = await runSwissPriceRepair({
+      config: loadConfig(),
+      client: getShopifyClient(),
+      apply,
+    });
 
-  setImmediate(() => {
-    const runBackground = async (): Promise<void> => {
-      try {
-        const { loadConfig } = await import("../config");
-        const { getShopifyClient } = await import("../shopify/client");
-        const { runSwissPriceRepair } = await import("../shopify/swiss-price-repair");
-        const report = await runSwissPriceRepair({
-          config: loadConfig(),
-          client: getShopifyClient(),
-          apply,
-        });
-
-        await mergeSwissRepairMetadata(runId, {
-          report,
-          reportStatus: "completed",
-        });
-        await tracker.complete();
-        logger.info(
-          { runId, mode: apply ? "apply" : "preview", targetedVariants: report.targetedVariants },
-          "Swiss price repair completed",
-        );
-      } catch (error) {
-        // Validation errors are persisted in full, including every issue, so a
-        // failed apply can be audited without rerunning Shopify or the repair.
-        const validation = error instanceof SwissPriceValidationError
-          ? {
-              status: "aborted-before-write",
-              issueCount: error.issues.length,
-              issues: error.issues,
-              noCurrencyConversionPerformed: true,
-            }
-          : undefined;
-        try {
-          await tracker.fail(error);
-          await mergeSwissRepairMetadata(runId, {
-            ...(validation ? { validation } : {}),
-            reportStatus: validation ? "validation-failed" : "failed",
-          });
-        } catch (recordingError) {
-          req.log.error(
-            { err: recordingError, runId },
-            "Failed to persist Swiss price repair failure report",
-          );
-        }
-        req.log.error({ err: error, runId }, "Swiss price repair failed");
-      } finally {
-        try {
-          await marketPriceLease.release();
-        } finally {
-          releaseLock(SWISS_PRICE_REPAIR_JOB_NAME);
-        }
-      }
-    };
-
-    runBackground().catch((error) =>
-      req.log.error({ err: error, runId }, "Unexpected Swiss price repair failure"),
+    await mergeSwissRepairMetadata(runId, {
+      report,
+      reportStatus: "completed",
+    });
+    await tracker.complete();
+    logger.info(
+      { runId, mode, targetedVariants: report.targetedVariants },
+      "Swiss price repair completed",
     );
-  });
+    finalResponse = {
+      statusCode: 200,
+      body: {
+        operation: SWISS_PRICE_REPAIR_OPERATION,
+        mode,
+        status: "completed",
+        runId,
+        report,
+      },
+    };
+  } catch (error) {
+    // Validation errors are persisted in full, including every issue, so a
+    // failed apply can be audited without rerunning Shopify or the repair.
+    const validation = error instanceof SwissPriceValidationError
+      ? {
+          status: "aborted-before-write",
+          issueCount: error.issues.length,
+          issues: error.issues,
+          noCurrencyConversionPerformed: true,
+        }
+      : undefined;
+    try {
+      await tracker.fail(error);
+      await mergeSwissRepairMetadata(runId, {
+        ...(validation ? { validation } : {}),
+        reportStatus: validation ? "validation-failed" : "failed",
+      });
+    } catch (recordingError) {
+      req.log.error(
+        { err: recordingError, runId },
+        "Failed to persist Swiss price repair failure report",
+      );
+    }
+    req.log.error({ err: error, runId }, "Swiss price repair failed");
+    finalResponse = {
+      statusCode: 500,
+      body: {
+        operation: SWISS_PRICE_REPAIR_OPERATION,
+        mode,
+        status: "failed",
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+        ...(validation ? { validation } : {}),
+      },
+    };
+  } finally {
+    try {
+      await marketPriceLease.release();
+    } catch (releaseError) {
+      req.log.error(
+        { err: releaseError, runId },
+        "Failed to release Swiss price repair database lock",
+      );
+      finalResponse = {
+        statusCode: 500,
+        body: {
+          operation: SWISS_PRICE_REPAIR_OPERATION,
+          mode,
+          status: "failed",
+          runId,
+          error: "Swiss price repair finished but PostgreSQL lock release failed",
+        },
+      };
+    } finally {
+      releaseLock(SWISS_PRICE_REPAIR_JOB_NAME);
+    }
+  }
+  res.status(finalResponse.statusCode).json(finalResponse.body);
 });
 
 /**

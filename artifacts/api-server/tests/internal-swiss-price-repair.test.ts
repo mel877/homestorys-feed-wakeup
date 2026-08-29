@@ -147,6 +147,7 @@ beforeEach(() => {
   mockTryAcquireMarketPriceWriteLock.mockResolvedValue({
     release: mockMarketPriceLeaseRelease,
   });
+  mockMarketPriceLeaseRelease.mockResolvedValue(undefined);
   mockTrackerStart.mockResolvedValue("00000000-0000-4000-8000-000000000001");
   mockRunSwissPriceRepair.mockResolvedValue({
     dryRun: true,
@@ -253,19 +254,24 @@ describe("POST /api/internal/repair/swiss-prices", () => {
       .set(auth)
       .send({});
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
       operation: "repair:swiss-prices",
       mode: "preview",
+      status: "completed",
       runId: "00000000-0000-4000-8000-000000000001",
+      report: {
+        dryRun: true,
+        targetedVariants: 1,
+        correctedVariants: 0,
+        shopifyApiCalls: 1,
+      },
     });
 
-    await vi.waitFor(() => {
-      expect(mockRunSwissPriceRepair).toHaveBeenCalledWith({
-        config: {},
-        client: {},
-        apply: false,
-      });
+    expect(mockRunSwissPriceRepair).toHaveBeenCalledWith({
+      config: {},
+      client: {},
+      apply: false,
     });
     expect(mockTrackerStart).toHaveBeenCalledWith(
       "swiss-price-repair",
@@ -280,6 +286,118 @@ describe("POST /api/internal/repair/swiss-prices", () => {
     expect(mockMarketPriceLeaseRelease).toHaveBeenCalled();
   });
 
+  it("keeps the HTTP request open until the final preview report is ready", async () => {
+    let resolveRepair!: (report: unknown) => void;
+    const report = {
+      dryRun: true,
+      targetedVariants: 2,
+      correctedVariants: 0,
+      shopifyApiCalls: 2,
+    };
+    mockRunSwissPriceRepair.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveRepair = resolve;
+      }),
+    );
+
+    const responsePromise = request(app)
+      .post("/api/internal/repair/swiss-prices")
+      .set(auth)
+      .send({})
+      .then((response) => response);
+
+    await vi.waitFor(() => {
+      expect(mockRunSwissPriceRepair).toHaveBeenCalledWith({
+        config: {},
+        client: {},
+        apply: false,
+      });
+    });
+    expect(mockTrackerComplete).not.toHaveBeenCalled();
+
+    resolveRepair(report);
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      operation: "repair:swiss-prices",
+      mode: "preview",
+      status: "completed",
+      runId: "00000000-0000-4000-8000-000000000001",
+      report,
+    });
+    expect(mockTrackerComplete).toHaveBeenCalled();
+    expect(mockMarketPriceLeaseRelease).toHaveBeenCalled();
+  });
+
+  it("releases the PostgreSQL lease before returning the final response", async () => {
+    let resolveRelease!: () => void;
+    mockMarketPriceLeaseRelease.mockImplementationOnce(
+      () => new Promise<void>((resolve) => {
+        resolveRelease = resolve;
+      }),
+    );
+
+    let responseSettled = false;
+    const responsePromise = request(app)
+      .post("/api/internal/repair/swiss-prices")
+      .set(auth)
+      .send({})
+      .then((response) => {
+        responseSettled = true;
+        return response;
+      });
+
+    await vi.waitFor(() => {
+      expect(mockMarketPriceLeaseRelease).toHaveBeenCalled();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(responseSettled).toBe(false);
+
+    resolveRelease();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("completed");
+  });
+
+  it("returns a structured final error if the PostgreSQL lease cannot be released", async () => {
+    mockMarketPriceLeaseRelease.mockRejectedValueOnce(new Error("unlock failed"));
+
+    const response = await request(app)
+      .post("/api/internal/repair/swiss-prices")
+      .set(auth)
+      .send({});
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({
+      operation: "repair:swiss-prices",
+      mode: "preview",
+      status: "failed",
+      runId: "00000000-0000-4000-8000-000000000001",
+      error: "Swiss price repair finished but PostgreSQL lock release failed",
+    });
+    expect(mockTrackerComplete).toHaveBeenCalled();
+    expect(mockReleaseLock).toHaveBeenCalledWith("swiss-price-repair");
+  });
+
+  it("returns a structured error if run creation and PostgreSQL lease cleanup both fail", async () => {
+    mockTrackerStart.mockRejectedValueOnce(new Error("run creation failed"));
+    mockMarketPriceLeaseRelease.mockRejectedValueOnce(new Error("unlock failed"));
+
+    const response = await request(app)
+      .post("/api/internal/repair/swiss-prices")
+      .set(auth)
+      .send({});
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({
+      error: "Could not create Swiss price repair run; PostgreSQL lock release also failed",
+    });
+    expect(mockRunSwissPriceRepair).not.toHaveBeenCalled();
+    expect(mockReleaseLock).toHaveBeenCalledWith("swiss-price-repair");
+  });
+
   it("allows writes only with the exact explicit confirmation phrase", async () => {
     const response = await request(app)
       .post("/api/internal/repair/swiss-prices")
@@ -289,13 +407,16 @@ describe("POST /api/internal/repair/swiss-prices", () => {
         confirmation: "APPLY_SWISS_PRICE_REPAIR",
       });
 
-    expect(response.status).toBe(202);
-    await vi.waitFor(() => {
-      expect(mockRunSwissPriceRepair).toHaveBeenCalledWith({
-        config: {},
-        client: {},
-        apply: true,
-      });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      operation: "repair:swiss-prices",
+      mode: "apply",
+      status: "completed",
+    });
+    expect(mockRunSwissPriceRepair).toHaveBeenCalledWith({
+      config: {},
+      client: {},
+      apply: true,
     });
     expect(mockTrackerStart).toHaveBeenCalledWith(
       "swiss-price-repair",
@@ -321,10 +442,15 @@ describe("POST /api/internal/repair/swiss-prices", () => {
         confirmation: "APPLY_SWISS_PRICE_REPAIR",
       });
 
-    expect(response.status).toBe(202);
-    await vi.waitFor(() => {
-      expect(mockTrackerFail).toHaveBeenCalledWith(error);
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({
+      operation: "repair:swiss-prices",
+      mode: "apply",
+      status: "failed",
+      runId: "00000000-0000-4000-8000-000000000001",
+      error: error.message,
     });
+    expect(mockTrackerFail).toHaveBeenCalledWith(error);
     expect(mockDbUpdate).toHaveBeenCalled();
     expect(mockMarketPriceLeaseRelease).toHaveBeenCalled();
   });
