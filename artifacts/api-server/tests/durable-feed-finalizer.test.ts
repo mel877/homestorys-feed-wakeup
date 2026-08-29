@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { finalizeDurableFeedFile } from "../src/exporters/durable-feed-finalizer";
+import { durableFeedFinalizerTestHooks } from "../src/exporters/durable-feed-finalizer";
+const finalizeDurableFeedFile = durableFeedFinalizerTestHooks!.finalizeDurableFeedFile;
 
 const base = {
   syncRunId: "run-1",
@@ -65,6 +66,9 @@ describe("durable feed finalizer", () => {
 
     expect(result).toMatchObject({ status: "published", published: true });
     expect(order).toEqual(["assemble", "manifest", "validate", "publish", "snapshot"]);
+    expect(recordSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      storagePath: "feeds/google/versions/v1/google-fr-BE_FR.tsv",
+    }));
   });
 
   it("retains the previous snapshot when the existing guardrail blocks publication", async () => {

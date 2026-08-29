@@ -25,6 +25,7 @@ interface SharedPlanOptions {
   version: string;
   productIds: string[];
   batchSize?: number;
+  sourceFingerprints: Record<string, string>;
 }
 
 interface BatchCheckpoint extends Record<string, unknown> {
@@ -32,6 +33,8 @@ interface BatchCheckpoint extends Record<string, unknown> {
   version: string;
   productIds: string[];
   contributingMarkets?: string[];
+  sourceMarkets: string[];
+  sourceFingerprints: Record<string, string>;
 }
 
 export function createProductBatches(
@@ -60,6 +63,7 @@ function buildSpecs(
     marketCode: string;
     language: string;
     contributingMarkets: string[];
+    sourceMarkets: string[];
   },
 ): FeedExportStepSpec[] {
   return createProductBatches(options.productIds, options.batchSize).map((batch) => {
@@ -67,6 +71,14 @@ function buildSpecs(
       fileKey: file.fileKey,
       version: options.version,
       productIds: batch.productIds,
+      sourceMarkets: file.sourceMarkets,
+      sourceFingerprints: Object.fromEntries(
+        batch.productIds.map((id) => {
+          const fingerprint = options.sourceFingerprints[id];
+          if (!fingerprint) throw new Error(`Missing source fingerprint for product ${id}`);
+          return [id, fingerprint];
+        }),
+      ),
       ...(file.contributingMarkets.length > 0
         ? { contributingMarkets: file.contributingMarkets }
         : {}),
@@ -94,6 +106,7 @@ export function createGoogleFeedBatchSpecs(
   },
 ): FeedExportStepSpec[] {
   const specs: FeedExportStepSpec[] = [];
+  const sourceMarkets = Object.keys(options.markets).sort();
   for (const [marketCode, market] of Object.entries(options.markets)) {
     specs.push(...buildSpecs(options, {
       channel: "google",
@@ -101,6 +114,7 @@ export function createGoogleFeedBatchSpecs(
       marketCode,
       language: market.language,
       contributingMarkets: [marketCode],
+      sourceMarkets,
     }));
   }
   for (const language of options.languages) {
@@ -114,6 +128,7 @@ export function createGoogleFeedBatchSpecs(
       marketCode: `LANG_${language.toUpperCase()}`,
       language,
       contributingMarkets,
+      sourceMarkets,
     }));
   }
   return specs;
@@ -127,6 +142,7 @@ export function createMetaFeedBatchSpecs(
   const specs: FeedExportStepSpec[] = [];
   const marketEntries = Object.entries(options.markets);
   const allMarkets = marketEntries.map(([marketCode]) => marketCode);
+  const sourceMarkets = [...allMarkets].sort();
 
   specs.push(...buildSpecs(options, {
     channel: "meta",
@@ -134,6 +150,7 @@ export function createMetaFeedBatchSpecs(
     marketCode: "BASE",
     language: "",
     contributingMarkets: allMarkets,
+    sourceMarkets,
   }));
 
   const languages = [...new Set(marketEntries.map(([, market]) => market.language))];
@@ -147,6 +164,7 @@ export function createMetaFeedBatchSpecs(
       marketCode: `LANG_${language.toUpperCase()}`,
       language,
       contributingMarkets,
+      sourceMarkets,
     }));
   }
 
@@ -161,6 +179,7 @@ export function createMetaFeedBatchSpecs(
       marketCode: country,
       language: "",
       contributingMarkets,
+      sourceMarkets,
     }));
   }
   return specs;

@@ -4,11 +4,12 @@ import {
   googleFeedPath,
   googleLanguageFeedPath,
   metaFeedPath,
-  uploadFeedFile,
+  uploadImmutableFeedFile,
   versionedPath,
 } from "../lib/storage";
 import { completeFeedExportStep } from "../jobs/feed-export-step-repository";
-import { processAllCanonicals, type ReadOptions } from "./canonical-reader";
+import { getOrCreateFrozenSourceBatch } from "../jobs/feed-export-source-repository";
+import { readAllCanonicals, type ReadOptions } from "./canonical-reader";
 import { mapToGoogleRow, type GoogleFeedRow } from "./google/mapper";
 import {
   mapToMeta,
@@ -24,10 +25,13 @@ export interface DurableFeedBuildCheckpoint extends Record<string, unknown> {
   version: string;
   productIds: string[];
   contributingMarkets: string[];
+  sourceMarkets: string[];
+  sourceFingerprints: Record<string, string>;
 }
 
 export interface DurableFeedBuildStep {
   id: string;
+  syncRunId: string;
   channel: "google" | "meta";
   stage: "build";
   marketCode: string;
@@ -36,14 +40,24 @@ export interface DurableFeedBuildStep {
   checkpoint: unknown;
 }
 
-type CanonicalProcessor = (
+type CanonicalReader = (
   config: AppConfig,
   options: ReadOptions,
-  callback: (canonical: CanonicalProduct) => Promise<void> | void,
-) => Promise<unknown>;
+ ) => Promise<{ canonicals: CanonicalProduct[] }>;
 
 interface CommonBuildDependencies {
-  processCanonicals: CanonicalProcessor;
+  readCanonicals: CanonicalReader;
+  getFrozenCanonicals(
+    input: {
+      syncRunId: string;
+      channel: "google" | "meta";
+      batchIndex: number;
+      productIds: string[];
+      sourceMarkets: string[];
+    },
+    createCanonicals: () => Promise<CanonicalProduct[]>,
+  ): Promise<CanonicalProduct[]>;
+  verifySourceFingerprints(expected: Record<string, string>): Promise<void>;
   uploadPart: (path: string, content: string) => Promise<string>;
   completeStep: typeof completeFeedExportStep;
 }
@@ -84,23 +98,20 @@ export async function executeGoogleFeedBuildStep(
   );
   const rows: GoogleFeedRow[] = [];
 
-  await dependencies.processCanonicals(
-    config,
-    {
-      productIds: checkpoint.productIds,
-      markets: checkpoint.contributingMarkets,
-      channel: "google",
-      persistFeedItems: !isLanguageFile,
-    },
-    (canonical) => {
+  const canonicals = await frozenCanonicals(step, checkpoint, config, dependencies);
+  for (const canonical of canonicals) {
+    if (
+      canonical.exclusionReasons.length === 0 &&
+      checkpoint.contributingMarkets.includes(canonical.market)
+    ) {
       const row = dependencies.mapGoogle(
         canonical,
         config,
         isLanguageFile ? { qualifyIdWithMarket: true } : undefined,
       );
       if (row) rows.push(row);
-    },
-  );
+    }
+  }
 
   const content = serializeFeedPart(rows as unknown as Array<Record<string, unknown>>);
   const sha256 = await dependencies.uploadPart(artifactPath, content);
@@ -125,21 +136,18 @@ export async function executeMetaFeedBuildStep(
   );
   const rows = new Map<string, Record<string, unknown>>();
 
-  await dependencies.processCanonicals(
-    config,
-    {
-      productIds: checkpoint.productIds,
-      markets: checkpoint.contributingMarkets,
-      channel: "meta",
-      persistFeedItems: checkpoint.fileKey === "meta-base",
-    },
-    (canonical) => {
+  const canonicals = await frozenCanonicals(step, checkpoint, config, dependencies);
+  for (const canonical of canonicals) {
+    if (
+      canonical.exclusionReasons.length === 0 &&
+      checkpoint.contributingMarkets.includes(canonical.market)
+    ) {
       const mapped = dependencies.mapMeta(canonical, config);
-      if (!mapped) return;
+      if (!mapped) continue;
       const row = selectMetaLayer(checkpoint.fileKey, mapped);
       rows.set(mapped.id, row);
-    },
-  );
+    }
+  }
 
   const values = [...rows.values()];
   const content = serializeFeedPart(values);
@@ -160,11 +168,44 @@ function parseCheckpoint(value: unknown): DurableFeedBuildCheckpoint {
     !checkpoint.productIds.every((id) => typeof id === "string") ||
     !Array.isArray(checkpoint.contributingMarkets) ||
     checkpoint.contributingMarkets.length === 0 ||
-    !checkpoint.contributingMarkets.every((market) => typeof market === "string")
+    !checkpoint.contributingMarkets.every((market) => typeof market === "string") ||
+    !Array.isArray(checkpoint.sourceMarkets) ||
+    checkpoint.sourceMarkets.length === 0 ||
+    !checkpoint.sourceMarkets.every((market) => typeof market === "string")
+    || !checkpoint.sourceFingerprints
+    || typeof checkpoint.sourceFingerprints !== "object"
   ) {
     throw new Error("Feed build step checkpoint is invalid");
   }
   return checkpoint as DurableFeedBuildCheckpoint;
+}
+
+async function frozenCanonicals(
+  step: DurableFeedBuildStep,
+  checkpoint: DurableFeedBuildCheckpoint,
+  config: AppConfig,
+  dependencies: CommonBuildDependencies,
+): Promise<CanonicalProduct[]> {
+  return dependencies.getFrozenCanonicals(
+    {
+      syncRunId: step.syncRunId,
+      channel: step.channel,
+      batchIndex: step.batchIndex,
+      productIds: checkpoint.productIds,
+      sourceMarkets: checkpoint.sourceMarkets,
+    },
+    async () => {
+      await dependencies.verifySourceFingerprints(checkpoint.sourceFingerprints);
+      const canonicals = (await dependencies.readCanonicals(config, {
+        productIds: checkpoint.productIds,
+        markets: checkpoint.sourceMarkets,
+        channel: step.channel,
+        persistFeedItems: false,
+      })).canonicals;
+      await dependencies.verifySourceFingerprints(checkpoint.sourceFingerprints);
+      return canonicals;
+    },
+  );
 }
 
 function metaCurrentPath(fileKey: string): string {
@@ -215,8 +256,17 @@ async function persistCompletion(
 }
 
 const commonDependencies: CommonBuildDependencies = {
-  processCanonicals: processAllCanonicals,
-  uploadPart: (path, content) => uploadFeedFile(path, content, "application/json"),
+  readCanonicals: readAllCanonicals,
+  async getFrozenCanonicals(input, createCanonicals) {
+    return (await getOrCreateFrozenSourceBatch(input, createCanonicals)).canonicals;
+  },
+  verifySourceFingerprints: async (expected) => {
+    const { assertProductSourceFingerprints } = await import(
+      "../jobs/feed-export-source-repository"
+    );
+    await assertProductSourceFingerprints(expected);
+  },
+  uploadPart: (path, content) => uploadImmutableFeedFile(path, content, "application/json"),
   completeStep: completeFeedExportStep,
 };
 

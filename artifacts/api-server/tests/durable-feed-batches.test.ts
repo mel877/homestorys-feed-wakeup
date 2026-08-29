@@ -27,6 +27,7 @@ describe("durable feed batches", () => {
       },
       languages: ["fr"],
       batchSize: 1,
+      sourceFingerprints: { "p-1": "f1", "p-2": "f2" },
     });
 
     expect(specs).toHaveLength(6);
@@ -46,6 +47,7 @@ describe("durable feed batches", () => {
         fileKey: "google-market-BE_FR",
         version: "2026-08-29T16-00-00",
         productIds: ["p-1"],
+        sourceFingerprints: { "p-1": "f1" },
       },
     });
   });
@@ -60,6 +62,7 @@ describe("durable feed batches", () => {
         BE_DE: { language: "de", country: "BE" },
       },
       batchSize: 2,
+      sourceFingerprints: { "p-1": "f1", "p-2": "f2" },
     });
 
     expect(specs.map((spec) => spec.checkpoint)).toEqual([
@@ -68,24 +71,32 @@ describe("durable feed batches", () => {
         version: "v1",
         productIds: ["p-1", "p-2"],
         contributingMarkets: ["BE_FR", "BE_DE"],
+        sourceMarkets: ["BE_DE", "BE_FR"],
+        sourceFingerprints: { "p-1": "f1", "p-2": "f2" },
       },
       {
         fileKey: "meta-language-fr",
         version: "v1",
         productIds: ["p-1", "p-2"],
         contributingMarkets: ["BE_FR"],
+        sourceMarkets: ["BE_DE", "BE_FR"],
+        sourceFingerprints: { "p-1": "f1", "p-2": "f2" },
       },
       {
         fileKey: "meta-language-de",
         version: "v1",
         productIds: ["p-1", "p-2"],
         contributingMarkets: ["BE_DE"],
+        sourceMarkets: ["BE_DE", "BE_FR"],
+        sourceFingerprints: { "p-1": "f1", "p-2": "f2" },
       },
       {
         fileKey: "meta-country-BE",
         version: "v1",
         productIds: ["p-1", "p-2"],
         contributingMarkets: ["BE_FR", "BE_DE"],
+        sourceMarkets: ["BE_DE", "BE_FR"],
+        sourceFingerprints: { "p-1": "f1", "p-2": "f2" },
       },
     ]);
   });
@@ -119,6 +130,7 @@ describe("durable feed batches", () => {
       markets: { CH_DE: { language: "de", country: "CH" } },
       languages: [],
       batchSize: 2,
+      sourceFingerprints: { "p-1": "f1", "p-2": "f2", "p-3": "f3" },
     });
 
     expect(createFeedFinalizationSpecs(builds)).toEqual([

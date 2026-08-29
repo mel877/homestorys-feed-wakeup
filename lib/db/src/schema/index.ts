@@ -11,3 +11,4 @@ export * from "./feed-snapshots";
 export * from "./webhook-events";
 export * from "./config-versions";
 export * from "./feed-export-steps";
+export * from "./feed-export-sources";

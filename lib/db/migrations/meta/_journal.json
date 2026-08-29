@@ -15,6 +15,13 @@
       "when": 1788019200000,
       "tag": "0001_durable_feed_export_steps",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788022800000,
+      "tag": "0002_feed_export_source_snapshots",
+      "breakpoints": true
     }
   ]
 }

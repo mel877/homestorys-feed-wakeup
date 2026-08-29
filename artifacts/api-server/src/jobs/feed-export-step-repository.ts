@@ -1,10 +1,11 @@
 import {
   db,
+  pool,
   feedExportStepsTable,
   type FeedExportStep,
   type InsertFeedExportStep,
 } from "@workspace/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import {
   claimStep,
   completeStep,
@@ -295,4 +296,61 @@ export async function getFeedExportStepSummary(syncRunId: string): Promise<{
     summary.total += row.count;
   }
   return summary;
+}
+
+export async function listFeedExportBuildStepsForFile(input: {
+  syncRunId: string;
+  channel: "google" | "meta";
+  marketCode: string;
+  language: string;
+  fileKey: string;
+}): Promise<FeedExportStep[]> {
+  const rows = await db
+    .select()
+    .from(feedExportStepsTable)
+    .where(and(
+      eq(feedExportStepsTable.syncRunId, input.syncRunId),
+      eq(feedExportStepsTable.channel, input.channel),
+      eq(feedExportStepsTable.stage, "build"),
+      eq(feedExportStepsTable.marketCode, input.marketCode),
+      eq(feedExportStepsTable.language, input.language),
+    ))
+    .orderBy(asc(feedExportStepsTable.batchIndex));
+  return rows.filter((row) => {
+    const checkpoint = row.checkpoint as { fileKey?: unknown } | null;
+    return checkpoint?.fileKey === input.fileKey;
+  });
+}
+
+export async function getFeedExportStepById(
+  stepId: string,
+): Promise<FeedExportStep | null> {
+  const [step] = await db
+    .select()
+    .from(feedExportStepsTable)
+    .where(eq(feedExportStepsTable.id, stepId))
+    .limit(1);
+  return step ?? null;
+}
+
+export async function withFeedFinalizationLock<T>(
+  lockKey: string,
+  callback: () => Promise<T>,
+): Promise<T | null> {
+  const client = await pool.connect();
+  let locked = false;
+  try {
+    const result = await client.query<{ locked: boolean }>(
+      "SELECT pg_try_advisory_lock(hashtext($1)) AS locked",
+      [lockKey],
+    );
+    locked = result.rows[0]?.locked === true;
+    if (!locked) return null;
+    return await callback();
+  } finally {
+    if (locked) {
+      await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]);
+    }
+    client.release();
+  }
 }

@@ -1,13 +1,18 @@
-import { db, feedSnapshotsTable } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { db, feedSnapshotsTable, type FeedExportStep } from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
 import type { AppConfig } from "../config/schemas";
 import {
-  atomicPublish,
-  downloadManifest,
-  uploadManifest,
+  createCompressedDerivativeIfLarge,
+  passesFeedSnapshotGate,
+  uploadImmutableManifest,
   type FeedManifest,
 } from "../lib/storage";
 import { resolveAlertWebhookUrl, sendFeedBlockAlert } from "../lib/alerting";
+import {
+  completeFeedExportStep,
+  getFeedExportStepById,
+  withFeedFinalizationLock,
+} from "../jobs/feed-export-step-repository";
 import {
   validateGoogleFeed,
   validateMetaFeed,
@@ -21,6 +26,7 @@ import {
   resolveDurableFeedFileDefinition,
   resolveExpectedFeedCurrency,
 } from "./durable-feed-file-definition";
+import { loadVerifiedFeedParts } from "./durable-feed-db-finalizer";
 
 export interface DurableFeedFinalizeOptions {
   syncRunId: string;
@@ -77,7 +83,7 @@ export interface DurableFeedFinalizeResult {
   validationErrors: unknown[];
 }
 
-export async function finalizeDurableFeedFile(
+async function finalizeDurableFeedFile(
   options: DurableFeedFinalizeOptions,
   dependencies: DurableFeedFinalizeDependencies,
 ): Promise<DurableFeedFinalizeResult> {
@@ -88,6 +94,7 @@ export async function finalizeDurableFeedFile(
     delimiter: options.delimiter,
     requiredBatchIndexes: options.requiredBatchIndexes,
     parts: options.parts,
+    immutableOutput: true,
   });
 
   const manifest: FeedManifest = {
@@ -148,7 +155,7 @@ export async function finalizeDurableFeedFile(
     channel: options.channel,
     language: options.language,
     marketCode: options.marketCode,
-    storagePath: options.currentPath,
+    storagePath: options.versionedPath,
     itemCount: assembled.itemCount,
     sha256: assembled.sha256,
     syncRunId: options.syncRunId,
@@ -175,11 +182,11 @@ export interface ConfiguredDurableFeedFinalizeOptions {
   marketCode: string;
   contributingMarkets: string[];
   requiredBatchIndexes: number[];
-  parts: CompletedFeedPart[];
+  outputVersionedPath: string;
   dryRun: boolean;
 }
 
-export async function finalizeConfiguredDurableFeedFile(
+async function finalizeConfiguredDurableFeedFile(
   options: ConfiguredDurableFeedFinalizeOptions,
 ): Promise<DurableFeedFinalizeResult> {
   const definition = resolveDurableFeedFileDefinition(options);
@@ -193,6 +200,15 @@ export async function finalizeConfiguredDurableFeedFile(
   const alertWebhookUrl = resolveAlertWebhookUrl(
     options.config.feedPolicy.alerts.webhook_url,
   );
+  const parts = await loadVerifiedFeedParts({
+    syncRunId: options.syncRunId,
+    channel: options.channel,
+    marketCode: options.marketCode,
+    language: options.language,
+    fileKey: options.fileKey,
+    versionedPath: definition.versionedPath,
+    requiredBatchIndexes: options.requiredBatchIndexes,
+  });
 
   return finalizeDurableFeedFile(
     {
@@ -202,17 +218,17 @@ export async function finalizeConfiguredDurableFeedFile(
       marketCode: options.marketCode || null,
       version: options.version,
       currentPath: definition.currentPath,
-      versionedPath: definition.versionedPath,
+      versionedPath: options.outputVersionedPath,
       headers: definition.headers,
       delimiter: definition.delimiter,
       requiredBatchIndexes: options.requiredBatchIndexes,
-      parts: options.parts,
+      parts,
       maxDropPct: options.config.feedPolicy.snapshot_gate.max_item_count_drop_pct,
       dryRun: options.dryRun,
     },
     {
       assemble: assembleVersionedFeed,
-      uploadManifest,
+      uploadManifest: uploadImmutableManifest,
       async validate(path) {
         const result = options.channel === "google"
           ? await validateGoogleFeed(path, { expectedCurrency })
@@ -233,10 +249,35 @@ export async function finalizeConfiguredDurableFeedFile(
         }
         return { valid: result.valid, errors: result.errors };
       },
-      async loadPreviousItemCount(path) {
-        return (await downloadManifest(path).catch(() => null))?.itemCount ?? null;
+      async loadPreviousItemCount() {
+        const [snapshot] = await db
+          .select({ itemCount: feedSnapshotsTable.itemCount })
+          .from(feedSnapshotsTable)
+          .where(and(
+            eq(feedSnapshotsTable.channel, options.channel),
+            options.language
+              ? eq(feedSnapshotsTable.language, options.language)
+              : sql`${feedSnapshotsTable.language} IS NULL`,
+            options.marketCode
+              ? eq(feedSnapshotsTable.marketCode, options.marketCode)
+              : sql`${feedSnapshotsTable.marketCode} IS NULL`,
+            eq(feedSnapshotsTable.isCurrent, true),
+          ))
+          .limit(1);
+        return snapshot?.itemCount ?? null;
       },
-      publish: (params) => atomicPublish({ ...params, alertWebhookUrl }),
+      async publish(params) {
+        const allowed = await passesFeedSnapshotGate({
+          currentPath: params.currentPath,
+          manifest: params.manifest,
+          previousItemCount: params.previousItemCount,
+          maxDropPct: params.maxDropPct,
+          alertWebhookUrl,
+        });
+        if (!allowed) return false;
+        await createCompressedDerivativeIfLarge(params.versionedPath);
+        return true;
+      },
       async recordSnapshot(snapshot) {
         await db.transaction(async (tx) => {
           await tx
@@ -244,7 +285,12 @@ export async function finalizeConfiguredDurableFeedFile(
             .set({ isCurrent: false })
             .where(and(
               eq(feedSnapshotsTable.channel, snapshot.channel),
-              eq(feedSnapshotsTable.storagePath, snapshot.storagePath),
+              snapshot.language === null
+                ? sql`${feedSnapshotsTable.language} IS NULL`
+                : eq(feedSnapshotsTable.language, snapshot.language),
+              snapshot.marketCode === null
+                ? sql`${feedSnapshotsTable.marketCode} IS NULL`
+                : eq(feedSnapshotsTable.marketCode, snapshot.marketCode),
             ));
           await tx.insert(feedSnapshotsTable).values({
             ...snapshot,
@@ -256,3 +302,122 @@ export async function finalizeConfiguredDurableFeedFile(
     },
   );
 }
+
+interface FinalizationCheckpoint {
+  fileKey: string;
+  version: string;
+  requiredBatchIndexes: number[];
+  contributingMarkets: string[];
+}
+
+export interface DurableFeedFinalizationExecutionDependencies {
+  loadStep(stepId: string): Promise<FeedExportStep | null>;
+  withLock<T>(lockKey: string, callback: () => Promise<T>): Promise<T | null>;
+  finalize(input: ConfiguredDurableFeedFinalizeOptions): Promise<DurableFeedFinalizeResult>;
+  completeStep: typeof completeFeedExportStep;
+}
+
+export async function executeDurableFeedFinalizationStep(
+  input: {
+    stepId: string;
+    workerId: string;
+    config: AppConfig;
+    dryRun: boolean;
+  },
+  dependencies: DurableFeedFinalizationExecutionDependencies = executionDependencies,
+): Promise<DurableFeedFinalizeResult> {
+  const initial = await dependencies.loadStep(input.stepId);
+  assertOwnedFinalizeStep(initial, input.workerId);
+  const initialCheckpoint = parseFinalizationCheckpoint(initial.checkpoint);
+  const lockKey = [
+    "feed-finalize",
+    initial.channel,
+    initialCheckpoint.fileKey,
+  ].join(":");
+  const result = await dependencies.withLock(lockKey, async () => {
+    const step = await dependencies.loadStep(input.stepId);
+    assertOwnedFinalizeStep(step, input.workerId);
+    const checkpoint = parseFinalizationCheckpoint(step.checkpoint);
+    const definition = resolveDurableFeedFileDefinition({
+      channel: step.channel as "google" | "meta",
+      fileKey: checkpoint.fileKey,
+      version: checkpoint.version,
+      language: step.language,
+      marketCode: step.marketCode,
+    });
+    const finalized = await dependencies.finalize({
+      config: input.config,
+      syncRunId: step.syncRunId,
+      channel: step.channel as "google" | "meta",
+      fileKey: checkpoint.fileKey,
+      version: checkpoint.version,
+      language: step.language,
+      marketCode: step.marketCode,
+      contributingMarkets: checkpoint.contributingMarkets,
+      requiredBatchIndexes: checkpoint.requiredBatchIndexes,
+      outputVersionedPath:
+        `${definition.versionedPath}.final-${step.id}-attempt-${step.attempts}`,
+      dryRun: input.dryRun,
+    });
+    const completed = await dependencies.completeStep(step.id, input.workerId, {
+      checkpoint: {
+        ...checkpoint,
+        result: finalized.status,
+        published: finalized.published,
+      },
+      itemCount: finalized.itemCount,
+      sha256: finalized.sha256,
+      artifactPath: finalized.versionedPath,
+    });
+    if (!completed) throw new Error("Finalize step lost its lease before completion");
+    return finalized;
+  });
+  if (!result) {
+    throw new Error(`Feed finalization is already running for ${initialCheckpoint.fileKey}`);
+  }
+  return result;
+}
+
+function assertOwnedFinalizeStep(
+  step: FeedExportStep | null,
+  workerId: string,
+): asserts step is FeedExportStep {
+  if (
+    !step ||
+    step.stage !== "finalize" ||
+    step.status !== "running" ||
+    step.leaseOwner !== workerId ||
+    (step.channel !== "google" && step.channel !== "meta")
+  ) {
+    throw new Error("Finalize step is missing or not owned by this worker");
+  }
+}
+
+function parseFinalizationCheckpoint(value: unknown): FinalizationCheckpoint {
+  if (!value || typeof value !== "object") {
+    throw new Error("Finalize step checkpoint is missing");
+  }
+  const checkpoint = value as Partial<FinalizationCheckpoint>;
+  if (
+    typeof checkpoint.fileKey !== "string" ||
+    typeof checkpoint.version !== "string" ||
+    !Array.isArray(checkpoint.requiredBatchIndexes) ||
+    !checkpoint.requiredBatchIndexes.every(Number.isInteger) ||
+    !Array.isArray(checkpoint.contributingMarkets) ||
+    !checkpoint.contributingMarkets.every((market) => typeof market === "string")
+  ) {
+    throw new Error("Finalize step checkpoint is invalid");
+  }
+  return checkpoint as FinalizationCheckpoint;
+}
+
+const executionDependencies: DurableFeedFinalizationExecutionDependencies = {
+  loadStep: getFeedExportStepById,
+  withLock: withFeedFinalizationLock,
+  finalize: finalizeConfiguredDurableFeedFile,
+  completeStep: completeFeedExportStep,
+};
+
+export const durableFeedFinalizerTestHooks = process.env.NODE_ENV === "test"
+  ? { finalizeDurableFeedFile }
+  : null;

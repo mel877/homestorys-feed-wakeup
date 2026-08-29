@@ -5,8 +5,10 @@ import {
   integer,
   boolean,
   index,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { syncRunsTable } from "./sync-runs";
@@ -40,6 +42,13 @@ export const feedSnapshotsTable = pgTable(
     ),
     index("feed_snapshots_is_current_idx").on(t.isCurrent),
     index("feed_snapshots_generated_at_idx").on(t.generatedAt),
+    uniqueIndex("feed_snapshots_one_current_target_unique")
+      .on(
+        t.channel,
+        sql`coalesce(${t.language}, '')`,
+        sql`coalesce(${t.marketCode}, '')`,
+      )
+      .where(sql`${t.isCurrent} = true`),
   ],
 );
 

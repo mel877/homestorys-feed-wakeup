@@ -101,6 +101,7 @@ async function serveFeedFile(
     generationMode?: "stable" | "snapshot";
   },
 ): Promise<void> {
+  storagePath = await resolvePublishedStoragePath(storagePath, context);
   const startedAt = Date.now();
   const requestId = String(req.id ?? req.headers["x-request-id"] ?? "");
   if (requestId) res.setHeader("X-Request-Id", requestId);
@@ -289,6 +290,52 @@ async function serveFeedFile(
       feedFile.stream.pipe(res);
     }
   });
+}
+
+async function resolvePublishedStoragePath(
+  fallbackPath: string,
+  context: {
+    channel: "google" | "meta" | "showroom";
+    language?: string;
+    market?: string;
+  },
+): Promise<string> {
+  if (context.channel === "showroom") return fallbackPath;
+  let marketCode = context.market;
+  if (!marketCode && context.language) {
+    marketCode = `LANG_${context.language.toUpperCase()}`;
+  }
+  if (!marketCode && context.channel === "meta") {
+    if (fallbackPath.endsWith("/meta-base.csv")) {
+      marketCode = "BASE";
+    } else {
+      const country = fallbackPath.match(/meta-country-([A-Z]{2})\.csv$/);
+      const language = fallbackPath.match(/meta-(?:language-)?([a-z]{2})\.csv$/);
+      marketCode = country?.[1] ?? (
+        language?.[1] ? `LANG_${language[1].toUpperCase()}` : undefined
+      );
+    }
+  }
+  if (!marketCode) return fallbackPath;
+  try {
+    const [snapshot] = await db
+      .select({ storagePath: feedSnapshotsTable.storagePath })
+      .from(feedSnapshotsTable)
+      .where(and(
+        eq(feedSnapshotsTable.channel, context.channel),
+        eq(feedSnapshotsTable.marketCode, marketCode),
+        eq(feedSnapshotsTable.isCurrent, true),
+      ))
+      .orderBy(desc(feedSnapshotsTable.generatedAt))
+      .limit(1);
+    return snapshot?.storagePath ?? fallbackPath;
+  } catch {
+    logger.warn(
+      { channel: context.channel, marketCode },
+      "Snapshot pointer lookup failed; using legacy current path",
+    );
+    return fallbackPath;
+  }
 }
 
 // ── Meta feed routes ──────────────────────────────────────────────────────────

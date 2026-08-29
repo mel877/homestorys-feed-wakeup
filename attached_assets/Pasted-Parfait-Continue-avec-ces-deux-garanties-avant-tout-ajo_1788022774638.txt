@@ -1,0 +1,47 @@
+Parfait. Continue avec ces deux garanties avant tout ajout de /api/internal/feed-pump.
+
+Implémente maintenant :
+
+Finalisation dérivée exclusivement de PostgreSQL
+le finaliseur doit charger lui-même les parts depuis feed_export_steps ;
+filtrage strict par run, channel et fichier cible ;
+vérification des checksums des artefacts présents dans App Storage ;
+refus de finaliser si une part attendue est absente, dupliquée, incohérente ou si son checksum ne correspond pas ;
+aucune liste de parts fournie par l’appelant ne doit être considérée comme source de vérité.
+Figement durable de la source du run
+un run ne doit jamais mélanger deux versions différentes du catalogue ;
+fige les payloads canoniques utilisés par les batches, ou utilise une révision immuable équivalente ;
+un batch rejoué après interruption doit lire exactement la même source qu’avant l’interruption ;
+les modifications Shopify arrivées pendant un run doivent alimenter un run ultérieur, pas modifier la source du run en cours.
+
+Ajoute des tests couvrant au minimum :
+
+modification d’un produit entre deux batches ;
+redémarrage Autoscale après plusieurs batches ;
+retry d’un batch avec source figée ;
+part avec checksum invalide ;
+part manquante ;
+concurrence entre deux finalisations ;
+vérification qu’aucun snapshot partiel ou incohérent ne peut devenir courant.
+
+Contraintes :
+
+ne lance aucun Full Sync ;
+ne lance aucun export réel ;
+n’applique pas encore la migration en production ;
+ne modifie aucun snapshot courant ;
+ne change aucune règle métier Google/Meta ;
+ne touche pas aux exclusions ;
+conserve les règles CHF, sale_price < price, validateurs et guardrail actuels.
+
+À la fin, indique-moi :
+
+les fichiers modifiés ;
+la stratégie choisie pour figer la source ;
+comment le finaliseur reconstruit sa vérité depuis PostgreSQL ;
+les protections contre concurrence et corruption ;
+les tests ajoutés ;
+le nombre total de tests passés ;
+si, oui ou non, la couche est alors prête pour /api/internal/feed-pump.
+
+Ne crée pas encore l’endpoint pump tant que ces garanties ne sont pas validées.

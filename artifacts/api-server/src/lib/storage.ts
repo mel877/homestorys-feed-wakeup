@@ -92,6 +92,35 @@ export async function uploadFeedFile(
   return sha256;
 }
 
+export async function uploadImmutableFeedFile(
+  storagePath: string,
+  content: string | Buffer,
+  contentType: "application/json",
+): Promise<string> {
+  const buf = typeof content === "string" ? Buffer.from(content, "utf-8") : content;
+  const sha256 = createHash("sha256").update(buf).digest("hex");
+  const file = getBucket().file(storagePath);
+  try {
+    await file.save(buf, {
+      contentType,
+      metadata: { sha256 },
+      resumable: false,
+      preconditionOpts: { ifGenerationMatch: 0 },
+    });
+    return sha256;
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? (error as { code?: unknown }).code
+      : null;
+    if (code !== 412 && code !== "412") throw error;
+    const existingSha256 = await computeFeedFileSha256(storagePath);
+    if (existingSha256 !== sha256) {
+      throw new Error(`Immutable feed artifact already exists with different bytes: ${storagePath}`);
+    }
+    return sha256;
+  }
+}
+
 /**
  * Create a write stream for uploading a feed file to App Storage incrementally.
  *
@@ -102,6 +131,7 @@ export async function uploadFeedFile(
 export function createFeedFileWriteStream(
   storagePath: string,
   contentType: "text/csv" | "text/tab-separated-values" | "application/json",
+  options: { immutable?: boolean } = {},
 ): { stream: NodeJS.WritableStream; done: Promise<{ sha256: string; bytes: number }> } {
   const file = getBucket().file(storagePath);
   const hash = createHash("sha256");
@@ -110,6 +140,7 @@ export function createFeedFileWriteStream(
   const gcsStream = file.createWriteStream({
     contentType,
     resumable: false,
+    ...(options.immutable ? { preconditionOpts: { ifGenerationMatch: 0 } } : {}),
   });
 
   const hashingStream = new Transform({
@@ -144,6 +175,22 @@ export async function downloadFeedFile(storagePath: string): Promise<Buffer | nu
   if (!exists) return null;
   const [content] = await file.download();
   return content;
+}
+
+/**
+ * Recompute an object's SHA-256 from its immutable body stream.
+ * Returns null when the object does not exist.
+ */
+export async function computeFeedFileSha256(
+  storagePath: string,
+): Promise<string | null> {
+  const file = await openFeedFileReadStream(storagePath);
+  if (!file) return null;
+  const hash = createHash("sha256");
+  for await (const chunk of file.stream) {
+    hash.update(chunk as Buffer);
+  }
+  return hash.digest("hex");
 }
 
 export interface FeedFileReadStream {
@@ -245,6 +292,17 @@ export async function uploadManifest(
   await uploadFeedFile(manifestPath, JSON.stringify(manifest, null, 2), "application/json");
 }
 
+export async function uploadImmutableManifest(
+  feedPath: string,
+  manifest: FeedManifest,
+): Promise<void> {
+  await uploadImmutableFeedFile(
+    `${feedPath}.manifest.json`,
+    JSON.stringify(manifest, null, 2),
+    "application/json",
+  );
+}
+
 /**
  * Download the manifest for a feed file. Returns null if not found.
  */
@@ -317,7 +375,44 @@ export async function atomicPublish(params: {
   const { versionedPath, currentPath, manifest, previousItemCount, maxDropPct } = params;
   const alertWebhookUrl = params.alertWebhookUrl ?? resolveAlertWebhookUrl();
 
-  // Gate: item count must not drop by more than maxDropPct vs previous snapshot
+  if (!await passesFeedSnapshotGate({
+    currentPath,
+    manifest,
+    previousItemCount,
+    maxDropPct,
+    alertWebhookUrl,
+  })) return false;
+
+  // Prepare the compressed representation before touching the current pointer.
+  // A compression/storage error therefore retains the previous valid snapshot.
+  const bucket = getBucket();
+  const compressedVersioned = await createCompressedDerivativeIfLarge(versionedPath);
+  if (compressedVersioned) {
+    await bucket
+      .file(compressedVersioned)
+      .copy(bucket.file(compressedFeedPath(currentPath)));
+  }
+
+  // Copy versioned → current (overwrites)
+  await bucket.file(versionedPath).copy(bucket.file(currentPath));
+  await bucket.file(`${versionedPath}.manifest.json`).copy(bucket.file(`${currentPath}.manifest.json`));
+
+  logger.info(
+    { currentPath, itemCount: manifest.itemCount, sha256: manifest.sha256 },
+    "Feed published atomically",
+  );
+  return true;
+}
+
+export async function passesFeedSnapshotGate(params: {
+  currentPath: string;
+  manifest: FeedManifest;
+  previousItemCount: number | null;
+  maxDropPct: number;
+  alertWebhookUrl?: string | null;
+}): Promise<boolean> {
+  const { currentPath, manifest, previousItemCount, maxDropPct } = params;
+  const alertWebhookUrl = params.alertWebhookUrl ?? resolveAlertWebhookUrl();
   if (previousItemCount !== null && previousItemCount > 0) {
     const dropPct = ((previousItemCount - manifest.itemCount) / previousItemCount) * 100;
     if (dropPct > maxDropPct) {
@@ -349,25 +444,6 @@ export async function atomicPublish(params: {
       return false;
     }
   }
-
-  // Prepare the compressed representation before touching the current pointer.
-  // A compression/storage error therefore retains the previous valid snapshot.
-  const bucket = getBucket();
-  const compressedVersioned = await createCompressedDerivativeIfLarge(versionedPath);
-  if (compressedVersioned) {
-    await bucket
-      .file(compressedVersioned)
-      .copy(bucket.file(compressedFeedPath(currentPath)));
-  }
-
-  // Copy versioned → current (overwrites)
-  await bucket.file(versionedPath).copy(bucket.file(currentPath));
-  await bucket.file(`${versionedPath}.manifest.json`).copy(bucket.file(`${currentPath}.manifest.json`));
-
-  logger.info(
-    { currentPath, itemCount: manifest.itemCount, sha256: manifest.sha256 },
-    "Feed published atomically",
-  );
   return true;
 }
 

@@ -17,6 +17,7 @@ export interface FeedPartStorage {
   createOutput(
     path: string,
     contentType: "text/csv" | "text/tab-separated-values",
+    immutable?: boolean,
   ): {
     stream: Writable;
     done: Promise<{ sha256: string; bytes: number }>;
@@ -29,6 +30,7 @@ export interface AssembleVersionedFeedOptions {
   delimiter: "," | "\t";
   requiredBatchIndexes: number[];
   parts: CompletedFeedPart[];
+  immutableOutput?: boolean;
   storage?: FeedPartStorage;
 }
 
@@ -71,8 +73,12 @@ export async function assembleVersionedFeed(
   const contentType = options.delimiter === "\t"
     ? "text/tab-separated-values"
     : "text/csv";
-  const output = storage.createOutput(options.outputPath, contentType);
-  writeOrWait(output.stream, serializeLine(options.headers, options.delimiter));
+  const output = storage.createOutput(
+    options.outputPath,
+    contentType,
+    options.immutableOutput,
+  );
+  await writeOrWait(output.stream, serializeLine(options.headers, options.delimiter));
 
   let itemCount = 0;
   for (const batchIndex of required) {
@@ -124,8 +130,8 @@ const defaultStorage: FeedPartStorage = {
     const file = await openFeedFileReadStream(path);
     return file?.stream ?? null;
   },
-  createOutput(path, contentType) {
-    return createFeedFileWriteStream(path, contentType) as {
+  createOutput(path, contentType, immutable) {
+    return createFeedFileWriteStream(path, contentType, { immutable }) as {
       stream: Writable;
       done: Promise<{ sha256: string; bytes: number }>;
     };
