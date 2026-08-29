@@ -20,3 +20,4 @@
 - [Market price freshness](market-price-freshness.md) — market_variants.updated_at is also touched by inventory availability updates, so it cannot prove when pricing was refreshed.
 - [Deployment secret visibility](deployment-secret-visibility.md) — Deployment secrets may authenticate the live app while remaining unavailable to the agent's local execution environment.
 - [Production export proxy timeout](production-export-proxy-timeout.md) — public dashboard requests abort near 300s while export may continue; never retry without checking the persisted run.
+- [Durable feed pump boundaries](durable-feed-pump-boundaries.md) — build deterministic versioned parts in bounded calls; only a complete-file barrier may validate and publish.

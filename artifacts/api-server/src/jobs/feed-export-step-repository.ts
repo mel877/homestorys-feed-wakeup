@@ -1,0 +1,298 @@
+import {
+  db,
+  feedExportStepsTable,
+  type FeedExportStep,
+  type InsertFeedExportStep,
+} from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
+import {
+  claimStep,
+  completeStep,
+  failStep,
+  type FeedExportStepState,
+} from "./feed-export-step-state";
+
+export interface FeedExportStepSpec {
+  syncRunId: string;
+  channel: "google" | "meta";
+  stage: "build" | "publish" | "finalize";
+  marketCode?: string;
+  language?: string;
+  batchIndex: number;
+  cursor?: Record<string, unknown> | null;
+  checkpoint?: Record<string, unknown> | null;
+}
+
+export interface FeedExportStepResult {
+  step: FeedExportStep;
+  reclaimed: boolean;
+}
+
+const DEFAULT_LEASE_MS = 4 * 60 * 1_000;
+const DEFAULT_MAX_ATTEMPTS = 5;
+
+function toState(step: FeedExportStep): FeedExportStepState {
+  return {
+    status: step.status as FeedExportStepState["status"],
+    attempts: step.attempts,
+    availableAt: step.availableAt,
+    leaseExpiresAt: step.leaseExpiresAt,
+    leaseOwner: step.leaseOwner,
+    completedAt: step.completedAt,
+    lastError: step.lastError,
+  };
+}
+
+function mapStepRow(row: Record<string, unknown>): FeedExportStep {
+  return {
+    id: String(row.id),
+    syncRunId: String(row.sync_run_id),
+    channel: String(row.channel),
+    stage: String(row.stage),
+    marketCode: String(row.market_code),
+    language: String(row.language),
+    batchIndex: Number(row.batch_index),
+    cursor: (row.cursor as Record<string, unknown> | null) ?? null,
+    checkpoint: (row.checkpoint as Record<string, unknown> | null) ?? null,
+    status: String(row.status),
+    attempts: Number(row.attempts),
+    leaseOwner: (row.lease_owner as string | null) ?? null,
+    leaseExpiresAt: (row.lease_expires_at as Date | null) ?? null,
+    availableAt: (row.available_at as Date | null) ?? null,
+    startedAt: (row.started_at as Date | null) ?? null,
+    completedAt: (row.completed_at as Date | null) ?? null,
+    lastError: (row.last_error as string | null) ?? null,
+    itemCount: (row.item_count as number | null) ?? null,
+    artifactPath: (row.artifact_path as string | null) ?? null,
+    sha256: (row.sha256 as string | null) ?? null,
+    createdAt: row.created_at as Date,
+    updatedAt: row.updated_at as Date,
+  } as FeedExportStep;
+}
+
+export async function ensureFeedExportSteps(
+  specs: FeedExportStepSpec[],
+): Promise<void> {
+  if (specs.length === 0) return;
+  const values: InsertFeedExportStep[] = specs.map((spec) => ({
+    syncRunId: spec.syncRunId,
+    channel: spec.channel,
+    stage: spec.stage,
+    marketCode: spec.marketCode ?? "",
+    language: spec.language ?? "",
+    batchIndex: spec.batchIndex,
+    cursor: spec.cursor ?? null,
+    checkpoint: spec.checkpoint ?? null,
+    status: "pending",
+    attempts: 0,
+    availableAt: new Date(),
+  }));
+  await db
+    .insert(feedExportStepsTable)
+    .values(values)
+    .onConflictDoNothing({
+      target: [
+        feedExportStepsTable.syncRunId,
+        feedExportStepsTable.channel,
+        feedExportStepsTable.stage,
+        feedExportStepsTable.marketCode,
+        feedExportStepsTable.language,
+        feedExportStepsTable.batchIndex,
+      ],
+    });
+}
+
+/**
+ * Claims exactly one eligible step with row locking. Two Autoscale instances
+ * cannot receive the same step, and expired leases are reclaimed naturally.
+ */
+export async function claimNextFeedExportStep(
+  workerId: string,
+  options: { leaseMs?: number; now?: Date } = {},
+): Promise<FeedExportStepResult | null> {
+  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  const now = options.now ?? new Date();
+  const claimed = await db.transaction(async (tx) => {
+    const result = await tx.execute(sql`
+      WITH candidate AS (
+        SELECT id
+        FROM feed_export_steps
+        WHERE
+          (
+            status = 'pending'
+            AND (available_at IS NULL OR available_at <= ${now})
+          )
+          OR (
+            status = 'running'
+            AND lease_expires_at IS NOT NULL
+            AND lease_expires_at <= ${now}
+          )
+        ORDER BY updated_at ASC, created_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      UPDATE feed_export_steps AS step
+      SET
+        status = 'running',
+        attempts = step.attempts + 1,
+        lease_owner = ${workerId},
+        lease_expires_at = ${new Date(now.getTime() + leaseMs)},
+        available_at = NULL,
+        started_at = COALESCE(step.started_at, ${now}),
+        last_error = NULL,
+        updated_at = ${now}
+      FROM candidate
+      WHERE step.id = candidate.id
+      RETURNING step.*
+    `);
+    const row = result.rows[0] as Record<string, unknown> | undefined;
+    return row ? mapStepRow(row) : null;
+  });
+
+  return claimed
+    ? { step: claimed, reclaimed: claimed.attempts > 1 }
+    : null;
+}
+
+export async function renewFeedExportStepLease(
+  stepId: string,
+  workerId: string,
+  options: { leaseMs?: number; now?: Date } = {},
+): Promise<boolean> {
+  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  const now = options.now ?? new Date();
+  const rows = await db
+    .update(feedExportStepsTable)
+    .set({
+      leaseExpiresAt: new Date(now.getTime() + leaseMs),
+      updatedAt: now,
+    })
+    .where(and(
+      eq(feedExportStepsTable.id, stepId),
+      eq(feedExportStepsTable.status, "running"),
+      eq(feedExportStepsTable.leaseOwner, workerId),
+    ))
+    .returning({ id: feedExportStepsTable.id });
+  return rows.length === 1;
+}
+
+export async function completeFeedExportStep(
+  stepId: string,
+  workerId: string,
+  output: {
+    checkpoint?: Record<string, unknown> | null;
+    itemCount?: number | null;
+    artifactPath?: string | null;
+    sha256?: string | null;
+  } = {},
+): Promise<boolean> {
+  const [current] = await db
+    .select()
+    .from(feedExportStepsTable)
+    .where(eq(feedExportStepsTable.id, stepId))
+    .limit(1);
+  if (!current) return false;
+  completeStep(toState(current), workerId, new Date());
+  const rows = await db
+    .update(feedExportStepsTable)
+    .set({
+      status: "completed",
+      checkpoint: output.checkpoint ?? current.checkpoint,
+      itemCount: output.itemCount ?? current.itemCount,
+      artifactPath: output.artifactPath ?? current.artifactPath,
+      sha256: output.sha256 ?? current.sha256,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(feedExportStepsTable.id, stepId),
+      eq(feedExportStepsTable.status, "running"),
+      eq(feedExportStepsTable.leaseOwner, workerId),
+    ))
+    .returning({ id: feedExportStepsTable.id });
+  return rows.length === 1;
+}
+
+export async function failFeedExportStep(
+  stepId: string,
+  workerId: string,
+  error: unknown,
+  maxAttempts = DEFAULT_MAX_ATTEMPTS,
+): Promise<boolean> {
+  const [current] = await db
+    .select()
+    .from(feedExportStepsTable)
+    .where(eq(feedExportStepsTable.id, stepId))
+    .limit(1);
+  if (!current) return false;
+  const next = failStep(
+    toState(current),
+    workerId,
+    new Date(),
+    error instanceof Error ? error.message : String(error),
+    maxAttempts,
+  );
+  const rows = await db
+    .update(feedExportStepsTable)
+    .set({
+      status: next.status,
+      availableAt: next.availableAt,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      completedAt: null,
+      lastError: next.lastError,
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(feedExportStepsTable.id, stepId),
+      eq(feedExportStepsTable.status, "running"),
+      eq(feedExportStepsTable.leaseOwner, workerId),
+    ))
+    .returning({ id: feedExportStepsTable.id });
+  return rows.length === 1;
+}
+
+export async function releaseExpiredFeedExportLeases(): Promise<number> {
+  const rows = await db
+    .update(feedExportStepsTable)
+    .set({
+      status: "pending",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      availableAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(sql`
+      ${feedExportStepsTable.status} = 'running'
+      AND ${feedExportStepsTable.leaseExpiresAt} IS NOT NULL
+      AND ${feedExportStepsTable.leaseExpiresAt} <= NOW()
+    `)
+    .returning({ id: feedExportStepsTable.id });
+  return rows.length;
+}
+
+export async function getFeedExportStepSummary(syncRunId: string): Promise<{
+  total: number;
+  pending: number;
+  running: number;
+  completed: number;
+  failed: number;
+}> {
+  const rows = await db
+    .select({
+      status: feedExportStepsTable.status,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(feedExportStepsTable)
+    .where(eq(feedExportStepsTable.syncRunId, syncRunId))
+    .groupBy(feedExportStepsTable.status);
+  const summary = { total: 0, pending: 0, running: 0, completed: 0, failed: 0 };
+  for (const row of rows) {
+    const status = row.status as keyof typeof summary;
+    if (status in summary && status !== "total") summary[status] = row.count;
+    summary.total += row.count;
+  }
+  return summary;
+}
