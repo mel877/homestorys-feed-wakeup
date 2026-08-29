@@ -21,6 +21,7 @@
 
 import type { CanonicalProduct } from "../../canonical/types";
 import type { AppConfig } from "../../config/schemas";
+import { isValidSalePrice } from "../../promotions/index";
 import { buildFeedDescription } from "../feed-content";
 import { buildMarketShipping } from "../shipping";
 
@@ -473,7 +474,7 @@ export function mapToGoogleResource(
   if (canonical.material.length > 0) resource.material = canonical.material.join("/").slice(0, 200);
 
   // Fix 5: sale price only when product is actively on sale
-  if (canonical.isOnSale && canonical.salePrice) {
+  if (canonical.isOnSale && isValidSalePrice(canonical.price, canonical.salePrice)) {
     resource.salePrice = {
       value: canonical.salePrice.amount.toFixed(2),
       currency: canonical.salePrice.currency,
@@ -535,7 +536,7 @@ export function mapToGoogleRow(
     availability_date: "",
     price: formatPrice(canonical.price.amount, canonical.price.currency),
     // Fix 5: was emitting salePrice whenever non-null, regardless of isOnSale flag
-    sale_price: canonical.isOnSale && canonical.salePrice
+    sale_price: canonical.isOnSale && isValidSalePrice(canonical.price, canonical.salePrice)
       ? formatPrice(canonical.salePrice.amount, canonical.salePrice.currency)
       : "",
     sale_price_effective_date: "", // Fix 10: see TODO in mapToGoogleResource

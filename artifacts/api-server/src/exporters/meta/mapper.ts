@@ -19,6 +19,7 @@
 
 import type { CanonicalProduct } from "../../canonical/types";
 import type { AppConfig } from "../../config/schemas";
+import { isValidSalePrice } from "../../promotions/index";
 import { buildFeedDescription } from "../feed-content";
 import { buildMarketShipping } from "../shipping";
 
@@ -258,7 +259,7 @@ export function mapToMeta(
   const country_row: MetaCountryRow = {
     id,
     price: formatPrice(canonical.price.amount, canonical.price.currency),
-    sale_price: canonical.salePrice
+    sale_price: canonical.isOnSale && isValidSalePrice(canonical.price, canonical.salePrice)
       ? formatPrice(canonical.salePrice.amount, canonical.salePrice.currency)
       : "",
     // Fix 10: sale_price_effective_date requires Shopify price-rule date range.

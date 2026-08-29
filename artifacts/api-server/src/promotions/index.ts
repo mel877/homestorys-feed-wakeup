@@ -17,6 +17,21 @@ export interface PromotionResult {
   invalidReason?: string;
 }
 
+/**
+ * Channel-level safety guard for promotional prices.
+ * A sale price is publishable only when it is positive, uses the same currency,
+ * and is strictly lower than the regular price.
+ */
+export function isValidSalePrice(
+  price: Money,
+  salePrice: Money | null | undefined,
+): salePrice is Money {
+  return !!salePrice
+    && salePrice.amount > 0
+    && salePrice.currency === price.currency
+    && salePrice.amount < price.amount;
+}
+
 /** Discount bucket bands per spec section 15.
  *  All bounds are inclusive: a 10% discount falls into "1_10", a 20% into "11_20", etc.
  *  The 70_plus bucket begins at 70 (inclusive); 51_70 therefore ends at 69.

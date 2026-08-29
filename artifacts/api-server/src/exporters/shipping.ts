@@ -1,5 +1,6 @@
 import type { CanonicalProduct } from "../canonical/types";
 import type { AppConfig, MetaShippingRate } from "../config/schemas";
+import { isValidSalePrice } from "../promotions/index";
 
 function selectShippingPrice(rate: MetaShippingRate, orderValue: number): string | null {
   const tiers = rate.tiers?.length
@@ -32,7 +33,10 @@ export function buildMarketShipping(canonical: CanonicalProduct, config: AppConf
   const rate = config.shipping.meta_feed_rates?.[market.country];
   if (!rate) return "";
 
-  const price = selectShippingPrice(rate, canonical.price.amount);
+  const payableAmount = canonical.isOnSale && isValidSalePrice(canonical.price, canonical.salePrice)
+    ? canonical.salePrice.amount
+    : canonical.price.amount;
+  const price = selectShippingPrice(rate, payableAmount);
   if (price === null) return "";
 
   return `${market.country}::${rate.service}:${price} ${rate.currency}`;

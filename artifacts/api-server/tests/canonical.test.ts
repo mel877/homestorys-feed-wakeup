@@ -230,10 +230,10 @@ describe("Test 2: Sale price", () => {
 
     expect(product).not.toBeNull();
     expect(product!.isOnSale).toBe(true);
-    expect(product!.price.amount).toBe(1190);
+    expect(product!.price).toMatchObject({ amount: 1490, currency: "EUR" });
     expect(product!.compareAtPrice).not.toBeNull();
     expect(product!.compareAtPrice!.amount).toBe(1490);
-    expect(product!.salePrice).not.toBeNull();
+    expect(product!.salePrice).toMatchObject({ amount: 1190, currency: "EUR" });
   });
 });
 
@@ -247,11 +247,13 @@ describe("Test 3: Invalid compare-at price", () => {
     expect(promo.isOnSale).toBe(false);
     expect(promo.priceInvalid).toBe(false); // not invalid, just not a sale
     expect(promo.discountBucket).toBe("none");
+    expect(promo.salePrice).toBeNull();
   });
 
   it("should not be on sale when compare_at equals price", () => {
     const promo = computePromotion("100.00", "100.00", "EUR");
     expect(promo.isOnSale).toBe(false);
+    expect(promo.salePrice).toBeNull();
   });
 });
 
@@ -965,6 +967,13 @@ describe("Data quality score", () => {
     const product = buildCanonical(makeInput(fixture), "BE_FR")!;
     const quality = computeQualityScore(product, testConfig.feedPolicy.quality_weights);
     expect(quality.score).toBeGreaterThan(60);
+  });
+
+  it("awards the full pricing score to a valid promotion", () => {
+    const fixture = loadFixture("sale_product");
+    const product = buildCanonical(makeInput(fixture), "BE_FR")!;
+    const quality = computeQualityScore(product, testConfig.feedPolicy.quality_weights);
+    expect(quality.pricing).toBe(testConfig.feedPolicy.quality_weights.pricing);
   });
 
   it("product without GTIN/MPN scores lower on identifiers", () => {

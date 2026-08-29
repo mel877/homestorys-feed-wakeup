@@ -177,8 +177,9 @@ export function buildCanonical(
   // Rule 2.7 — exclude products priced above 10,000 € (Channable rule set v1.0)
   if (parseFloat(pricing.priceAmount ?? "0") > 10_000) return null;
 
-  const price = buildMoney(pricing.priceAmount, pricing.priceCurrency)!;
+  const currentPrice = buildMoney(pricing.priceAmount, pricing.priceCurrency)!;
   const compareAtPrice = buildMoney(pricing.compareAtPriceAmount, pricing.priceCurrency);
+  const price = promo.isOnSale && compareAtPrice ? compareAtPrice : currentPrice;
 
   // ── Inventory ─────────────────────────────────────────────────────────────
   const eupenLocationId = config.stores.stores["eupen"]?.shopify_location_id ?? null;
@@ -345,7 +346,7 @@ export function buildCanonical(
 
     price,
     compareAtPrice,
-    salePrice: promo.isOnSale ? price : null,
+    salePrice: promo.isOnSale ? promo.salePrice : null,
 
     isOnSale: promo.isOnSale,
     discountPercentage: promo.discountPercentage,

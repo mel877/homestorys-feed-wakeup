@@ -14,6 +14,7 @@
 
 import type { CanonicalProduct } from "../canonical/types";
 import type { FeedPolicyConfig } from "../config/schemas";
+import { isValidSalePrice } from "../promotions/index";
 
 export interface QualityBreakdown {
   score: number; // 0-100
@@ -63,11 +64,17 @@ export function computeQualityScore(
 
   // ── Pricing (15 pts) ─────────────────────────────────────────────────────
   let pricingRatio = 0;
+  const hasValidSale = !product.isOnSale || (
+    product.compareAtPrice !== null
+    && product.compareAtPrice.currency === product.price.currency
+    && product.compareAtPrice.amount === product.price.amount
+    && isValidSalePrice(product.price, product.salePrice)
+  );
   const pricingChecks = [
     product.price.amount > 0,
     !!product.price.currency,
-    // Valid sale: if on sale, compareAtPrice must exist and be > salePrice
-    !product.isOnSale || (product.compareAtPrice !== null && product.compareAtPrice.amount > product.price.amount),
+    // Valid sale: regular/compare-at prices agree and salePrice is strictly lower.
+    hasValidSale,
   ];
   pricingRatio = pricingChecks.filter(Boolean).length / pricingChecks.length;
   if (product.price.amount <= 0) details.push("missing_price");

@@ -130,6 +130,8 @@ function makeConfig(): AppConfig {
         FR: { country: "FR", language: "fr", currency: "EUR" },
         DE: { country: "DE", language: "de", currency: "EUR" },
         AT: { country: "AT", language: "de", currency: "EUR" },
+        CH_DE: { country: "CH", language: "de", currency: "CHF" },
+        CH_FR: { country: "CH", language: "fr", currency: "CHF" },
       },
       language_masters: {
         fr: { markets: ["BE_FR", "FR"] },
@@ -310,8 +312,24 @@ describe("mapToGoogleResource", () => {
   });
 
   it("includes salePrice when product is on sale", () => {
-    const result = mapToGoogleResource(makeCanonical(), makeConfig())!;
+    const result = mapToGoogleResource(makeCanonical({
+      price: { amount: 799, currency: "EUR", formatted: "€799.00" },
+      salePrice: { amount: 599, currency: "EUR", formatted: "€599.00" },
+    }), makeConfig())!;
     expect(result.salePrice).toEqual({ value: "599.00", currency: "EUR" });
+  });
+
+  it("omits salePrice when it is equal to the regular price", () => {
+    const result = mapToGoogleResource(makeCanonical(), makeConfig())!;
+    expect(result.salePrice).toBeUndefined();
+  });
+
+  it("omits salePrice when its currency differs from the regular price", () => {
+    const result = mapToGoogleResource(makeCanonical({
+      price: { amount: 799, currency: "EUR", formatted: "€799.00" },
+      salePrice: { amount: 599, currency: "USD", formatted: "$599.00" },
+    }), makeConfig())!;
+    expect(result.salePrice).toBeUndefined();
   });
 
   it("omits salePrice when not on sale", () => {
@@ -456,8 +474,26 @@ describe("mapToGoogleRow", () => {
   });
 
   it("formats sale_price when on sale", () => {
-    const row = mapToGoogleRow(makeCanonical(), makeConfig())!;
+    const row = mapToGoogleRow(makeCanonical({
+      price: { amount: 799, currency: "EUR", formatted: "€799.00" },
+      salePrice: { amount: 599, currency: "EUR", formatted: "€599.00" },
+    }), makeConfig())!;
     expect(row.sale_price).toBe("599.00 EUR");
+  });
+
+  it.each([
+    ["CH_DE", "de"],
+    ["CH_FR", "fr"],
+  ])("keeps valid Swiss promotion prices in CHF for %s", (market, language) => {
+    const row = mapToGoogleRow(makeCanonical({
+      market,
+      language,
+      price: { amount: 799, currency: "CHF", formatted: "CHF 799.00" },
+      compareAtPrice: { amount: 799, currency: "CHF", formatted: "CHF 799.00" },
+      salePrice: { amount: 599, currency: "CHF", formatted: "CHF 599.00" },
+    }), makeConfig())!;
+    expect(row.price).toBe("799.00 CHF");
+    expect(row.sale_price).toBe("599.00 CHF");
   });
 
   it("leaves sale_price empty when not on sale", () => {
@@ -505,6 +541,28 @@ describe("mapToGoogleRow", () => {
     )!;
     expect(result.shipping).toBe("DE::Standardlieferung:0 EUR");
     expect(result.unit_pricing_measure).toBe("");
+  });
+
+  it("uses the payable sale price when selecting a shipping tier", () => {
+    const config = makeConfig();
+    config.shipping.meta_feed_rates = {
+      DE: {
+        service: "Standardlieferung",
+        currency: "EUR",
+        tiers: [
+          { minimum_order_value: 0, price: "9.50" },
+          { minimum_order_value: 250, price: "0" },
+        ],
+      },
+    };
+    const result = mapToGoogleRow(makeCanonical({
+      market: "DE",
+      language: "de",
+      isOnSale: true,
+      price: { amount: 300, currency: "EUR", formatted: "€300.00" },
+      salePrice: { amount: 249, currency: "EUR", formatted: "€249.00" },
+    }), config)!;
+    expect(result.shipping).toBe("DE::Standardlieferung:9.50 EUR");
   });
 
   it("adds the exact German short-description template at the inclusive 500-character boundary", () => {

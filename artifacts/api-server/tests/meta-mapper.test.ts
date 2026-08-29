@@ -110,6 +110,7 @@ function makeConfig(): AppConfig {
         DE: { country: "DE", language: "de", currency: "EUR" },
         AT: { country: "AT", language: "de", currency: "EUR" },
         CH_DE: { country: "CH", language: "de", currency: "CHF" },
+        CH_FR: { country: "CH", language: "fr", currency: "CHF" },
         LU_DE: { country: "LU", language: "de", currency: "EUR" },
       },
       language_masters: {
@@ -310,6 +311,49 @@ describe("mapToMeta", () => {
     expect(result.country_row.sale_price).toBe("249.00 EUR");
   });
 
+  it("country_row.sale_price is empty when it equals the regular price", () => {
+    const canonical = makeCanonical({
+      isOnSale: true,
+      salePrice: { amount: 349, currency: "EUR", formatted: "€349.00" },
+    });
+    const result = mapToMeta(canonical, makeConfig())!;
+    expect(result.country_row.sale_price).toBe("");
+  });
+
+  it("country_row.sale_price is empty when it exceeds the regular price", () => {
+    const canonical = makeCanonical({
+      isOnSale: true,
+      salePrice: { amount: 399, currency: "EUR", formatted: "€399.00" },
+    });
+    const result = mapToMeta(canonical, makeConfig())!;
+    expect(result.country_row.sale_price).toBe("");
+  });
+
+  it("country_row.sale_price is empty when its currency is incorrect", () => {
+    const canonical = makeCanonical({
+      isOnSale: true,
+      salePrice: { amount: 249, currency: "USD", formatted: "$249.00" },
+    });
+    const result = mapToMeta(canonical, makeConfig())!;
+    expect(result.country_row.sale_price).toBe("");
+  });
+
+  it.each([
+    ["CH_DE", "de"],
+    ["CH_FR", "fr"],
+  ])("keeps valid Swiss promotion prices in CHF for %s", (market, language) => {
+    const result = mapToMeta(makeCanonical({
+      market,
+      language,
+      isOnSale: true,
+      price: { amount: 799, currency: "CHF", formatted: "CHF 799.00" },
+      compareAtPrice: { amount: 799, currency: "CHF", formatted: "CHF 799.00" },
+      salePrice: { amount: 599, currency: "CHF", formatted: "CHF 599.00" },
+    }), makeConfig())!;
+    expect(result.country_row.price).toBe("799.00 CHF");
+    expect(result.country_row.sale_price).toBe("599.00 CHF");
+  });
+
   it("country_row.availability 'in stock' for in_stock", () => {
     const result = mapToMeta(makeCanonical({ availability: "in_stock" }), makeConfig())!;
     expect(result.country_row.availability).toBe("in stock");
@@ -388,6 +432,28 @@ describe("mapToMeta", () => {
       config,
     )!;
     expect(result.country_row.shipping).toBe("DE::Standardlieferung:0 EUR");
+  });
+
+  it("uses the payable sale price when selecting a shipping tier", () => {
+    const config = makeConfig();
+    config.shipping.meta_feed_rates = {
+      DE: {
+        service: "Standardlieferung",
+        currency: "EUR",
+        tiers: [
+          { minimum_order_value: 0, price: "9.50" },
+          { minimum_order_value: 250, price: "0" },
+        ],
+      },
+    };
+    const result = mapToMeta(makeCanonical({
+      market: "DE",
+      language: "de",
+      isOnSale: true,
+      price: { amount: 300, currency: "EUR", formatted: "€300.00" },
+      salePrice: { amount: 249, currency: "EUR", formatted: "€249.00" },
+    }), config)!;
+    expect(result.country_row.shipping).toBe("DE::Standardlieferung:9.50 EUR");
   });
 
   it("country_row.shipping is BE::Livraison Standard:9.60 EUR for BE_FR market", () => {
