@@ -1,0 +1,75 @@
+Je souhaite abandonner pour le moment la piste Reserved VM.
+
+Mon objectif est d'obtenir des flux Google Merchant Center et Meta Catalog entièrement fonctionnels, prêts à l'emploi, avec mon déploiement Autoscale actuel et sans coût d'infrastructure supplémentaire.
+
+IMPORTANT : dans le dashboard actuel, il n'existe pas de bouton ou de fonction utilisateur “Export”. Ne construis donc pas la solution en supposant qu'un utilisateur lance manuellement un export depuis le dashboard.
+
+Le problème actuel est que les générations complètes Google + Meta peuvent durer plusieurs minutes. Une requête HTTP longue finit par être interrompue et une tâche détachée en mémoire peut être perdue lorsqu'une instance Autoscale redémarre.
+
+Ne modifie rien pour cette première étape. Analyse uniquement l'architecture actuelle.
+
+Je veux que l'architecture finale fonctionne ainsi :
+
+les URLs publiques Google et Meta servent toujours le dernier snapshot complètement généré et validé ;
+aucune génération longue ne doit dépendre d'une requête HTTP maintenue ouverte ;
+aucune tâche critique ne doit exister uniquement en mémoire du processus ;
+la progression des générations doit être persistée dans neondb ;
+les générations doivent être découpées en petits traitements reprenables, par plateforme, marché et éventuellement par batch de produits ;
+si Autoscale redémarre, le traitement doit pouvoir reprendre à partir du dernier état enregistré ;
+un snapshot incomplet ne doit jamais remplacer le snapshot public précédent ;
+lorsqu'un nouveau snapshot complet passe tous les validateurs, il devient atomiquement le snapshot public ;
+le dernier snapshot valide reste servi pendant toute génération ou en cas d'échec.
+
+Étudie également comment déclencher et poursuivre ces traitements avec les mécanismes déjà disponibles dans le projet et dans notre offre Replit actuelle, sans Reserved VM et sans service payant supplémentaire.
+
+Si un traitement peut être intégré à une synchronisation Shopify existante, à un endpoint court déjà appelé, à une reprise automatique au démarrage ou à un autre mécanisme existant, privilégie cette solution plutôt que d'ajouter une nouvelle infrastructure.
+
+Il faut conserver strictement :
+
+la production database neondb ;
+homestorys-flux.eteamsys.be ;
+le déploiement Autoscale ;
+les exclusions produit actuellement configurées ;
+les règles Google et Meta existantes ;
+les marchés existants ;
+la récupération Shopify contextualPricing pour la Suisse ;
+CHF obligatoire pour CH_DE et CH_FR ;
+aucune conversion interne EUR → CHF ;
+sale_price < price et même devise ;
+les validateurs existants ;
+le système de fallback vers le dernier snapshot valide ;
+le guardrail actuel, sans augmenter son seuil.
+
+Les corrections CHF de la base sont déjà terminées : les variantes CH éligibles ont été réparées et il reste 0 variante EUR éligible. Les EUR restants correspondent aux produits exclus et ne doivent pas être réintroduits.
+
+Analyse notamment si la meilleure solution est :
+
+A. génération incrémentale persistée en DB ;
+
+B. fractionnement Google/Meta par marché ;
+
+C. reprise automatique des jobs interrompus ;
+
+D. combinaison A+B+C.
+
+Vérifie dans le code actuel ce qui existe déjà et réutilise autant que possible l'architecture actuelle au lieu de reconstruire le moteur.
+
+Je veux également savoir si les flux peuvent devenir automatiquement à jour sans bouton Export dans le dashboard.
+
+À la fin de l'analyse, donne-moi :
+
+la solution recommandée ;
+pourquoi elle fonctionne avec Autoscale ;
+comment les traitements sont déclenchés sans bouton Export ;
+comment un redémarrage Autoscale est géré ;
+comment Google et Meta continuent à recevoir un flux valide pendant une nouvelle génération ;
+les modifications de code réellement nécessaires ;
+une estimation du risque de régression ;
+la procédure de test permettant de confirmer que les URLs sont ensuite directement utilisables dans Google Merchant Center et Meta Commerce Manager.
+
+Ne crée aucune tâche.
+Ne lance aucun Full Sync.
+Ne lance aucune génération Google/Meta.
+Ne modifie aucun fichier pour l'instant.
+
+Je veux d'abord le plan technique.
