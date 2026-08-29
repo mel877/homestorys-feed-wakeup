@@ -1,0 +1,75 @@
+Merci.
+Je comprends maintenant que le seul élément manquant pour conserver Autoscale est un mécanisme de réveil indépendant du trafic.
+
+Je souhaite toujours obtenir des flux Google Merchant Center et Meta Catalog fiables, automatiquement actualisés, sans Reserved VM et si possible sans coût supplémentaire.
+
+Avant toute modification, étudie donc la possibilité d’utiliser un scheduler externe gratuit, en priorité GitHub Actions si le projet peut être relié à GitHub.
+
+L’architecture cible serait :
+
+Autoscale Replit conservé ;
+neondb conserve l’état durable des jobs ;
+les exports sont fractionnés en petites étapes idempotentes et reprenables ;
+les snapshots publics actuels restent servis pendant les traitements ;
+aucun bouton Export n’est nécessaire dans le dashboard ;
+un endpoint interne très court permet uniquement de réclamer/exécuter ou réveiller la prochaine étape ;
+un scheduler externe appelle périodiquement cet endpoint ;
+si l’instance Autoscale redémarre, l’appel suivant reprend le job à partir de neondb.
+
+Étudie en priorité :
+
+OPTION A — GitHub Actions Scheduled Workflow
+
+Un workflow planifié appelle périodiquement l’application Replit via HTTPS.
+
+Il doit utiliser un secret sécurisé, sans exposer INTERNAL_API_SECRET publiquement.
+
+OPTION B — autre scheduler externe gratuit
+
+Si GitHub Actions n’est pas adapté, propose un service gratuit suffisamment fiable permettant simplement d’appeler périodiquement un endpoint HTTPS.
+
+Contraintes :
+
+aucune Reserved VM ;
+aucun Scheduled Deployment Replit payant ;
+aucune nouvelle base ;
+aucun changement de domaine ;
+aucune modification des règles Google/Meta ;
+aucune modification des exclusions ;
+CHF obligatoire en Suisse ;
+aucun EUR éligible en Suisse ;
+sale_price < price ;
+conservation des validateurs et du guardrail ;
+conservation du dernier snapshot valide en cas d’échec.
+
+Vérifie également qu’un appel du scheduler peut rester court et ne doit pas attendre la génération complète d’un flux.
+
+Je veux éviter de retomber dans le problème actuel d’une requête HTTP ouverte pendant plusieurs minutes.
+
+Chaque appel doit idéalement :
+
+réveiller Autoscale ;
+réclamer une étape disponible ;
+traiter un batch borné ;
+enregistrer le checkpoint dans neondb ;
+retourner rapidement un HTTP 200 ;
+laisser l’appel suivant poursuivre le travail.
+
+Analyse combien d’appels seraient nécessaires pour terminer une génération complète Google + Meta et quelle fréquence de scheduler serait raisonnable.
+
+Vérifie aussi si GitHub Actions peut être utilisé avec notre configuration actuelle sans coût supplémentaire réel pour notre usage prévu. Si cela dépend de notre type de repository ou de notre quota GitHub, indique-le clairement.
+
+Ne modifie aucun fichier.
+Ne crée aucun workflow.
+Ne crée aucune tâche.
+Ne lance aucun Full Sync ni aucune génération.
+
+À la fin, réponds :
+
+SOLUTION GRATUITE VIABLE
+
+ou
+
+AUCUNE SOLUTION GRATUITE FIABLE
+
+puis donne l’architecture exacte recommandée.
