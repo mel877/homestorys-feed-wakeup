@@ -160,6 +160,39 @@ function makeInput(fixture: ReturnType<typeof loadFixture>): BuildCanonicalInput
   };
 }
 
+function makeSwissInput(priceCurrency: string): BuildCanonicalInput {
+  const fixture = loadFixture("normal_product");
+  const config = structuredClone(testConfig);
+  config.markets.markets["CH_DE"] = {
+    country: "CH",
+    language: "de",
+    currency: "CHF",
+    base_url: "https://shop.homestorys.com/de-ch/",
+  };
+  config.markets.markets["CH_FR"] = {
+    country: "CH",
+    language: "fr",
+    currency: "CHF",
+    base_url: "https://shop.homestorys.com/fr-ch/",
+    pricing_market: "CH_DE",
+  };
+
+  const source = fixture.marketVariants[0]!;
+  return {
+    ...makeInput(fixture),
+    config,
+    marketVariants: [
+      {
+        ...source,
+        marketCode: "CH_DE",
+        priceAmount: "899.00",
+        priceCurrency,
+        productUrl: "https://shop.homestorys.com/de-ch/products/table",
+      },
+    ],
+  };
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Test 1: Standard price (no compare-at, not on sale)
 // ════════════════════════════════════════════════════════════════════════════
@@ -215,6 +248,42 @@ describe("Language market aliases", () => {
     expect(canonical!.productUrl).toMatch(
       /^https:\/\/shop\.homestorys\.com\/fr-ch\/products\/.*\?variant=\d+$/,
     );
+  });
+});
+
+describe("Swiss currency guard", () => {
+  it("accepts a CHF price for CH_DE", () => {
+    const canonical = buildCanonical(makeSwissInput("CHF"), "CH_DE");
+
+    expect(canonical).not.toBeNull();
+    expect(canonical!.price).toMatchObject({ amount: 899, currency: "CHF" });
+  });
+
+  it("rejects an EUR price for CH_DE without converting it", () => {
+    const canonical = buildCanonical(makeSwissInput("EUR"), "CH_DE");
+
+    expect(canonical).toBeNull();
+  });
+
+  it("protects CH_FR when pricing is resolved through CH_DE", () => {
+    const canonical = buildCanonical(makeSwissInput("EUR"), "CH_FR");
+
+    expect(canonical).toBeNull();
+  });
+
+  it("keeps EUR markets unchanged", () => {
+    const fixture = loadFixture("normal_product");
+    const canonical = buildCanonical(makeInput(fixture), "BE_FR");
+
+    expect(canonical).not.toBeNull();
+    expect(canonical!.price).toMatchObject({ amount: 899, currency: "EUR" });
+  });
+
+  it("does not replace a non-CHF Swiss currency with CHF", () => {
+    const canonical = buildCanonical(makeSwissInput("EUR"), "CH_DE");
+
+    expect(canonical).toBeNull();
+    expect(canonical?.price.currency).not.toBe("CHF");
   });
 });
 

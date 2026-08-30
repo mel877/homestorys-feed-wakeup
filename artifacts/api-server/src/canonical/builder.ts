@@ -108,6 +108,10 @@ export function buildCanonical(
   const pricing = resolvePricing(pricingMarketCode, input.marketVariants, market.currency);
   if (!pricing) return null; // no market variant row → product not available in this market
 
+  // Swiss canonicals must only use the CHF contextual price persisted by the
+  // Shopify pricing sync. Never convert or substitute a non-CHF price.
+  if (market.currency === "CHF" && pricing.priceCurrency !== "CHF") return null;
+
   if (!pricing.isEligible) return null; // explicitly ineligible
 
   // ── Resolve content ────────────────────────────────────────────────────────
