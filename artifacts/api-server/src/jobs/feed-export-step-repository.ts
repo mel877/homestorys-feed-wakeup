@@ -32,6 +32,26 @@ export interface FeedExportStepResult {
 
 const DEFAULT_LEASE_MS = 4 * 60 * 1_000;
 const DEFAULT_MAX_ATTEMPTS = 5;
+const EXPECTED_META_FINALIZER_REQUEUE_COUNT = 9;
+
+export class FeedFinalizerRequeueCardinalityError extends Error {
+  constructor(public readonly matched: number) {
+    super(
+      `Expected exactly ${EXPECTED_META_FINALIZER_REQUEUE_COUNT} blocked Meta finalizer steps, found ${matched}`,
+    );
+    this.name = "FeedFinalizerRequeueCardinalityError";
+  }
+}
+
+export interface RequeuedMetaFinalizers {
+  count: number;
+  targets: Array<{
+    id: string;
+    marketCode: string;
+    language: string;
+    batchIndex: number;
+  }>;
+}
 
 function toState(step: FeedExportStep): FeedExportStepState {
   return {
@@ -102,6 +122,55 @@ export async function ensureFeedExportSteps(
         feedExportStepsTable.batchIndex,
       ],
     });
+}
+
+export async function requeueBlockedMetaFinalizers(
+  syncRunId: string,
+): Promise<RequeuedMetaFinalizers> {
+  return db.transaction(async (tx) => {
+    const result = await tx.execute(sql`
+      UPDATE feed_export_steps
+      SET
+        status = 'pending',
+        available_at = NOW(),
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        started_at = NULL,
+        completed_at = NULL,
+        last_error = NULL,
+        item_count = NULL,
+        artifact_path = NULL,
+        sha256 = NULL,
+        updated_at = NOW()
+      WHERE sync_run_id = ${syncRunId}::uuid
+        AND channel = 'meta'
+        AND stage = 'finalize'
+        AND status = 'completed'
+        AND checkpoint->>'result' = 'blocked'
+        AND checkpoint->>'published' = 'false'
+      RETURNING id, market_code, language, batch_index
+    `);
+    const rows = result.rows as Array<{
+      id: string;
+      market_code: string;
+      language: string;
+      batch_index: number;
+    }>;
+
+    if (rows.length !== EXPECTED_META_FINALIZER_REQUEUE_COUNT) {
+      throw new FeedFinalizerRequeueCardinalityError(rows.length);
+    }
+
+    return {
+      count: rows.length,
+      targets: rows.map((row) => ({
+        id: String(row.id),
+        marketCode: String(row.market_code),
+        language: String(row.language),
+        batchIndex: Number(row.batch_index),
+      })),
+    };
+  });
 }
 
 export interface DurableFeedRunPlanInput {

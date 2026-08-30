@@ -28,6 +28,7 @@ import { SwissPriceValidationError } from "../shopify/swiss-price-repair";
 import { tryAcquireMarketPriceWriteLock } from "../shopify/market-price-write-lock";
 import feedPumpRouter from "./feed-pump";
 import feedPlanRouter from "./feed-plan";
+import feedFinalizersRouter from "./feed-finalizers";
 
 const SWISS_PRICE_REPAIR_JOB_NAME = "swiss-price-repair";
 const SWISS_PRICE_REPAIR_OPERATION = "repair:swiss-prices";
@@ -95,6 +96,7 @@ const router: IRouter = Router();
 router.use(requireInternalAuth);
 router.use(feedPumpRouter);
 router.use(feedPlanRouter);
+router.use(feedFinalizersRouter);
 
 // ── Sync trigger routes ────────────────────────────────────────────────────────
 
