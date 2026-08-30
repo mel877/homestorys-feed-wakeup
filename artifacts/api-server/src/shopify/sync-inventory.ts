@@ -13,11 +13,55 @@ import { eq, sql } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config";
 import type { ShopifyClient } from "./client";
-import { downloadBulkResults, runBulkQuery } from "./bulk-ops";
+import { downloadBulkResults, readBulkJsonlSlice, runBulkQuery } from "./bulk-ops";
 import type { SyncRunTracker } from "./sync-run-tracker";
 import type { BulkNode } from "./types";
 
 const logger = rootLogger.child({ module: "sync-inventory" });
+export const MAX_DURABLE_INVENTORY_LINES_PER_SLICE = 1_000;
+
+export interface DurableInventoryGroup {
+  parent: InventoryItemNode;
+  children: BulkNode[];
+  startOffset: number;
+}
+
+export async function readDurableInventoryGroups(
+  url: string,
+  options: {
+    byteOffset?: number; maxLines?: number; shouldContinue?: () => boolean | Promise<boolean>;
+    fetcher?: typeof fetch;
+    pendingGroup?: DurableInventoryGroup | null;
+  } = {},
+): Promise<{ groups: DurableInventoryGroup[]; pendingGroup: DurableInventoryGroup | null; nextByteOffset: number; eof: boolean }> {
+  const offset = options.byteOffset ?? 0;
+  const slice = await readBulkJsonlSlice<BulkNode>(url, {
+    offset, maxLines: options.maxLines ?? MAX_DURABLE_INVENTORY_LINES_PER_SLICE,
+    shouldContinue: options.shouldContinue, fetcher: options.fetcher,
+  });
+  const groups: DurableInventoryGroup[] = [];
+  let current: DurableInventoryGroup | null = options.pendingGroup ?? null;
+  for (const line of slice.lines) {
+    if (isInventoryItemNode(line.value)) {
+      if (current) groups.push(current);
+      current = { parent: line.value, children: [], startOffset: line.startOffset };
+    } else if (current) current.children.push(line.value);
+  }
+  if (current && slice.eof) {
+    groups.push(current);
+    current = null;
+  }
+  const firstUncommitted = groups[25];
+  if (firstUncommitted) {
+    return { groups: groups.slice(0, 25), pendingGroup: null, nextByteOffset: firstUncommitted.startOffset, eof: false };
+  }
+  return {
+    groups,
+    pendingGroup: current,
+    nextByteOffset: slice.nextOffset,
+    eof: slice.eof,
+  };
+}
 
 // ── GraphQL bulk query ────────────────────────────────────────────────────────
 
@@ -121,13 +165,25 @@ export interface InventorySyncSliceOptions {
   startBatchIndex?: number;
   beforeBatch?: () => Promise<boolean>;
   beforeFinalize?: () => Promise<boolean>;
+  /** Durable callers fence each committed SQL batch with their step cursor. */
+  commitUnit?: (
+    cursor: Record<string, unknown>,
+    writer: (tx: any) => Promise<void>,
+  ) => Promise<void>;
+  byteOffset?: number;
+  fetcher?: typeof fetch;
+  finalized?: boolean;
+  pendingInventoryGroup?: DurableInventoryGroup | null;
 }
 
 export async function syncInventory(
   client: ShopifyClient,
   tracker: SyncRunTracker,
   options: InventorySyncSliceOptions = {},
-): Promise<{ completed: boolean; nextBatchIndex: number }> {
+): Promise<{ completed: boolean; nextBatchIndex: number; byteOffset?: number; finalized?: boolean; pendingInventoryGroup?: DurableInventoryGroup | null }> {
+  if (options.bulkResultUrl && options.commitUnit && options.finalized) {
+    return { completed: true, nextBatchIndex: 0, byteOffset: options.byteOffset, finalized: true, pendingInventoryGroup: options.pendingInventoryGroup };
+  }
   logger.info("Starting inventory sync via bulk operation");
 
   // Load variant GID → DB ID map
@@ -142,15 +198,16 @@ export async function syncInventory(
       .map((v) => [v.inventoryItemId!, v]),
   );
 
-  // Collect bulk nodes
+  const durableMode = !!options.bulkResultUrl && !!options.commitUnit;
+  const initialPendingInventoryGroup = options.pendingInventoryGroup;
+  let durableNextByteOffset: number | undefined;
+  let durableEof = false;
+  // Collect bulk nodes (legacy only; durable mode reads a bounded prefix).
   const inventoryItems = new Map<string, InventoryItemNode>();
   const levelsByItem = new Map<string, InventoryLevelNode[]>();
 
   let nodeCount = 0;
-  const bulkNodes = options.bulkResultUrl
-    ? downloadBulkResults<BulkNode>(options.bulkResultUrl)
-    : runBulkQuery<BulkNode>(client, BULK_INVENTORY_QUERY);
-  for await (const node of bulkNodes) {
+  const acceptNode = (node: BulkNode) => {
     nodeCount++;
     tracker.bumpApiCalls();
 
@@ -161,6 +218,29 @@ export async function syncInventory(
       list.push(node);
       levelsByItem.set(node.__parentId, list);
     }
+  };
+  if (durableMode) {
+    const grouped = await readDurableInventoryGroups(options.bulkResultUrl!, {
+      byteOffset: options.byteOffset,
+      shouldContinue: options.beforeBatch,
+      fetcher: options.fetcher,
+      pendingGroup: options.pendingInventoryGroup,
+    });
+    // Inventory is committed per bounded read; replay starts at a parent
+    // boundary if the next parent did not fit.
+    const groups = grouped.groups.slice(0, 25);
+    for (const group of groups) {
+      acceptNode(group.parent);
+      for (const child of group.children) acceptNode(child);
+    }
+    durableNextByteOffset = grouped.groups[25]?.startOffset ?? grouped.nextByteOffset;
+    durableEof = grouped.eof && grouped.groups.length <= 25;
+    options.pendingInventoryGroup = grouped.pendingGroup;
+  } else {
+    const bulkNodes = options.bulkResultUrl
+      ? downloadBulkResults<BulkNode>(options.bulkResultUrl)
+      : runBulkQuery<BulkNode>(client, BULK_INVENTORY_QUERY);
+    for await (const node of bulkNodes) acceptNode(node);
   }
 
   logger.info({ inventoryItems: inventoryItems.size, totalNodes: nodeCount }, "Inventory bulk complete");
@@ -190,13 +270,19 @@ export async function syncInventory(
   }
 
   // Upsert in batches
-  const batches = chunks(rows, 200);
+  const batches = durableMode ? (rows.length > 0 ? [rows] : []) : chunks(rows, 200);
   for (const [batchIndex, batch] of batches.entries()) {
     if (batchIndex < (options.startBatchIndex ?? 0)) continue;
     if (options.beforeBatch && !await options.beforeBatch()) {
+      if (durableMode) {
+        return {
+          completed: false, nextBatchIndex: 0, byteOffset: options.byteOffset,
+          pendingInventoryGroup: initialPendingInventoryGroup, finalized: false,
+        };
+      }
       return { completed: false, nextBatchIndex: batchIndex };
     }
-    await db
+    const writeBatch = async (tx: any) => tx
       .insert(inventoryLevelsTable)
       .values(batch)
       .onConflictDoUpdate({
@@ -210,18 +296,59 @@ export async function syncInventory(
           updatedAt: new Date(),
         },
       });
+    if (options.commitUnit) {
+      await options.commitUnit(durableMode
+        ? {
+          byteOffset: durableNextByteOffset ?? options.byteOffset ?? 0,
+          ...(options.pendingInventoryGroup ? { pendingInventoryGroup: options.pendingInventoryGroup } : {}),
+        }
+        : { nextBatchIndex: batchIndex + 1 }, writeBatch);
+    } else {
+      await writeBatch(db);
+    }
     tracker.bumpChanged(batch.length);
+  }
+  if (durableMode && batches.length === 0 && inventoryItems.size > 0) {
+    await options.commitUnit!({
+      byteOffset: durableNextByteOffset ?? options.byteOffset ?? 0,
+      ...(options.pendingInventoryGroup ? { pendingInventoryGroup: options.pendingInventoryGroup } : {}),
+    }, async () => {});
+  }
+  if (durableMode && !durableEof) {
+    if (batches.length === 0 && options.pendingInventoryGroup && inventoryItems.size === 0) {
+      await options.commitUnit!({
+        byteOffset: durableNextByteOffset ?? options.byteOffset ?? 0,
+        pendingInventoryGroup: options.pendingInventoryGroup,
+      }, async () => {});
+    }
+    return {
+      completed: false, nextBatchIndex: 0, byteOffset: durableNextByteOffset,
+      pendingInventoryGroup: options.pendingInventoryGroup, finalized: false,
+    };
   }
 
   logger.info({ rows: rows.length }, "Inventory levels upserted");
 
   if (options.beforeFinalize && !await options.beforeFinalize()) {
-    return { completed: false, nextBatchIndex: batches.length };
+    return {
+      completed: false, nextBatchIndex: batches.length,
+      byteOffset: durableNextByteOffset,
+    };
   }
-  // Update market_variants.availability from aggregated inventory
-  await updateMarketAvailability(tracker);
+  // Update availability and the finalized cursor in one fenced transaction.
+  if (durableMode) {
+    await options.commitUnit!({
+      byteOffset: durableNextByteOffset ?? options.byteOffset ?? 0,
+      finalized: true,
+    }, async (tx) => updateMarketAvailability(tracker, tx));
+  } else {
+    await updateMarketAvailability(tracker);
+  }
   logger.info("Inventory sync complete");
-  return { completed: true, nextBatchIndex: batches.length };
+  return {
+    completed: true, nextBatchIndex: batches.length,
+    byteOffset: durableNextByteOffset, ...(durableMode ? { finalized: true } : {}),
+  };
 }
 
 /**
@@ -229,30 +356,25 @@ export async function syncInventory(
  * Logic: a variant is "in_stock" for a market if total available > 0 across
  * all locations. Future: can be market-specific if location → market mapping exists.
  */
-async function updateMarketAvailability(tracker: SyncRunTracker): Promise<void> {
+async function updateMarketAvailability(tracker: SyncRunTracker, executor: any = db): Promise<void> {
   logger.info("Updating market availability from inventory levels...");
 
   // Aggregate total available inventory per variant
-  const aggregated = await db.execute<{ variant_id: string; total_available: string }>(sql`
-    SELECT variant_id, SUM(available) AS total_available
-    FROM inventory_levels
-    GROUP BY variant_id
+  const updated = await executor.execute(sql`
+    UPDATE market_variants mv
+    SET availability = CASE WHEN stock.total_available > 0 THEN 'in_stock' ELSE 'out_of_stock' END,
+        updated_at = NOW()
+    FROM (
+      SELECT variant_id, COALESCE(SUM(available), 0) AS total_available
+      FROM inventory_levels
+      GROUP BY variant_id
+    ) stock
+    WHERE mv.variant_id = stock.variant_id
+    RETURNING mv.variant_id
   `);
 
-  const rows = (aggregated as unknown as { rows: Array<{ variant_id: string; total_available: string }> }).rows;
-
-  for (const { variant_id, total_available } of rows) {
-    const total = parseInt(total_available, 10);
-    const availability = total > 0 ? "in_stock" : "out_of_stock";
-
-    await db
-      .update(marketVariantsTable)
-      .set({ availability, updatedAt: new Date() })
-      .where(eq(marketVariantsTable.variantId, variant_id));
-  }
-
   // Also update the variant.available flag
-  await db.execute(sql`
+  await executor.execute(sql`
     UPDATE variants v
     SET available = (
       SELECT COALESCE(SUM(il.available), 0) > 0
@@ -265,8 +387,9 @@ async function updateMarketAvailability(tracker: SyncRunTracker): Promise<void> 
     )
   `);
 
-  tracker.bumpChanged(rows.length);
-  logger.debug({ variantsUpdated: rows.length }, "Market availability updated");
+  const count = (updated as { rows?: unknown[] }).rows?.length ?? 0;
+  tracker.bumpChanged(count);
+  logger.debug({ variantsUpdated: count }, "Market availability updated");
 }
 
 // ── Targeted inventory update (for webhook) ──────────────────────────────────

@@ -24,6 +24,7 @@ import {
   releaseExpiredShopifySyncLeases,
   saveShopifySyncStepProgress,
   validateShopifyCompletionGate,
+  commitShopifySyncUnit,
   type ShopifySyncPhase,
 } from "./shopify-sync-step-repository";
 
@@ -232,11 +233,25 @@ async function executeProductsSlice(
   const startBatchIndex = typeof cursor?.nextBatchIndex === "number"
     ? cursor.nextBatchIndex
     : 0;
+  const byteOffset = typeof cursor?.byteOffset === "number" ? cursor.byteOffset : 0;
   const result = await syncProducts(client, tracker, {
     bulkResultUrl: resultUrl,
     startBatchIndex,
+    byteOffset,
+    seenProductGids: Array.isArray(cursor?.seenProductGids)
+      ? cursor.seenProductGids.filter((gid): gid is string => typeof gid === "string")
+      : [],
+    finalized: cursor?.finalized === true,
+    pendingProductGroup: cursor?.pendingProductGroup as never,
     beforeBatch: async () => Date.now() < context.deadlineMs && context.heartbeat(),
     beforeFinalize: async () => Date.now() < context.deadlineMs && context.heartbeat(),
+    commitUnit: async (cursor, writer) => commitShopifySyncUnit({
+      stepId: step.id,
+      workerId: context.workerId,
+      cursor,
+      checkpoint: { stage: "batches", operationId, resultUrl },
+      writer,
+    }),
   });
   const next = {
     stage: result.completed ? "complete" : "batches",
@@ -244,8 +259,26 @@ async function executeProductsSlice(
     resultUrl,
   };
   return result.completed
-    ? { status: "completed", checkpoint: next }
-    : { status: "running", cursor: { nextBatchIndex: result.nextBatchIndex }, checkpoint: next };
+    ? {
+      status: "completed",
+      cursor: {
+        byteOffset: result.byteOffset ?? byteOffset,
+        ...(result.seenProductGids ? { seenProductGids: result.seenProductGids } : {}),
+        ...(result.pendingProductGroup ? { pendingProductGroup: result.pendingProductGroup } : {}),
+        ...(result.finalized ? { finalized: true } : {}),
+      },
+      checkpoint: next,
+    }
+    : {
+      status: "running",
+      cursor: {
+        byteOffset: result.byteOffset ?? byteOffset,
+        ...(result.seenProductGids ? { seenProductGids: result.seenProductGids } : {}),
+        ...(result.pendingProductGroup ? { pendingProductGroup: result.pendingProductGroup } : {}),
+        ...(result.finalized ? { finalized: true } : {}),
+      },
+      checkpoint: next,
+    };
 }
 
 async function executeInventorySlice(
@@ -282,16 +315,43 @@ async function executeInventorySlice(
   }
   const cursor = step.cursor as Record<string, unknown> | null;
   const startBatchIndex = typeof cursor?.nextBatchIndex === "number" ? cursor.nextBatchIndex : 0;
+  const byteOffset = typeof cursor?.byteOffset === "number" ? cursor.byteOffset : 0;
   const result = await syncInventory(client, tracker, {
     bulkResultUrl: resultUrl,
     startBatchIndex,
+    byteOffset,
+    finalized: cursor?.finalized === true,
+    pendingInventoryGroup: cursor?.pendingInventoryGroup as never,
     beforeBatch: async () => Date.now() < context.deadlineMs && context.heartbeat(),
     beforeFinalize: async () => Date.now() < context.deadlineMs && context.heartbeat(),
+    commitUnit: async (cursor, writer) => commitShopifySyncUnit({
+      stepId: step.id,
+      workerId: context.workerId,
+      cursor,
+      checkpoint: { stage: "batches", operationId, resultUrl },
+      writer,
+    }),
   });
   const next = { stage: result.completed ? "complete" : "batches", operationId, resultUrl };
   return result.completed
-    ? { status: "completed", checkpoint: next }
-    : { status: "running", cursor: { nextBatchIndex: result.nextBatchIndex }, checkpoint: next };
+    ? {
+      status: "completed",
+      cursor: {
+        byteOffset: result.byteOffset ?? byteOffset,
+        ...(result.finalized ? { finalized: true } : {}),
+        ...(result.pendingInventoryGroup ? { pendingInventoryGroup: result.pendingInventoryGroup } : {}),
+      },
+      checkpoint: next,
+    }
+    : {
+      status: "running",
+      cursor: {
+        byteOffset: result.byteOffset ?? byteOffset,
+        ...(result.pendingInventoryGroup ? { pendingInventoryGroup: result.pendingInventoryGroup } : {}),
+        ...(result.finalized ? { finalized: true } : {}),
+      },
+      checkpoint: next,
+    };
 }
 
 const defaultDependencies: DurableShopifySyncDependencies = {

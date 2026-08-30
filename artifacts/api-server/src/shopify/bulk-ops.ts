@@ -16,6 +16,106 @@ import { sleep } from "./client";
 
 const logger = rootLogger.child({ module: "shopify-bulk-ops" });
 
+export interface BulkJsonlLine<T> {
+  value: T;
+  startOffset: number;
+  endOffset: number;
+}
+
+/** Read only a bounded prefix of a bulk result.  Offsets are byte offsets in
+ * the original UTF-8 object and consequently can be used directly in HTTP
+ * Range requests after a crash. */
+export async function readBulkJsonlSlice<T>(
+  url: string,
+  options: {
+    offset?: number;
+    maxLines?: number;
+    shouldContinue?: () => boolean | Promise<boolean>;
+    fetcher?: typeof fetch;
+  } = {},
+): Promise<{ lines: BulkJsonlLine<T>[]; nextOffset: number; eof: boolean }> {
+  const offset = options.offset ?? 0;
+  const maxLines = options.maxLines ?? 100;
+  const fetcher = options.fetcher ?? fetch;
+  if (options.shouldContinue && !await options.shouldContinue()) {
+    return { lines: [], nextOffset: offset, eof: false };
+  }
+  const response = await fetcher(url, {
+    headers: offset > 0 ? { Range: `bytes=${offset}-` } : undefined,
+  });
+  if (offset === 0 ? response.status !== 200 : response.status !== 206) {
+    throw new Error(`Bulk range download at offset ${offset} requires HTTP ${offset === 0 ? 200 : 206}; got ${response.status}`);
+  }
+  if (!response.body) throw new Error("Bulk results response has no body");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let pending = new Uint8Array();
+  let pendingOffset = offset;
+  let lastCompleteOffset = offset;
+  let eof = false;
+  const lines: BulkJsonlLine<T>[] = [];
+  try {
+    while (lines.length < maxLines && await (options.shouldContinue?.() ?? true)) {
+      const { done, value } = await reader.read();
+      if (done) {
+        eof = true;
+        if (pending.length > 0 && lines.length < maxLines) {
+          const startOffset = pendingOffset;
+          const endOffset = pendingOffset + pending.length;
+          try {
+            lines.push({
+              value: JSON.parse(decoder.decode(pending)) as T,
+              startOffset,
+              endOffset,
+            });
+            lastCompleteOffset = endOffset;
+          } catch {
+            logger.warn({ offset: startOffset }, "Failed to parse final JSONL line");
+            lastCompleteOffset = endOffset;
+          }
+        }
+        break;
+      }
+      const joined = new Uint8Array(pending.length + value.length);
+      joined.set(pending);
+      joined.set(value, pending.length);
+      let lineStart = 0;
+      for (let i = 0; i < joined.length && lines.length < maxLines; i++) {
+        if (joined[i] !== 10) continue;
+        const lineBytes = joined.slice(lineStart, i);
+        const startOffset = pendingOffset + lineStart;
+        const endOffset = pendingOffset + i + 1;
+        lineStart = i + 1;
+        lastCompleteOffset = endOffset;
+        if (lineBytes.length === 0) continue;
+        try {
+          lines.push({ value: JSON.parse(decoder.decode(lineBytes)) as T, startOffset, endOffset });
+        } catch {
+          logger.warn({ offset: startOffset }, "Failed to parse JSONL line — skipping");
+        }
+      }
+      if (lines.length >= maxLines) {
+        // Do not retain data read ahead from this chunk: the next range starts
+        // at the last committed newline and safely replays only uncommitted data.
+        break;
+      }
+      pending = joined.slice(lineStart);
+      pendingOffset += lineStart;
+    }
+  } finally {
+    if (!eof) await reader.cancel();
+    reader.releaseLock();
+  }
+  return {
+    lines,
+    // Bad/blank complete lines are also safely consumed; otherwise a malformed
+    // line would make a resumed worker retry the same byte range forever.
+    nextOffset: lastCompleteOffset,
+    eof,
+  };
+}
+
 // ── GraphQL fragments ─────────────────────────────────────────────────────────
 
 const BULK_OPERATION_FIELDS = `

@@ -10,7 +10,7 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config";
 import type { ShopifyClient } from "./client";
-import { downloadBulkResults, runBulkQuery } from "./bulk-ops";
+import { downloadBulkResults, readBulkJsonlSlice, runBulkQuery } from "./bulk-ops";
 import { computeChecksum, hashUrl, hasChanged } from "./checksums";
 import type { SyncRunTracker } from "./sync-run-tracker";
 import type {
@@ -23,6 +23,56 @@ import type {
 } from "./types";
 
 const logger = rootLogger.child({ module: "sync-products" });
+export const MAX_DURABLE_PRODUCT_LINES_PER_SLICE = 1_000;
+
+export interface DurableProductGroup {
+  parent: BulkProductNode;
+  children: BulkNode[];
+  startOffset: number;
+}
+
+/** Read a bounded prefix and deliberately retain the last parent until EOF or
+ * the next parent proves that its child stream is complete. */
+export async function readDurableProductGroups(
+  url: string,
+  options: {
+    byteOffset?: number; maxLines?: number; shouldContinue?: () => boolean | Promise<boolean>;
+    fetcher?: typeof fetch;
+    pendingGroup?: DurableProductGroup | null;
+  } = {},
+): Promise<{ groups: DurableProductGroup[]; pendingGroup: DurableProductGroup | null; nextByteOffset: number; eof: boolean }> {
+  const offset = options.byteOffset ?? 0;
+  const slice = await readBulkJsonlSlice<BulkNode>(url, {
+    offset, maxLines: options.maxLines ?? MAX_DURABLE_PRODUCT_LINES_PER_SLICE,
+    shouldContinue: options.shouldContinue, fetcher: options.fetcher,
+  });
+  const groups: DurableProductGroup[] = [];
+  let current: DurableProductGroup | null = options.pendingGroup ?? null;
+  for (const line of slice.lines) {
+    if (isProductNode(line.value)) {
+      if (current) groups.push(current);
+      current = { parent: line.value as BulkProductNode, children: [], startOffset: line.startOffset };
+    } else if (current) current.children.push(line.value);
+  }
+  if (current && slice.eof) {
+    groups.push(current);
+    current = null;
+  }
+  const firstUncommitted = groups[25];
+  if (firstUncommitted) {
+    return {
+      groups: groups.slice(0, 25), pendingGroup: null,
+      nextByteOffset: firstUncommitted.startOffset, eof: false,
+    };
+  }
+  return {
+    groups,
+    pendingGroup: current,
+    // A parent spanning a read is serialized and subsequent reads append to it.
+    nextByteOffset: current ? slice.nextOffset : slice.nextOffset,
+    eof: slice.eof,
+  };
+}
 
 // ── GraphQL bulk query ────────────────────────────────────────────────────────
 
@@ -414,13 +464,30 @@ export interface ProductSyncSliceOptions {
   startBatchIndex?: number;
   beforeBatch?: () => Promise<boolean>;
   beforeFinalize?: () => Promise<boolean>;
+  /** Durable callers fence each committed SQL batch with their step cursor. */
+  commitUnit?: (
+    cursor: Record<string, unknown>,
+    writer: (tx: any) => Promise<void>,
+  ) => Promise<void>;
+  byteOffset?: number;
+  fetcher?: typeof fetch;
+  seenProductGids?: string[];
+  finalized?: boolean;
+  pendingProductGroup?: DurableProductGroup | null;
 }
 
 export async function syncProducts(
   client: ShopifyClient,
   tracker: SyncRunTracker,
   options: ProductSyncSliceOptions = {},
-): Promise<{ completed: boolean; nextBatchIndex: number }> {
+): Promise<{ completed: boolean; nextBatchIndex: number; byteOffset?: number; seenProductGids?: string[]; finalized?: boolean; pendingProductGroup?: DurableProductGroup | null }> {
+  if (options.bulkResultUrl && options.commitUnit && options.finalized) {
+    return {
+      completed: true, nextBatchIndex: 0, byteOffset: options.byteOffset,
+      seenProductGids: options.seenProductGids, finalized: true,
+      pendingProductGroup: options.pendingProductGroup,
+    };
+  }
   // Derive primary locale from config (Shopify default = "de"; marked primary:true in languages.yaml).
   // syncProducts stores the Shopify base content under this locale code so that
   // syncTranslations can fill in every other locale from the Shopify translation API.
@@ -451,17 +518,20 @@ export async function syncProducts(
 
   const variantMap = new Map(existingVariants.map((v) => [v.shopifyGid, v]));
 
-  // Collect all bulk nodes in memory
+  const durableMode = !!options.bulkResultUrl && !!options.commitUnit;
+  const initialPendingProductGroup = options.pendingProductGroup;
+  const initialSeenProductGids = options.seenProductGids;
+  let durableNextByteOffset: number | undefined;
+  let durableEof = false;
+  const durableSeen = new Set(options.seenProductGids ?? []);
+  // Collect all bulk nodes in memory only for the legacy flow.
   const products = new Map<string, BulkProductNode>();
   const variantsByProduct = new Map<string, BulkVariantNode[]>();
   const metafieldsByVariant = new Map<string, BulkMetafieldNode[]>();
   const imagesByProduct = new Map<string, BulkImageNode[]>();
 
   let nodeCount = 0;
-  const bulkNodes = options.bulkResultUrl
-    ? downloadBulkResults<BulkNode>(options.bulkResultUrl)
-    : runBulkQuery<BulkNode>(client, BULK_PRODUCTS_QUERY);
-  for await (const node of bulkNodes) {
+  const acceptNode = (node: BulkNode) => {
     nodeCount++;
     tracker.bumpApiCalls();
 
@@ -482,6 +552,30 @@ export async function syncProducts(
         imagesByProduct.set(node.__parentId, list);
       }
     }
+  };
+  if (durableMode) {
+    const grouped = await readDurableProductGroups(options.bulkResultUrl!, {
+      byteOffset: options.byteOffset,
+      shouldContinue: options.beforeBatch,
+      fetcher: options.fetcher,
+      pendingGroup: options.pendingProductGroup,
+    });
+    // A SQL unit is at most 25 parents, so its checkpoint cannot skip an
+    // uncommitted sibling group.
+    const groups = grouped.groups.slice(0, 25);
+    for (const group of groups) {
+      durableSeen.add(group.parent.id);
+      acceptNode(group.parent);
+      for (const child of group.children) acceptNode(child);
+    }
+    durableNextByteOffset = grouped.groups[25]?.startOffset ?? grouped.nextByteOffset;
+    durableEof = grouped.eof && grouped.groups.length <= 25;
+    options.pendingProductGroup = grouped.pendingGroup;
+  } else {
+    const bulkNodes = options.bulkResultUrl
+      ? downloadBulkResults<BulkNode>(options.bulkResultUrl)
+      : runBulkQuery<BulkNode>(client, BULK_PRODUCTS_QUERY);
+    for await (const node of bulkNodes) acceptNode(node);
   }
 
   logger.info(
@@ -497,9 +591,17 @@ export async function syncProducts(
     // A committed batch is never replayed after a durable hand-off.
     if (batchIdx < (options.startBatchIndex ?? 0)) continue;
     if (options.beforeBatch && !await options.beforeBatch()) {
+      if (durableMode) {
+        return {
+          completed: false, nextBatchIndex: 0, byteOffset: options.byteOffset,
+          seenProductGids: initialSeenProductGids,
+          pendingProductGroup: initialPendingProductGroup,
+          finalized: false,
+        };
+      }
       return { completed: false, nextBatchIndex: batchIdx };
     }
-    await db.transaction(async (tx) => {
+    const writeBatch = async (tx: any) => {
       for (const [productGid, node] of batch) {
         // ── Product upsert ──────────────────────────────────────────────────
         const productFields = buildProductRow(node);
@@ -626,7 +728,20 @@ export async function syncProducts(
             .from(imagesTable)
             .where(eq(imagesTable.productId, productDbId));
           classificationByHash = new Map(
-            existing.filter((c) => c.isClassified).map((c) => [c.urlHash, c]),
+            existing
+              .filter((c: { isClassified: boolean }) => c.isClassified)
+              .map((c: {
+                urlHash: string;
+                imageType: string | null;
+                whiteBgScore: string | null;
+                solidBgScore: string | null;
+                alphaRatio: string | null;
+                edgeDensity: string | null;
+                variance: string | null;
+                resolutionScore: string | null;
+                isClassified: boolean;
+                classifiedAt: Date | null;
+              }) => [c.urlHash, c]),
           );
         }
 
@@ -653,7 +768,21 @@ export async function syncProducts(
           await tx.insert(imagesTable).values(imageRows);
         }
       }
-    });
+    };
+    // The legacy path retains its historical transaction.  Durable callers
+    // supply a fence, which owns this transaction and atomically persists the
+    // cursor only after every business write succeeded.
+    if (options.commitUnit) {
+      await options.commitUnit(durableMode
+        ? {
+          byteOffset: durableNextByteOffset ?? options.byteOffset ?? 0,
+          seenProductGids: [...durableSeen],
+          ...(options.pendingProductGroup ? { pendingProductGroup: options.pendingProductGroup } : {}),
+        }
+        : { nextBatchIndex: batchIdx + 1 }, writeBatch);
+    } else {
+      await db.transaction(writeBatch);
+    }
 
     if ((batchIdx + 1) % 10 === 0) {
       const lastGid = batch[batch.length - 1]?.[0];
@@ -661,44 +790,83 @@ export async function syncProducts(
       logger.debug({ batchIdx, total: productBatches.length }, "Product sync progress");
     }
   }
+  if (durableMode && !durableEof) {
+    if (productBatches.length === 0 && options.pendingProductGroup) {
+      await options.commitUnit!({
+        byteOffset: durableNextByteOffset ?? options.byteOffset ?? 0,
+        seenProductGids: [...durableSeen],
+        pendingProductGroup: options.pendingProductGroup,
+      }, async () => {});
+    }
+    return {
+      completed: false, nextBatchIndex: 0, byteOffset: durableNextByteOffset,
+      seenProductGids: [...durableSeen],
+      pendingProductGroup: options.pendingProductGroup,
+      finalized: false,
+    };
+  }
 
   // Mark products not seen in this sync as archived (deleted from Shopify)
   if (options.beforeFinalize && !await options.beforeFinalize()) {
-    return { completed: false, nextBatchIndex: productBatches.length };
+    return {
+      completed: false, nextBatchIndex: productBatches.length,
+      byteOffset: durableNextByteOffset,
+      ...(durableMode ? { seenProductGids: [...durableSeen] } : {}),
+      ...(durableMode && options.pendingProductGroup ? { pendingProductGroup: options.pendingProductGroup } : {}),
+    };
   }
-  const seenGids = [...products.keys()];
-  if (seenGids.length > 0) {
-    const archivedCount = await markDeletedProducts(seenGids);
-    if (archivedCount > 0) {
-      tracker.bumpDeleted(archivedCount);
-      logger.info({ count: archivedCount }, "Products marked archived (not in Shopify bulk)");
-    }
+  const seenGids = durableMode ? [...durableSeen] : [...products.keys()];
+  let archivedCount = 0;
+  if (durableMode) {
+    await options.commitUnit!({
+      byteOffset: durableNextByteOffset ?? options.byteOffset ?? 0,
+      seenProductGids: seenGids,
+      finalized: true,
+    }, async (tx) => {
+      // Preserve the legacy empty-catalog safety behavior while still
+      // atomically recording that finalization ran.
+      if (seenGids.length > 0) {
+        archivedCount = await markDeletedProducts(seenGids, tx);
+      }
+    });
+  } else if (seenGids.length > 0) {
+    archivedCount = await markDeletedProducts(seenGids);
+  }
+  if (archivedCount > 0) {
+    tracker.bumpDeleted(archivedCount);
+    logger.info({ count: archivedCount }, "Products marked archived (not in Shopify bulk)");
   }
 
   logger.info(tracker.getStats(), "Product sync complete");
-  return { completed: true, nextBatchIndex: productBatches.length };
+  return {
+    completed: true, nextBatchIndex: productBatches.length, byteOffset: durableNextByteOffset,
+    ...(durableMode ? { seenProductGids: [...durableSeen] } : {}),
+    ...(durableMode ? { finalized: true } : {}),
+  };
 }
 
 /** Mark products in DB that were NOT returned by Shopify as archived. */
-async function markDeletedProducts(seenGids: string[]): Promise<number> {
+async function markDeletedProducts(seenGids: string[], executor: any = db): Promise<number> {
   // Only archive ACTIVE products that disappeared — don't touch already-archived
-  const inDB = await db
+  const inDB = await executor
     .select({ shopifyGid: productsTable.shopifyGid, id: productsTable.id })
     .from(productsTable)
     .where(eq(productsTable.status, "active"));
 
   const seenSet = new Set(seenGids);
-  const disappeared = inDB.filter((p) => !seenSet.has(p.shopifyGid));
+  const disappeared = inDB.filter(
+    (p: { shopifyGid: string; id: string }) => !seenSet.has(p.shopifyGid),
+  );
 
   if (disappeared.length === 0) return 0;
 
-  await db
+  await executor
     .update(productsTable)
     .set({ status: "archived", updatedAt: new Date() })
     .where(
       inArray(
         productsTable.id,
-        disappeared.map((p) => p.id),
+        disappeared.map((p: { id: string }) => p.id),
       ),
     );
 

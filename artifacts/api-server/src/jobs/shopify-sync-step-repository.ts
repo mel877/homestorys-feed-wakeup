@@ -20,6 +20,55 @@ export type ShopifySyncPhase = typeof SHOPIFY_PHASES[number];
 const DEFAULT_LEASE_MS = 15 * 60_000;
 const DEFAULT_MAX_ATTEMPTS = 5;
 
+export class ShopifySyncLeaseLostError extends Error {
+  constructor() {
+    super("Shopify sync step lease was lost or expired");
+    this.name = "ShopifySyncLeaseLostError";
+  }
+}
+
+/** Commit one durable business unit and its resumable position as one database
+ * transaction.  The lock and second conditional update protect against a worker
+ * whose lease expired while it was performing the business write. */
+export async function commitShopifySyncUnit(input: {
+  stepId: string;
+  workerId: string;
+  cursor?: Record<string, unknown> | null;
+  checkpoint?: Record<string, unknown> | null;
+  writer: (tx: unknown) => Promise<void>;
+  database?: Pick<typeof db, "transaction">;
+}): Promise<void> {
+  const database = input.database ?? db;
+  await database.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      SELECT id
+      FROM shopify_sync_steps
+      WHERE id = ${input.stepId}::uuid
+        AND status = 'running'
+        AND lease_owner = ${input.workerId}
+        AND lease_expires_at > clock_timestamp()
+      FOR UPDATE
+    `);
+    if (locked.rows.length !== 1) throw new ShopifySyncLeaseLostError();
+
+    await input.writer(tx);
+
+    // Recheck after the writer: a lease may expire during a slow SQL unit.
+    const updated = await tx.execute(sql`
+      UPDATE shopify_sync_steps
+      SET cursor = ${input.cursor ?? null}::jsonb,
+          checkpoint = ${input.checkpoint ?? null}::jsonb,
+          updated_at = NOW()
+      WHERE id = ${input.stepId}::uuid
+        AND status = 'running'
+        AND lease_owner = ${input.workerId}
+        AND lease_expires_at > clock_timestamp()
+      RETURNING id
+    `);
+    if (updated.rows.length !== 1) throw new ShopifySyncLeaseLostError();
+  });
+}
+
 function mapRow(row: Record<string, unknown>): ShopifySyncStep {
   return {
     id: String(row.id),
