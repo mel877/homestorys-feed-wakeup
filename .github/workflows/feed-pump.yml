@@ -8,7 +8,7 @@ on:
 jobs:
   feed-pump:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 60
     steps:
       - name: Advance one durable feed slice
         env:
@@ -18,11 +18,19 @@ jobs:
           set -eu
           test -n "$FEED_PUMP_URL"
           test -n "$INTERNAL_API_SECRET"
-          curl --fail-with-body --silent --show-error \
-            --max-time 240 \
-            --retry 1 \
-            --retry-delay 2 \
-            -X POST "$FEED_PUMP_URL" \
-            -H "Authorization: Bearer $INTERNAL_API_SECRET" \
-            -H "Content-Type: application/json" \
-            --data '{"budgetMs":30000,"maxSteps":4}'
+
+          for i in $(seq 1 30); do
+            echo "=== Pump $i/30 ==="
+
+            curl --fail-with-body --silent --show-error \
+              --max-time 240 \
+              --retry 1 \
+              --retry-delay 2 \
+              -X POST "$FEED_PUMP_URL" \
+              -H "Authorization: Bearer $INTERNAL_API_SECRET" \
+              -H "Content-Type: application/json" \
+              --data '{"budgetMs":30000,"maxSteps":4}'
+
+            echo
+            sleep 2
+          done
