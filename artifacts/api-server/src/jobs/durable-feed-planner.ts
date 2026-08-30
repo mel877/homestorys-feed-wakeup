@@ -4,6 +4,7 @@ import {
   createGoogleFeedBatchSpecs,
   createMetaFeedBatchSpecs,
   createFeedFinalizationSpecs,
+  createMetaMarketFinalizationSpecs,
 } from "../exporters/durable-feed-batches";
 import {
   computeProductSourceFingerprints,
@@ -130,7 +131,15 @@ export async function planDurableFeedRun(
     markets: config.markets.markets,
   });
   const builds = [...googleBuilds, ...metaBuilds];
-  const specs = [...builds, ...createFeedFinalizationSpecs(builds)];
+  const specs = [
+    ...builds,
+    ...createFeedFinalizationSpecs(builds),
+    ...createMetaMarketFinalizationSpecs({
+      syncRunId: runId,
+      version,
+      markets: config.markets.markets,
+    }),
+  ];
   const persisted = await dependencies.persistPlan({
     runId,
     metadata: {

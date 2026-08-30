@@ -36,6 +36,11 @@ function getPublicUrl(language: string, marketCode: string | null | undefined): 
   if (marketCode === "BASE") {
     return "/api/feeds/meta/base.csv";
   }
+  if (language && marketCode && [
+    "FR", "BE_FR", "BE_DE", "DE", "AT", "LU_DE", "CH_FR", "CH_DE",
+  ].includes(marketCode)) {
+    return `/api/feeds/meta/market/${marketCode}.csv`;
+  }
   if (marketCode) {
     return `/api/feeds/meta/country/${marketCode}.csv`;
   }

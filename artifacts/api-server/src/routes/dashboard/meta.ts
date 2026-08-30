@@ -15,6 +15,11 @@ const DURABLE_META_IDENTITIES = [
   "LU",
   "META_LANGUAGE_FR",
   "META_LANGUAGE_DE",
+  "BE_FR",
+  "BE_DE",
+  "LU_DE",
+  "CH_FR",
+  "CH_DE",
 ] as const;
 
 router.get("/dashboard/meta/status", requireDashboardAuth, async (_req, res): Promise<void> => {

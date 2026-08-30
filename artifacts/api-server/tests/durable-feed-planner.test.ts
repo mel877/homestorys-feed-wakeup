@@ -55,8 +55,8 @@ describe("planDurableFeedRun", () => {
     expect(result.status).toBe("planned");
     expect(result.productCount).toBe(2);
     expect(result.buildSteps).toBe(19);
-    expect(result.finalizeSteps).toBe(19);
-    expect(result.totalSteps).toBe(38);
+    expect(result.finalizeSteps).toBe(27);
+    expect(result.totalSteps).toBe(46);
     expect(deps.persistPlan).toHaveBeenCalledTimes(1);
     expect(deps.persistPlan).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -70,6 +70,21 @@ describe("planDurableFeedRun", () => {
         ]),
       }),
     );
+    const persisted = vi.mocked(deps.persistPlan).mock.calls[0]![0];
+    const marketFinalizers = persisted.specs.filter((spec) =>
+      spec.stage === "finalize" &&
+      String(spec.checkpoint?.["fileKey"] ?? "").startsWith("meta-market-"),
+    );
+    expect(marketFinalizers.map((spec) => spec.marketCode).sort()).toEqual([
+      "AT",
+      "BE_DE",
+      "BE_FR",
+      "CH_DE",
+      "CH_FR",
+      "DE",
+      "FR",
+      "LU_DE",
+    ]);
   });
 
   it("refuses a second plan when the atomic persistence layer finds an active cycle", async () => {
@@ -163,7 +178,7 @@ describe("planDurableFeedRun", () => {
     expect(deps.persistPlan).not.toHaveBeenCalled();
   });
 
-  it("generates exactly 171 builds and 19 finalizers for 2,129 products", async () => {
+  it("generates exactly 171 builds and 27 finalizers for 2,129 products", async () => {
     const productIds = Array.from(
       { length: 2_129 },
       (_, index) => `00000000-0000-0000-0000-${String(index).padStart(12, "0")}`,
@@ -175,7 +190,7 @@ describe("planDurableFeedRun", () => {
       ),
       persistPlan: vi.fn().mockResolvedValue({
         status: "planned",
-        insertedSteps: 190,
+        insertedSteps: 198,
       }),
     });
 
@@ -187,8 +202,8 @@ describe("planDurableFeedRun", () => {
     expect(result).toMatchObject({
       productCount: 2_129,
       buildSteps: 171,
-      finalizeSteps: 19,
-      totalSteps: 190,
+      finalizeSteps: 27,
+      totalSteps: 198,
     });
   });
 

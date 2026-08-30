@@ -27,6 +27,11 @@ import {
   resolveExpectedFeedCurrency,
 } from "./durable-feed-file-definition";
 import { loadVerifiedFeedParts } from "./durable-feed-db-finalizer";
+import {
+  assembleMetaMarketFeed,
+  META_MARKET_FEEDS,
+  type MetaMarketCode,
+} from "./meta/market-feeds";
 
 export interface DurableFeedFinalizeOptions {
   syncRunId: string;
@@ -196,6 +201,44 @@ function resolveSnapshotMarketCode(input: Pick<
   return input.marketCode;
 }
 
+async function loadMetaMarketComponentPaths(input: {
+  marketCode: MetaMarketCode;
+  language: string;
+}): Promise<{ base: string; language: string; country: string }> {
+  const market = META_MARKET_FEEDS[input.marketCode];
+  const identities = [
+    { key: "base", marketCode: "BASE", language: null },
+    {
+      key: "language",
+      marketCode: `META_LANGUAGE_${input.language.toUpperCase()}`,
+      language: input.language,
+    },
+    { key: "country", marketCode: market.country, language: null },
+  ] as const;
+  const resolved: Partial<Record<(typeof identities)[number]["key"], string>> = {};
+  for (const identity of identities) {
+    const [snapshot] = await db
+      .select({ storagePath: feedSnapshotsTable.storagePath })
+      .from(feedSnapshotsTable)
+      .where(and(
+        eq(feedSnapshotsTable.channel, "meta"),
+        eq(feedSnapshotsTable.marketCode, identity.marketCode),
+        identity.language === null
+          ? sql`${feedSnapshotsTable.language} IS NULL`
+          : eq(feedSnapshotsTable.language, identity.language),
+        eq(feedSnapshotsTable.isCurrent, true),
+      ))
+      .limit(1);
+    if (!snapshot?.storagePath) {
+      throw new Error(
+        `Required published Meta component snapshot is missing: ${identity.marketCode}`,
+      );
+    }
+    resolved[identity.key] = snapshot.storagePath;
+  }
+  return resolved as { base: string; language: string; country: string };
+}
+
 async function finalizeConfiguredDurableFeedFile(
   options: ConfiguredDurableFeedFinalizeOptions,
 ): Promise<DurableFeedFinalizeResult> {
@@ -211,15 +254,22 @@ async function finalizeConfiguredDurableFeedFile(
   const alertWebhookUrl = resolveAlertWebhookUrl(
     options.config.feedPolicy.alerts.webhook_url,
   );
-  const parts = await loadVerifiedFeedParts({
-    syncRunId: options.syncRunId,
-    channel: options.channel,
-    marketCode: options.marketCode,
-    language: options.language,
-    fileKey: options.fileKey,
-    versionedPath: definition.versionedPath,
-    requiredBatchIndexes: options.requiredBatchIndexes,
-  });
+  const isMetaMarket = options.channel === "meta" &&
+    options.fileKey.startsWith("meta-market-");
+  if (isMetaMarket && !(options.marketCode in META_MARKET_FEEDS)) {
+    throw new Error(`Unsupported Meta market feed: ${options.marketCode}`);
+  }
+  const parts = isMetaMarket
+    ? []
+    : await loadVerifiedFeedParts({
+        syncRunId: options.syncRunId,
+        channel: options.channel,
+        marketCode: options.marketCode,
+        language: options.language,
+        fileKey: options.fileKey,
+        versionedPath: definition.versionedPath,
+        requiredBatchIndexes: options.requiredBatchIndexes,
+      });
 
   return finalizeDurableFeedFile(
     {
@@ -238,7 +288,21 @@ async function finalizeConfiguredDurableFeedFile(
       dryRun: options.dryRun,
     },
     {
-      assemble: assembleVersionedFeed,
+      assemble: isMetaMarket
+        ? async ({ outputPath }) => {
+            const marketCode = options.marketCode as MetaMarketCode;
+            return assembleMetaMarketFeed({
+              outputPath,
+              syncRunId: options.syncRunId,
+              version: options.version,
+              marketCode,
+              componentPaths: await loadMetaMarketComponentPaths({
+                marketCode,
+                language: options.language,
+              }),
+            });
+          }
+        : assembleVersionedFeed,
       uploadManifest: uploadImmutableManifest,
       async validate(path) {
         const result = options.channel === "google"
@@ -320,6 +384,7 @@ interface FinalizationCheckpoint {
   version: string;
   requiredBatchIndexes: number[];
   contributingMarkets: string[];
+  requiredFinalizerFileKeys?: string[];
 }
 
 export interface DurableFeedFinalizationExecutionDependencies {

@@ -333,6 +333,28 @@ export async function claimNextFeedExportStep(
               )
             )
           )
+          AND (
+            candidate_step.stage <> 'finalize'
+            OR NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements_text(
+                COALESCE(
+                  candidate_step.checkpoint->'requiredFinalizerFileKeys',
+                  '[]'::jsonb
+                )
+              ) AS required(file_key)
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM feed_export_steps AS dependency_step
+                WHERE dependency_step.sync_run_id = candidate_step.sync_run_id
+                  AND dependency_step.channel = candidate_step.channel
+                  AND dependency_step.stage = 'finalize'
+                  AND dependency_step.checkpoint->>'fileKey' = required.file_key
+                  AND dependency_step.status = 'completed'
+                  AND dependency_step.checkpoint->>'published' = 'true'
+              )
+            )
+          )
         ORDER BY candidate_step.updated_at ASC, candidate_step.created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1

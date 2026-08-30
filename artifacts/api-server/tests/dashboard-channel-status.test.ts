@@ -179,6 +179,14 @@ describe("GET /api/dashboard/meta/status", () => {
       },
       {
         channel: "meta",
+        language: "fr",
+        marketCode: "CH_FR",
+        itemCount: 21_552,
+        generatedAt: new Date("2026-08-30T11:12:50.678Z"),
+        isCurrent: true,
+      },
+      {
+        channel: "meta",
         language: "",
         marketCode: "CH",
         itemCount: 43_105,
@@ -190,11 +198,13 @@ describe("GET /api/dashboard/meta/status", () => {
     const response = await request(app).get("/api/dashboard/meta/status");
 
     expect(response.status).toBe(200);
-    expect(response.body.feeds.map((feed: Row) => feed.marketCode)).toEqual([
+    expect(response.body.feeds.map((feed: Row) => feed.marketCode)).toEqual(expect.arrayContaining([
       "BASE",
+      "CH_FR",
       "META_LANGUAGE_FR",
-    ]);
-    expect(response.body.lastPushAt).toBe("2026-08-30T11:02:50.678Z");
+    ]));
+    expect(response.body.feeds).toHaveLength(3);
+    expect(response.body.lastPushAt).toBe("2026-08-30T11:12:50.678Z");
   });
 });
 
@@ -222,6 +232,9 @@ describe("Meta dashboard public URLs", () => {
     );
     expect(source).toContain(
       'return "/api/feeds/meta/base.csv"',
+    );
+    expect(source).toContain(
+      'return `/api/feeds/meta/market/${marketCode}.csv`',
     );
   });
 });

@@ -343,6 +343,9 @@ async function resolvePublishedStoragePath(
       .where(and(
         eq(feedSnapshotsTable.channel, context.channel),
         eq(feedSnapshotsTable.marketCode, marketCode),
+        context.language
+          ? eq(feedSnapshotsTable.language, context.language)
+          : sql`${feedSnapshotsTable.language} IS NULL`,
         eq(feedSnapshotsTable.isCurrent, true),
       ))
       .orderBy(desc(feedSnapshotsTable.generatedAt))
@@ -411,6 +414,29 @@ router.get("/feeds/meta/country/:cc", async (req: Request, res: Response) => {
     res,
     undefined,
     { channel: "meta", market: cc },
+  );
+});
+
+/** GET /feeds/meta/market/:market — complete market feed. */
+router.get("/feeds/meta/market/:market", async (req: Request, res: Response) => {
+  const rawMarket = req.params["market"];
+  const market = (Array.isArray(rawMarket) ? rawMarket[0] : rawMarket)
+    ?.replace(/\.csv$/, "")
+    .toUpperCase();
+  const supported = new Set([
+    "FR", "BE_FR", "BE_DE", "DE", "AT", "LU_DE", "CH_FR", "CH_DE",
+  ]);
+  if (!market || !supported.has(market)) {
+    res.status(400).json({ error: "Invalid Meta market code" });
+    return;
+  }
+  await serveFeedFile(
+    `feeds/meta/meta-market-${market}.csv`,
+    "text/csv; charset=utf-8",
+    req,
+    res,
+    undefined,
+    { channel: "meta", market, language: market.endsWith("_FR") || market === "FR" ? "fr" : "de" },
   );
 });
 

@@ -74,6 +74,7 @@ const publicFeedCases = [
   ["/api/feeds/meta/base.csv", "feeds/meta/meta-base.csv", "text/csv"],
   ["/api/feeds/meta/lang/fr.csv", "feeds/meta/meta-language-fr.csv", "text/csv"],
   ["/api/feeds/meta/country/BE.csv", "feeds/meta/meta-country-BE.csv", "text/csv"],
+  ["/api/feeds/meta/market/CH_FR.csv", "feeds/meta/meta-market-CH_FR.csv", "text/csv"],
   ["/api/feeds/google/fr.tsv", "feeds/google/google-fr.tsv", "text/tab-separated-values"],
   ["/api/feeds/google/de.tsv", "feeds/google/google-de.tsv", "text/tab-separated-values"],
   ["/api/feeds/google/showroom/eupen.tsv", "feeds/showroom/google-eupen.tsv", "text/tab-separated-values"],
@@ -125,6 +126,13 @@ describe("public feed streaming", () => {
       language: "de",
       },
     )).toBe("META_LANGUAGE_DE");
+  });
+
+  it("uses the exact market snapshot identity for Meta market routes", () => {
+    expect(feedRouteTestHooks.resolveSnapshotMarketCode(
+      "feeds/meta/meta-market-CH_FR.csv",
+      { channel: "meta", market: "CH_FR" },
+    )).toBe("CH_FR");
   });
 
   for (const [url, storagePath, contentType] of publicFeedCases) {

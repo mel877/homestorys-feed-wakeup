@@ -24,3 +24,4 @@
 - [Production migration baseline](production-migration-baseline.md) — production has no Drizzle journal; use a reviewed Publish schema diff until migration history is deliberately baselined.
 - [Nightly cycle ownership](nightly-cycle-ownership.md) — GitHub is the sole scheduled Shopify/feed batch orchestrator; never re-add competing in-process Shopify or direct export schedules.
 - [Durable external-job checkpoints](durable-external-job-checkpoints.md) — data commits and cursor advancement need one lease-fenced transaction; external job creation also needs durable correlation.
+- [Meta market snapshot composition](meta-market-snapshot-composition.md) — filter shared COUNTRY rows by exact market-ID suffix; resolve market snapshots by marketCode plus language.

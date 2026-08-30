@@ -217,7 +217,7 @@ async function closeTracked(writer: TrackedWriter): Promise<void> {
   });
 }
 
-async function* parseDelimitedRecords(
+export async function* parseDelimitedRecords(
   stream: Readable,
   delimiter: "," | "\t",
 ): AsyncGenerator<string[]> {

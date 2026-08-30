@@ -462,6 +462,10 @@ export function metaFeedPath(suffix: string): string {
   return `feeds/meta/${suffix}`;
 }
 
+export function metaMarketFeedPath(marketCode: string): string {
+  return metaFeedPath(`meta-market-${marketCode}.csv`);
+}
+
 /** Stable public language feed; overwritten atomically after every export. */
 export function metaLanguageFeedPath(language: string): string {
   return `feeds/meta/meta-${language}.csv`;

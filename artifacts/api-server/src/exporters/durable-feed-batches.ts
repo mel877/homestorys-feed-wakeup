@@ -219,6 +219,37 @@ export function createFeedFinalizationSpecs(
   });
 }
 
+export function createMetaMarketFinalizationSpecs(options: {
+  syncRunId: string;
+  version: string;
+  markets: Record<string, MarketDescriptor>;
+}): FeedExportStepSpec[] {
+  const supported = new Set([
+    "FR", "BE_FR", "BE_DE", "DE", "AT", "LU_DE", "CH_FR", "CH_DE",
+  ]);
+  return Object.entries(options.markets)
+    .filter(([marketCode]) => supported.has(marketCode))
+    .map(([marketCode, market]) => ({
+      syncRunId: options.syncRunId,
+      channel: "meta",
+      stage: "finalize",
+      marketCode,
+      language: market.language,
+      batchIndex: 0,
+      checkpoint: {
+        fileKey: `meta-market-${marketCode}`,
+        version: options.version,
+        requiredBatchIndexes: [],
+        contributingMarkets: [marketCode],
+        requiredFinalizerFileKeys: [
+          "meta-base",
+          `meta-language-${market.language}`,
+          `meta-country-${market.country}`,
+        ],
+      },
+    }));
+}
+
 export function feedFileIsComplete(
   requiredStepIds: string[],
   steps: FeedExportBatchRecord[],

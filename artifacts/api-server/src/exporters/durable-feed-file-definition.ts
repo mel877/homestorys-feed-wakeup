@@ -10,6 +10,7 @@ import {
   META_COUNTRY_HEADERS,
   META_LANGUAGE_HEADERS,
 } from "./meta/mapper";
+import { META_MARKET_FEED_HEADERS } from "./meta/market-feeds";
 
 export interface DurableFeedFileDefinitionInput {
   channel: "google" | "meta";
@@ -73,6 +74,10 @@ export function resolveDurableFeedFileDefinition(
   } else if (input.fileKey.startsWith("meta-country-")) {
     filename = `${input.fileKey}.csv`;
     headers = [...META_COUNTRY_HEADERS];
+    expectedCurrencyMarket = input.marketCode;
+  } else if (input.fileKey.startsWith("meta-market-")) {
+    filename = `${input.fileKey}.csv`;
+    headers = [...META_MARKET_FEED_HEADERS];
     expectedCurrencyMarket = input.marketCode;
   } else {
     throw new Error(`Unsupported durable feed file key: ${input.fileKey}`);
