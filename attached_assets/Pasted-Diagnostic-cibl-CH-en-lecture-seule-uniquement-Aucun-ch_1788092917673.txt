@@ -1,0 +1,42 @@
+Diagnostic ciblé CH en lecture seule uniquement.
+
+Aucun changement, aucun build, aucun publish, aucun pump, aucun feed-plan, aucune migration, aucune synchronisation Shopify.
+
+Objectif : sécuriser définitivement les prochains exports Google + Meta pour la Suisse.
+
+État connu :
+
+les flux CH actuellement publiés sont valides et 100 % CHF ;
+leur frozen source contient 21 540 lignes CH_DE + 21 540 CH_FR en CHF ;
+market_variants contient actuellement, pour chacun des marchés CH :
+36 544 lignes CHF éligibles
+1 855 lignes EUR éligibles
+resolvePricing() privilégie actuellement market_variants.price_currency lorsqu'il est renseigné.
+
+Analyse précisément :
+
+Pourquoi ces 1 855 variantes EUR existent encore dans market_variants pour CH.
+D'où viennent leurs prix : Shopify contextualPricing CH, ancien import, fallback, données historiques ou autre.
+Compare ces variantes EUR avec Shopify/contextual pricing ou avec les données CHF fiables déjà disponibles dans la base, sans effectuer d'appel mutatif.
+Vérifie si ces 1 855 lignes correspondent à des produits/variantes réellement éligibles au flux ou à des données qui devraient être exclues.
+Identifie la correction durable la plus petite pour garantir que CH_DE et CH_FR ne puissent jamais construire un canonical éligible avec une devise autre que CHF.
+Le correctif doit respecter cette règle :
+aucune conversion interne EUR → CHF.
+Le CHF doit provenir du contextual pricing Shopify CH ou d'une donnée CHF déjà obtenue de cette source.
+Détermine s'il faut :
+corriger les données market_variants,
+corriger la synchronisation Shopify,
+ajouter un guard dans la construction canonical,
+ou une combinaison de ces éléments.
+Vérifie également que le prochain sync nocturne rafraîchira correctement ces prix avant la construction des feeds.
+
+Ne modifie rien.
+
+Termine exactement par :
+
+ROOT CAUSE CH EUR = ...
+SOURCE OF TRUTH CHF = ...
+DATA REPAIR REQUIRED = YES/NO
+CODE PATCH REQUIRED = YES/NO
+NEXT NIGHTLY SYNC SAFE TODAY = YES/NO
+MINIMAL PATCH FILES = ...
