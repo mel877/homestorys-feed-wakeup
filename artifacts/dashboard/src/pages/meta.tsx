@@ -27,6 +27,15 @@ function CopyButton({ value }: { value: string }) {
 
 /** Derive the public (unauthenticated) feed URL from snapshot fields. */
 function getPublicUrl(language: string, marketCode: string | null | undefined): string {
+  if (marketCode === "META_LANGUAGE_FR") {
+    return "/api/feeds/meta/lang/fr.csv";
+  }
+  if (marketCode === "META_LANGUAGE_DE") {
+    return "/api/feeds/meta/lang/de.csv";
+  }
+  if (marketCode === "BASE") {
+    return "/api/feeds/meta/base.csv";
+  }
   if (marketCode) {
     return `/api/feeds/meta/country/${marketCode}.csv`;
   }

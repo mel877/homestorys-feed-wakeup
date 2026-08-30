@@ -1,34 +1,43 @@
 import { Router, type IRouter } from "express";
 import { db, feedSnapshotsTable } from "@workspace/db";
 import { requireDashboardAuth } from "./auth";
-import { eq, desc, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-router.get("/dashboard/meta/status", requireDashboardAuth, async (_req, res): Promise<void> => {
-  const [lastPush, feeds] = await Promise.all([
-    db.select({ generatedAt: feedSnapshotsTable.generatedAt })
-      .from(feedSnapshotsTable)
-      .where(eq(feedSnapshotsTable.channel, "meta"))
-      .orderBy(desc(feedSnapshotsTable.generatedAt))
-      .limit(1),
-    db.select().from(feedSnapshotsTable)
-      .where(eq(feedSnapshotsTable.channel, "meta"))
-      .orderBy(feedSnapshotsTable.language, feedSnapshotsTable.marketCode, desc(feedSnapshotsTable.generatedAt)),
-  ]);
+const DURABLE_META_IDENTITIES = [
+  "BASE",
+  "AT",
+  "BE",
+  "CH",
+  "DE",
+  "FR",
+  "LU",
+  "META_LANGUAGE_FR",
+  "META_LANGUAGE_DE",
+] as const;
 
-  // Deduplicate: keep only the most recent snapshot per language+marketCode combo
-  const seen = new Set<string>();
-  const dedupedFeeds = feeds.filter((f) => {
-    const key = `${f.language ?? ""}:${f.marketCode ?? ""}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+router.get("/dashboard/meta/status", requireDashboardAuth, async (_req, res): Promise<void> => {
+  const feeds = await db.select()
+    .from(feedSnapshotsTable)
+    .where(
+      and(
+        eq(feedSnapshotsTable.channel, "meta"),
+        eq(feedSnapshotsTable.isCurrent, true),
+        inArray(feedSnapshotsTable.marketCode, DURABLE_META_IDENTITIES),
+      ),
+    )
+    .orderBy(feedSnapshotsTable.marketCode);
+
+  const lastPushAt = feeds.reduce<Date | null>((latest, feed) => {
+    if (!feed.generatedAt) return latest;
+    if (!latest || feed.generatedAt > latest) return feed.generatedAt;
+    return latest;
+  }, null);
 
   res.json({
-    lastPushAt: lastPush[0]?.generatedAt?.toISOString() ?? null,
-    feeds: dedupedFeeds.map((f) => ({
+    lastPushAt: lastPushAt?.toISOString() ?? null,
+    feeds: feeds.map((f) => ({
       language: f.language ?? "",
       marketCode: f.marketCode ?? null,
       itemCount: f.itemCount ?? 0,
