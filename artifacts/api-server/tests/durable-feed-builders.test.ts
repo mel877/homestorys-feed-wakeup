@@ -45,6 +45,9 @@ describe("durable feed builders", () => {
           exclusionReasons: [],
           market: "BE_FR",
         } as never],
+        computeSourceFingerprints: vi.fn().mockResolvedValue({
+          "product-1": "capture-fingerprint",
+        }),
         verifySourceFingerprints: vi.fn(),
         mapGoogle: () => ({ id: "offer-1", title: "Chair" } as never),
         uploadPart,
@@ -81,6 +84,9 @@ describe("durable feed builders", () => {
           exclusionReasons: [],
           market: "BE_FR",
         } as never],
+        computeSourceFingerprints: vi.fn().mockResolvedValue({
+          "product-1": "capture-fingerprint",
+        }),
         verifySourceFingerprints: vi.fn(),
         mapMeta: () => ({
           id: "offer-1",
@@ -123,6 +129,9 @@ describe("durable feed builders", () => {
     const dependencies = {
       readCanonicals,
       getFrozenCanonicals: durableStore,
+      computeSourceFingerprints: vi.fn().mockResolvedValue({
+        "product-1": "capture-fingerprint",
+      }),
       verifySourceFingerprints: vi.fn(),
       mapGoogle: (canonical: { title: string }) => ({
         id: "offer-1",
@@ -150,14 +159,15 @@ describe("durable feed builders", () => {
     );
 
     expect(readCanonicals).toHaveBeenCalledTimes(1);
-    expect(dependencies.verifySourceFingerprints).toHaveBeenCalledTimes(2);
+    expect(dependencies.computeSourceFingerprints).toHaveBeenCalledTimes(1);
+    expect(dependencies.verifySourceFingerprints).toHaveBeenCalledTimes(1);
     expect(uploaded).toEqual([
       '{"id":"offer-1","title":"Frozen title"}\n',
       '{"id":"offer-1","title":"Frozen title"}\n',
     ]);
   });
 
-  it("blocks a later batch when its planned source fingerprint changed", async () => {
+  it("accepts a source change that happened before canonical capture", async () => {
     const changedStep = {
       ...step("google", "google-market-BE_FR"),
       batchIndex: 4,
@@ -167,23 +177,26 @@ describe("durable feed builders", () => {
         sourceFingerprints: { "product-2": "planned-fingerprint" },
       },
     };
-    const uploadPart = vi.fn();
-    await expect(executeGoogleFeedBuildStep(
+    const uploadPart = vi.fn().mockResolvedValue("sha-google");
+    const readCanonicals = vi.fn().mockResolvedValue({ canonicals: [] });
+    await executeGoogleFeedBuildStep(
       changedStep,
       "worker-1",
       {} as never,
       {
-        readCanonicals: vi.fn(),
+        readCanonicals,
         getFrozenCanonicals: async (_input, create) => create(),
-        verifySourceFingerprints: async () => {
-          throw new Error("Source changed during feed export for product product-2");
-        },
+        computeSourceFingerprints: vi.fn().mockResolvedValue({
+          "product-2": "current-before-capture",
+        }),
+        verifySourceFingerprints: vi.fn(),
         mapGoogle: vi.fn(),
         uploadPart,
-        completeStep: vi.fn(),
+        completeStep: vi.fn().mockResolvedValue(true),
       },
-    )).rejects.toThrow("Source changed during feed export");
-    expect(uploadPart).not.toHaveBeenCalled();
+    );
+    expect(readCanonicals).toHaveBeenCalledOnce();
+    expect(uploadPart).toHaveBeenCalledOnce();
   });
 
   it("blocks when Shopify changes the source during canonical capture", async () => {
@@ -202,15 +215,19 @@ describe("durable feed builders", () => {
           } as never],
         }),
         getFrozenCanonicals: async (_input, create) => create(),
+        computeSourceFingerprints: vi.fn().mockResolvedValue({
+          "product-1": "before-capture",
+        }),
         verifySourceFingerprints: async () => {
           verification++;
-          if (verification === 2) throw new Error("Source changed during capture");
+          throw new Error("Source changed during capture");
         },
         mapGoogle: vi.fn(),
         uploadPart,
         completeStep: vi.fn(),
       },
     )).rejects.toThrow("Source changed during capture");
+    expect(verification).toBe(1);
     expect(uploadPart).not.toHaveBeenCalled();
   });
 });

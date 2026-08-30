@@ -5,18 +5,28 @@
  * GCS download is mocked via module-level vi.mock.
  */
 
+import { Readable } from "node:stream";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the storage module — no real GCS calls
 vi.mock("../src/lib/storage", () => ({
   downloadFeedFile: vi.fn(),
+  openFeedFileReadStream: vi.fn(),
   listFeedFiles: vi.fn(),
 }));
 
 import { validateGoogleFeed, validateMetaFeed } from "../src/validation/feed-validator";
-import { downloadFeedFile } from "../src/lib/storage";
+import { downloadFeedFile, openFeedFileReadStream } from "../src/lib/storage";
 
-const mockDownload = downloadFeedFile as ReturnType<typeof vi.fn>;
+const mockDownloadFunction = downloadFeedFile as ReturnType<typeof vi.fn>;
+const mockOpen = openFeedFileReadStream as ReturnType<typeof vi.fn>;
+const mockDownload = {
+  mockResolvedValue(content: Buffer | null) {
+    mockOpen.mockResolvedValue(content === null
+      ? null
+      : { stream: Readable.from([content]), size: content.length });
+  },
+};
 
 // ── Google TSV fixtures ───────────────────────────────────────────────────────
 
@@ -84,6 +94,15 @@ describe("validateGoogleFeed", () => {
     const result = await validateGoogleFeed("feeds/google/google-fr-BE_FR.tsv");
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.message).toContain("not found");
+  });
+
+  it("streams the feed instead of downloading the complete object", async () => {
+    mockDownload.mockResolvedValue(Buffer.from(VALID_GOOGLE_TSV, "utf-8"));
+
+    await validateGoogleFeed("feeds/google/google-fr-BE_FR.tsv");
+
+    expect(mockOpen).toHaveBeenCalledOnce();
+    expect(mockDownloadFunction).not.toHaveBeenCalled();
   });
 
   it("validates a correct Google TSV as valid", async () => {
@@ -261,6 +280,57 @@ describe("validateMetaFeed — multiline descriptions in language layer", () => 
     expect(result.valid).toBe(true);
   });
 
+  it("parses escaped quotes, commas, multiline fields, CRLF and LF across stream chunks", async () => {
+    const chunks = [
+      Buffer.from("id,title,description,link\r\nuuid-1_FR,\"Table, basse\",\"Ligne 1\r"),
+      Buffer.from("\nLigne \""),
+      Buffer.from("\"citée\"\"\",\"https://example.com/fr/table\"\nuuid-2_FR,Canapé,Simple,https://example.com/fr/canape\r\n"),
+    ];
+    mockOpen.mockResolvedValue({
+      stream: Readable.from(chunks),
+      size: chunks.reduce((total, chunk) => total + chunk.length, 0),
+    });
+
+    const result = await validateMetaFeed("feeds/meta/meta-language-fr.csv");
+
+    expect(result.valid).toBe(true);
+    expect(result.rowCount).toBe(2);
+  });
+
+  it("rejects an unterminated quoted field without buffering to end-of-process memory", async () => {
+    const chunks = [
+      Buffer.from("id,title,description,link\nuuid-1_FR,Title,\"unterminated"),
+      Buffer.alloc(1024, "x"),
+    ];
+    mockOpen.mockResolvedValue({
+      stream: Readable.from(chunks),
+      size: chunks.reduce((total, chunk) => total + chunk.length, 0),
+    });
+
+    const result = await validateMetaFeed("feeds/meta/meta-language-fr.csv");
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ field: "csv" }));
+  });
+
+  it("preserves the exact prior error count when a later CSV record is malformed", async () => {
+    const csv = [
+      "id,title,description,link",
+      "uuid-1_FR,,Description,not-a-url",
+      "uuid-2_FR,Title,\"unterminated",
+    ].join("\n");
+    mockDownload.mockResolvedValue(Buffer.from(csv));
+
+    const result = await validateMetaFeed("feeds/meta/meta-language-fr.csv");
+
+    expect(result.errorCount).toBe(3);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "title" }),
+      expect.objectContaining({ field: "link" }),
+      expect.objectContaining({ field: "csv" }),
+    ]));
+  });
+
   it("rejects duplicate Meta IDs", async () => {
     const csvContent = VALID_META_LANGUAGE_CSV + "\n" + VALID_META_LANGUAGE_CSV.split("\n")[1];
     mockDownload.mockResolvedValue(Buffer.from(csvContent, "utf-8"));
@@ -268,6 +338,40 @@ describe("validateMetaFeed — multiline descriptions in language layer", () => 
     expect(result.valid).toBe(false);
     expect(result.errors).toContainEqual(expect.objectContaining({ field: "id", message: expect.stringContaining("Duplicate") }));
   });
+
+  it("counts every error while retaining only the first 200", async () => {
+    const rows = Array.from(
+      { length: 250 },
+      (_, index) => `uuid-${index}_FR,,Description,not-a-url`,
+    );
+    mockDownload.mockResolvedValue(Buffer.from([
+      "id,title,description,link",
+      ...rows,
+    ].join("\n")));
+
+    const result = await validateMetaFeed("feeds/meta/meta-language-fr.csv");
+
+    expect(result.errorCount).toBe(500);
+    expect(result.errors).toHaveLength(200);
+  });
+
+  it("validates a production-sized stream without materializing the complete feed", async () => {
+    const rowCount = 100_000;
+    async function* rows() {
+      yield Buffer.from("id,title,description,link\n");
+      for (let index = 0; index < rowCount; index++) {
+        yield Buffer.from(
+          `uuid-${index}_FR,Title ${index},Description ${index},https://example.com/fr/${index}\n`,
+        );
+      }
+    }
+    mockOpen.mockResolvedValue({ stream: Readable.from(rows()), size: null });
+
+    const result = await validateMetaFeed("feeds/meta/meta-language-fr.csv");
+
+    expect(result.valid).toBe(true);
+    expect(result.rowCount).toBe(rowCount);
+  }, 60_000);
 });
 
 describe("validateMetaFeed — country layer (meta-country-BE.csv)", () => {

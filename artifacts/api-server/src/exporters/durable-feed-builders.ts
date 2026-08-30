@@ -57,6 +57,7 @@ interface CommonBuildDependencies {
     },
     createCanonicals: () => Promise<CanonicalProduct[]>,
   ): Promise<CanonicalProduct[]>;
+  computeSourceFingerprints(productIds: string[]): Promise<Record<string, string>>;
   verifySourceFingerprints(expected: Record<string, string>): Promise<void>;
   uploadPart: (path: string, content: string) => Promise<string>;
   completeStep: typeof completeFeedExportStep;
@@ -195,14 +196,14 @@ async function frozenCanonicals(
       sourceMarkets: checkpoint.sourceMarkets,
     },
     async () => {
-      await dependencies.verifySourceFingerprints(checkpoint.sourceFingerprints);
+      const before = await dependencies.computeSourceFingerprints(checkpoint.productIds);
       const canonicals = (await dependencies.readCanonicals(config, {
         productIds: checkpoint.productIds,
         markets: checkpoint.sourceMarkets,
         channel: step.channel,
         persistFeedItems: false,
       })).canonicals;
-      await dependencies.verifySourceFingerprints(checkpoint.sourceFingerprints);
+      await dependencies.verifySourceFingerprints(before);
       return canonicals;
     },
   );
@@ -259,6 +260,12 @@ const commonDependencies: CommonBuildDependencies = {
   readCanonicals: readAllCanonicals,
   async getFrozenCanonicals(input, createCanonicals) {
     return (await getOrCreateFrozenSourceBatch(input, createCanonicals)).canonicals;
+  },
+  computeSourceFingerprints: async (productIds) => {
+    const { computeProductSourceFingerprints } = await import(
+      "../jobs/feed-export-source-repository"
+    );
+    return computeProductSourceFingerprints(productIds);
   },
   verifySourceFingerprints: async (expected) => {
     const { assertProductSourceFingerprints } = await import(

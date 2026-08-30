@@ -9,6 +9,7 @@ import type { CanonicalProduct } from "../canonical/types";
 import { computeChecksum } from "../shopify/checksums";
 
 const FROZEN_SOURCE_ROW_INSERT_CHUNK_SIZE = 500;
+const SOURCE_FINGERPRINT_VOLATILE_FIELDS = new Set(["updated_at"]);
 
 export interface FrozenSourceBatch {
   batch: FeedExportSourceBatch;
@@ -25,6 +26,14 @@ export function frozenSourceHash(canonicals: CanonicalProduct[]): string {
     [...canonicals]
       .sort((a, b) => a.id.localeCompare(b.id))
       .map(stableCanonical),
+  );
+}
+
+export function sourceFingerprintPayload(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(row).filter(([key]) => !SOURCE_FINGERPRINT_VOLATILE_FIELDS.has(key)),
   );
 }
 
@@ -162,27 +171,27 @@ export async function computeProductSourceFingerprints(
   const ids = sql.join(productIds.map((id) => sql`${id}::uuid`), sql`, `);
   const result = await db.execute(sql`
     WITH source_rows AS (
-      SELECT p.id AS product_id, 'product:' || p.id::text AS row_key, to_jsonb(p)::text AS payload
+      SELECT p.id AS product_id, 'product:' || p.id::text AS row_key, (to_jsonb(p) - 'updated_at')::text AS payload
       FROM products p WHERE p.id IN (${ids})
       UNION ALL
-      SELECT v.product_id, 'variant:' || v.id::text, to_jsonb(v)::text
+      SELECT v.product_id, 'variant:' || v.id::text, (to_jsonb(v) - 'updated_at')::text
       FROM variants v WHERE v.product_id IN (${ids})
       UNION ALL
-      SELECT v.product_id, 'market:' || mv.id::text, to_jsonb(mv)::text
+      SELECT v.product_id, 'market:' || mv.id::text, (to_jsonb(mv) - 'updated_at')::text
       FROM market_variants mv JOIN variants v ON v.id = mv.variant_id
       WHERE v.product_id IN (${ids})
       UNION ALL
-      SELECT pt.product_id, 'translation:' || pt.id::text, to_jsonb(pt)::text
+      SELECT pt.product_id, 'translation:' || pt.id::text, (to_jsonb(pt) - 'updated_at')::text
       FROM product_translations pt WHERE pt.product_id IN (${ids})
       UNION ALL
-      SELECT i.product_id, 'image:' || i.id::text, to_jsonb(i)::text
+      SELECT i.product_id, 'image:' || i.id::text, (to_jsonb(i) - 'updated_at')::text
       FROM images i WHERE i.product_id IN (${ids})
       UNION ALL
-      SELECT v.product_id, 'inventory:' || il.id::text, to_jsonb(il)::text
+      SELECT v.product_id, 'inventory:' || il.id::text, (to_jsonb(il) - 'updated_at')::text
       FROM inventory_levels il JOIN variants v ON v.id = il.variant_id
       WHERE v.product_id IN (${ids})
       UNION ALL
-      SELECT r.product_id, 'recommendation:' || r.id::text, to_jsonb(r)::text
+      SELECT r.product_id, 'recommendation:' || r.id::text, (to_jsonb(r) - 'updated_at')::text
       FROM recommendations r WHERE r.product_id IN (${ids})
     )
     SELECT product_id::text AS product_id,

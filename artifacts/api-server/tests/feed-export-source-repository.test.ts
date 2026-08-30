@@ -119,7 +119,9 @@ vi.mock("@workspace/db", () => ({
 }));
 
 import {
+  sourceFingerprintPayload,
   frozenSourceHash,
+  getOrCreateFrozenSourceBatch,
   persistFrozenSourceBatch,
 } from "../src/jobs/feed-export-source-repository";
 
@@ -215,5 +217,71 @@ describe("persistFrozenSourceBatch", () => {
     expect(mocks.state.rowInsertBatches.map((chunk) => chunk.length)).toEqual([500, 500]);
     expect(mocks.state.committed).toBe(false);
     expect(mocks.state.rolledBack).toBe(true);
+  });
+});
+
+describe("sourceFingerprintPayload", () => {
+  it("ignores updated_at changes", () => {
+    const first = sourceFingerprintPayload({
+      id: "row-1",
+      quantity: 4,
+      updated_at: "2026-08-30T08:00:00.000Z",
+    });
+    const second = sourceFingerprintPayload({
+      id: "row-1",
+      quantity: 4,
+      updated_at: "2026-08-30T09:00:00.000Z",
+    });
+
+    expect(computeChecksum(first)).toBe(computeChecksum(second));
+  });
+
+  it.each([
+    ["quantity", { quantity: 5 }],
+    ["price", { price: "19.99" }],
+    ["availability", { available: false }],
+    ["translation", { title: "Neuer Titel" }],
+    ["image", { url: "https://example.com/new.jpg" }],
+  ])("changes when the %s business value changes", (_field, change) => {
+    const baseline = sourceFingerprintPayload({
+      id: "row-1",
+      quantity: 4,
+      price: "10.00",
+      available: true,
+      title: "Titel",
+      url: "https://example.com/old.jpg",
+      updated_at: "2026-08-30T08:00:00.000Z",
+    });
+    const changed = sourceFingerprintPayload({
+      id: "row-1",
+      quantity: 4,
+      price: "10.00",
+      available: true,
+      title: "Titel",
+      url: "https://example.com/old.jpg",
+      updated_at: "2026-08-30T08:00:00.000Z",
+      ...change,
+    });
+
+    expect(computeChecksum(changed)).not.toBe(computeChecksum(baseline));
+  });
+});
+
+describe("getOrCreateFrozenSourceBatch", () => {
+  it("returns an existing complete batch without consulting the live source", async () => {
+    const canonicals = makeCanonicals(2);
+    configureSuccessfulReload(canonicals);
+    const createCanonicals = vi.fn();
+
+    const result = await getOrCreateFrozenSourceBatch({
+      syncRunId: "run-1",
+      channel: "google",
+      batchIndex: 0,
+      productIds: ["product-1"],
+      sourceMarkets: ["BE_FR"],
+    }, createCanonicals);
+
+    expect(result.canonicals).toEqual(canonicals);
+    expect(createCanonicals).not.toHaveBeenCalled();
   });
 });

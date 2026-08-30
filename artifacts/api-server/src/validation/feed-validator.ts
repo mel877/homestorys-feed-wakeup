@@ -12,12 +12,21 @@
  * reports schema errors with row numbers.
  */
 
-import { readFileSync } from "fs";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
+import { createReadStream, createWriteStream, readFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "path";
-import { downloadFeedFile, listFeedFiles } from "../lib/storage";
+import type { Readable } from "node:stream";
+import { createInterface } from "node:readline";
+import { listFeedFiles, openFeedFileReadStream } from "../lib/storage";
 import { logger as rootLogger } from "../lib/logger";
 
 const logger = rootLogger.child({ module: "feed-validator" });
+const MAX_DELIMITED_FIELD_CHARS = 16 * 1024 * 1024;
+const DUPLICATE_ID_PARTITIONS = 64;
+const MAX_DUPLICATE_PARTITION_BYTES = 4 * 1024 * 1024;
 
 // ── Schema loading ────────────────────────────────────────────────────────────
 
@@ -166,108 +175,257 @@ export function createMetaRowValidator(
   return (row, rowIndex) => validateRow(row, schema, rowIndex);
 }
 
-// ── TSV parsing ───────────────────────────────────────────────────────────────
+// ── Incremental delimited parsing ─────────────────────────────────────────────
 
-function parseTsv(content: string): Record<string, string>[] {
-  const lines = content.split("\n").filter((l) => l.trim());
-  if (lines.length < 2) return [];
+class DelimitedParseError extends Error {}
 
-  const headers = lines[0]!.split("\t");
-  return lines.slice(1).map((line) => {
-    const values = line.split("\t");
-    const row: Record<string, string> = {};
-    for (let i = 0; i < headers.length; i++) {
-      row[headers[i]!] = values[i]?.replace(/\\t/g, "\t").replace(/\\n/g, "\n") ?? "";
-    }
-    return row;
+interface TrackedWriter {
+  stream: ReturnType<typeof createWriteStream>;
+  error: Error | null;
+}
+
+function createTrackedWriter(path: string): TrackedWriter {
+  const tracked: TrackedWriter = {
+    stream: createWriteStream(path, { encoding: "utf8" }),
+    error: null,
+  };
+  tracked.stream.on("error", (error) => {
+    tracked.error = error;
+  });
+  return tracked;
+}
+
+async function writeTracked(writer: TrackedWriter, content: string): Promise<void> {
+  if (writer.error) throw writer.error;
+  if (!writer.stream.write(content)) {
+    await once(writer.stream, "drain");
+  }
+  if (writer.error) throw writer.error;
+}
+
+async function closeTracked(writer: TrackedWriter): Promise<void> {
+  if (writer.error) throw writer.error;
+  await new Promise<void>((resolveEnd, reject) => {
+    const handleError = (error: Error) => reject(error);
+    writer.stream.once("error", handleError);
+    writer.stream.end(() => {
+      writer.stream.off("error", handleError);
+      if (writer.error) reject(writer.error);
+      else resolveEnd();
+    });
   });
 }
 
-// ── CSV parsing (RFC-4180 compliant, handles quoted multiline fields) ──────────
-
-/**
- * Full RFC-4180 CSV parser.
- *
- * Scans the entire content character-by-character so quoted fields
- * containing embedded newlines (e.g. product descriptions with \n) are
- * parsed as a single field, not split into multiple malformed rows.
- */
-function parseCsv(content: string): Record<string, string>[] {
-  // Split content into records (fields across the whole file)
-  const records: string[][] = [];
+async function* parseDelimitedRecords(
+  stream: Readable,
+  delimiter: "," | "\t",
+): AsyncGenerator<string[]> {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
   let currentRecord: string[] = [];
   let currentField = "";
   let inQuotes = false;
-  let i = 0;
+  let afterQuote = false;
+  let skipLineFeed = false;
 
-  while (i < content.length) {
-    const ch = content[i]!;
-    const next = content[i + 1];
+  const parseChunk = (content: string): string[][] => {
+    const completed: string[][] = [];
+    const finishRecord = () => {
+      currentRecord.push(currentField);
+      currentField = "";
+      completed.push(currentRecord);
+      currentRecord = [];
+    };
 
-    if (inQuotes) {
-      if (ch === '"') {
-        if (next === '"') {
-          // Escaped quote: "" → "
-          currentField += '"';
-          i += 2;
-          continue;
-        } else {
-          // Closing quote
-          inQuotes = false;
-        }
-      } else {
-        // Inside quoted field — accept any character including \n
-        currentField += ch;
+    for (const ch of content) {
+      if (skipLineFeed) {
+        skipLineFeed = false;
+        if (ch === "\n") continue;
       }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ',') {
-        currentRecord.push(currentField);
-        currentField = "";
-      } else if (ch === '\n') {
-        currentRecord.push(currentField);
-        currentField = "";
-        records.push(currentRecord);
-        currentRecord = [];
-      } else if (ch === '\r') {
-        // Skip CR (handle \r\n as single newline)
-        if (next === '\n') {
-          i++;
+
+      if (delimiter === "," && inQuotes) {
+        if (ch === '"') {
+          inQuotes = false;
+          afterQuote = true;
+        } else {
+          currentField += ch;
         }
+        if (currentField.length > MAX_DELIMITED_FIELD_CHARS) {
+          throw new DelimitedParseError("Delimited field exceeds maximum supported size");
+        }
+        continue;
+      }
+
+      if (delimiter === "," && afterQuote) {
+        if (ch === '"') {
+          currentField += '"';
+          if (currentField.length > MAX_DELIMITED_FIELD_CHARS) {
+            throw new DelimitedParseError("Delimited field exceeds maximum supported size");
+          }
+          inQuotes = true;
+          afterQuote = false;
+          continue;
+        }
+        afterQuote = false;
+        if (ch !== delimiter && ch !== "\n" && ch !== "\r") {
+          throw new DelimitedParseError("Unexpected character after closing CSV quote");
+        }
+      }
+
+      if (delimiter === "," && ch === '"') {
+        if (currentField.length > 0) {
+          throw new DelimitedParseError("Unexpected CSV quote in unquoted field");
+        }
+        inQuotes = true;
+      } else if (ch === delimiter) {
         currentRecord.push(currentField);
         currentField = "";
-        records.push(currentRecord);
-        currentRecord = [];
+      } else if (ch === "\n") {
+        finishRecord();
+      } else if (ch === "\r") {
+        finishRecord();
+        skipLineFeed = true;
       } else {
         currentField += ch;
+        if (currentField.length > MAX_DELIMITED_FIELD_CHARS) {
+          throw new DelimitedParseError("Delimited field exceeds maximum supported size");
+        }
       }
     }
-    i++;
+    return completed;
+  };
+
+  for await (const chunk of stream) {
+    const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    for (const record of parseChunk(decoder.decode(bytes, { stream: true }))) {
+      yield record;
+    }
   }
-  // Flush final field and record
+  for (const record of parseChunk(decoder.decode())) {
+    yield record;
+  }
+  if (inQuotes) {
+    throw new DelimitedParseError("CSV quoted field is not terminated");
+  }
   if (currentField || currentRecord.length > 0) {
     currentRecord.push(currentField);
-    if (currentRecord.some((f) => f !== "")) {
-      records.push(currentRecord);
+    if (currentRecord.some((field) => field !== "")) {
+      yield currentRecord;
+    }
+  }
+}
+
+class ExactDuplicateIdTracker {
+  private readonly directory: string;
+  private readonly paths: string[];
+  private readonly writers: TrackedWriter[];
+  private writersClosed = false;
+
+  private constructor(directory: string) {
+    this.directory = directory;
+    this.paths = Array.from(
+      { length: DUPLICATE_ID_PARTITIONS },
+      (_, index) => resolve(directory, `${String(index).padStart(2, "0")}.jsonl`),
+    );
+    this.writers = this.paths.map(createTrackedWriter);
+  }
+
+  static async create(): Promise<ExactDuplicateIdTracker> {
+    return new ExactDuplicateIdTracker(
+      await mkdtemp(resolve(tmpdir(), "feed-validator-ids-")),
+    );
+  }
+
+  async add(id: string, row: number): Promise<void> {
+    const partition = createHash("sha256").update(id).digest()[0]! %
+      DUPLICATE_ID_PARTITIONS;
+    const writer = this.writers[partition]!;
+    await writeTracked(writer, `${JSON.stringify([id, row])}\n`);
+  }
+
+  async findDuplicates(
+    onDuplicate: (error: ValidationError) => void,
+  ): Promise<void> {
+    await this.closeWriters();
+    try {
+      for (const path of this.paths) {
+        await this.scanPartition(path, 1, onDuplicate);
+      }
+    } finally {
+      await rm(this.directory, { recursive: true, force: true });
     }
   }
 
-  if (records.length < 2) return [];
-
-  const headers = records[0]!;
-  const rows: Record<string, string>[] = [];
-
-  for (let r = 1; r < records.length; r++) {
-    const values = records[r]!;
-    if (values.every((v) => v === "")) continue; // skip blank rows
-    const row: Record<string, string> = {};
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]!] = values[j] ?? "";
-    }
-    rows.push(row);
+  async dispose(): Promise<void> {
+    await this.closeWriters();
+    await rm(this.directory, { recursive: true, force: true });
   }
-  return rows;
+
+  private async closeWriters(): Promise<void> {
+    if (this.writersClosed) return;
+    this.writersClosed = true;
+    await Promise.all(this.writers.map(closeTracked));
+  }
+
+  private async scanPartition(
+    path: string,
+    hashByte: number,
+    onDuplicate: (error: ValidationError) => void,
+  ): Promise<void> {
+    const metadata = await stat(path);
+    if (metadata.size <= MAX_DUPLICATE_PARTITION_BYTES || hashByte >= 32) {
+      const seen = new Set<string>();
+      const lines = createInterface({
+        input: createReadStream(path),
+        crlfDelay: Infinity,
+      });
+      for await (const line of lines) {
+        if (!line) continue;
+        const [id, row] = JSON.parse(line) as [string, number];
+        if (seen.has(id)) {
+          onDuplicate({
+            row,
+            field: "id",
+            message: `Duplicate ID "${id}"`,
+            value: id,
+          });
+        } else {
+          seen.add(id);
+        }
+      }
+      return;
+    }
+
+    const partitionDirectory = `${path}.partitions-${hashByte}`;
+    await mkdir(partitionDirectory);
+    const paths = Array.from(
+      { length: DUPLICATE_ID_PARTITIONS },
+      (_, index) => resolve(partitionDirectory, `${String(index).padStart(2, "0")}.jsonl`),
+    );
+    const writers = paths.map(createTrackedWriter);
+    try {
+      const lines = createInterface({
+        input: createReadStream(path),
+        crlfDelay: Infinity,
+      });
+      for await (const line of lines) {
+        if (!line) continue;
+        const [id] = JSON.parse(line) as [string, number];
+        const partition = createHash("sha256").update(id).digest()[hashByte]! %
+          DUPLICATE_ID_PARTITIONS;
+        const writer = writers[partition]!;
+        await writeTracked(writer, `${line}\n`);
+      }
+      await Promise.all(writers.map(closeTracked));
+      await rm(path, { force: true });
+      for (const partitionPath of paths) {
+        await this.scanPartition(partitionPath, hashByte + 1, onDuplicate);
+      }
+    } finally {
+      for (const writer of writers) {
+        if (!writer.stream.closed) writer.stream.destroy();
+      }
+    }
+  }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -285,69 +443,26 @@ export interface FeedValidationOptions {
   expectedCurrency?: string;
 }
 
-function decodeUtf8(buf: Buffer, storagePath: string): {
-  content: string;
-  errors: ValidationError[];
-} {
-  try {
-    return {
-      content: new TextDecoder("utf-8", { fatal: true }).decode(buf),
-      errors: [],
-    };
-  } catch {
-    return {
-      content: "",
-      errors: [{
-        row: 0,
-        field: "encoding",
-        message: "File is not valid UTF-8",
-        value: storagePath,
-      }],
-    };
-  }
-}
-
-function findDuplicateIds(rows: Record<string, string>[]): ValidationError[] {
-  const seen = new Set<string>();
-  const errors: ValidationError[] = [];
-  for (let i = 0; i < rows.length; i++) {
-    const id = rows[i]?.["id"]?.trim();
-    if (!id) continue;
-    if (seen.has(id)) {
-      errors.push({
-        row: i + 2,
-        field: "id",
-        message: `Duplicate ID "${id}"`,
-        value: id,
-      });
-    } else {
-      seen.add(id);
-    }
-  }
-  return errors;
-}
-
-function findUnexpectedCurrencies(
-  rows: Record<string, string>[],
+function findUnexpectedCurrenciesInRow(
+  row: Record<string, string>,
+  rowIndex: number,
   expectedCurrency: string | undefined,
 ): ValidationError[] {
   if (!expectedCurrency) return [];
 
   const errors: ValidationError[] = [];
   const currencyFields = ["price", "sale_price", "shipping"];
-  for (let i = 0; i < rows.length; i++) {
-    for (const field of currencyFields) {
-      const value = rows[i]?.[field]?.trim();
-      if (!value) continue;
-      const currency = value.match(/\b([A-Z]{3})$/)?.[1];
-      if (currency && currency !== expectedCurrency) {
-        errors.push({
-          row: i + 2,
-          field,
-          message: `Expected currency ${expectedCurrency}, received ${currency}`,
-          value,
-        });
-      }
+  for (const field of currencyFields) {
+    const value = row[field]?.trim();
+    if (!value) continue;
+    const currency = value.match(/\b([A-Z]{3})$/)?.[1];
+    if (currency && currency !== expectedCurrency) {
+      errors.push({
+        row: rowIndex,
+        field,
+        message: `Expected currency ${expectedCurrency}, received ${currency}`,
+        value,
+      });
     }
   }
   return errors;
@@ -365,39 +480,152 @@ function parseMoney(value: string | undefined): {
   };
 }
 
-function findInvalidPromotions(
-  rows: Record<string, string>[],
+function findInvalidPromotionInRow(
+  row: Record<string, string>,
+  rowIndex: number,
 ): ValidationError[] {
   const errors: ValidationError[] = [];
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!;
-    const rawSalePrice = row["sale_price"]?.trim();
-    if (!rawSalePrice) continue;
+  const rawSalePrice = row["sale_price"]?.trim();
+  if (!rawSalePrice) return errors;
 
-    const price = parseMoney(row["price"]);
-    const salePrice = parseMoney(rawSalePrice);
-    if (!price || !salePrice) continue;
+  const price = parseMoney(row["price"]);
+  const salePrice = parseMoney(rawSalePrice);
+  if (!price || !salePrice) return errors;
 
-    if (price.currency !== salePrice.currency) {
-      errors.push({
-        row: i + 2,
-        field: "sale_price",
-        message: `Sale price currency ${salePrice.currency} must match price currency ${price.currency}`,
-        value: rawSalePrice,
-      });
-      continue;
-    }
+  if (price.currency !== salePrice.currency) {
+    errors.push({
+      row: rowIndex,
+      field: "sale_price",
+      message: `Sale price currency ${salePrice.currency} must match price currency ${price.currency}`,
+      value: rawSalePrice,
+    });
+    return errors;
+  }
 
-    if (salePrice.amount >= price.amount) {
-      errors.push({
-        row: i + 2,
-        field: "sale_price",
-        message: "Sale price must be strictly lower than price",
-        value: rawSalePrice,
-      });
-    }
+  if (salePrice.amount >= price.amount) {
+    errors.push({
+      row: rowIndex,
+      field: "sale_price",
+      message: "Sale price must be strictly lower than price",
+      value: rawSalePrice,
+    });
   }
   return errors;
+}
+
+async function validateFeedStream(input: {
+  storagePath: string;
+  schemaName: SchemaName;
+  delimiter: "," | "\t";
+  expectedCurrency?: string;
+}): Promise<FeedValidationResult> {
+  const file = await openFeedFileReadStream(input.storagePath);
+  if (!file) {
+    return {
+      file: input.storagePath,
+      rowCount: 0,
+      errorCount: 1,
+      errors: [{
+        row: 0,
+        field: "file",
+        message: "File not found in storage",
+        value: input.storagePath,
+      }],
+      valid: false,
+      schema: input.schemaName,
+    };
+  }
+
+  const schema = loadSchema(input.schemaName) as JsonSchemaNode;
+  const duplicateIds = await ExactDuplicateIdTracker.create();
+  const errors: ValidationError[] = [];
+  let errorCount = 0;
+  let rowCount = 0;
+  let headers: string[] | null = null;
+
+  const addErrors = (newErrors: ValidationError[]) => {
+    errorCount += newErrors.length;
+    if (errors.length < 200) {
+      errors.push(...newErrors.slice(0, 200 - errors.length));
+    }
+  };
+
+  try {
+    for await (const values of parseDelimitedRecords(file.stream, input.delimiter)) {
+      if (!headers) {
+        if (values.every((value) => value === "")) continue;
+        headers = values;
+        continue;
+      }
+      if (values.every((value) => value === "")) continue;
+
+      rowCount++;
+      const rowIndex = rowCount + 1;
+      const row: Record<string, string> = {};
+      for (let index = 0; index < headers.length; index++) {
+        const value = values[index] ?? "";
+        row[headers[index]!] = input.delimiter === "\t"
+          ? value.replace(/\\t/g, "\t").replace(/\\n/g, "\n")
+          : value;
+      }
+
+      const id = row["id"]?.trim();
+      if (id) {
+        await duplicateIds.add(id, rowIndex);
+      }
+      addErrors(findUnexpectedCurrenciesInRow(row, rowIndex, input.expectedCurrency));
+      addErrors(findInvalidPromotionInRow(row, rowIndex));
+      addErrors(validateRow(row, schema, rowIndex));
+    }
+    await duplicateIds.findDuplicates((error) => addErrors([error]));
+  } catch (error) {
+    file.stream.destroy();
+    await duplicateIds.dispose();
+    if (
+      error instanceof TypeError &&
+      (error as NodeJS.ErrnoException).code === "ERR_ENCODING_INVALID_ENCODED_DATA"
+    ) {
+      return {
+        file: input.storagePath,
+        rowCount: 0,
+        errorCount: 1,
+        errors: [{
+          row: 0,
+          field: "encoding",
+          message: "File is not valid UTF-8",
+          value: input.storagePath,
+        }],
+        valid: false,
+        schema: input.schemaName,
+      };
+    }
+    if (error instanceof DelimitedParseError) {
+      addErrors([{
+        row: rowCount + 2,
+        field: "csv",
+        message: error.message,
+        value: input.storagePath,
+      }]);
+      return {
+        file: input.storagePath,
+        rowCount,
+        errorCount,
+        errors,
+        valid: false,
+        schema: input.schemaName,
+      };
+    }
+    throw error;
+  }
+
+  return {
+    file: input.storagePath,
+    rowCount,
+    errorCount,
+    errors,
+    valid: errorCount === 0,
+    schema: input.schemaName,
+  };
 }
 
 /**
@@ -408,34 +636,12 @@ export async function validateGoogleFeed(
   storagePath: string,
   options: FeedValidationOptions = {},
 ): Promise<FeedValidationResult> {
-  const buf = await downloadFeedFile(storagePath);
-  if (!buf) {
-    return { file: storagePath, rowCount: 0, errorCount: 1, errors: [{ row: 0, field: "file", message: "File not found in storage", value: storagePath }], valid: false, schema: "google-product" };
-  }
-
-  const schema = loadSchema("google-product") as JsonSchemaNode;
-  const decoded = decodeUtf8(buf, storagePath);
-  const rows = decoded.errors.length ? [] : parseTsv(decoded.content);
-  const allErrors: ValidationError[] = [
-    ...decoded.errors,
-    ...findDuplicateIds(rows),
-    ...findUnexpectedCurrencies(rows, options.expectedCurrency),
-    ...findInvalidPromotions(rows),
-  ];
-
-  for (let i = 0; i < rows.length; i++) {
-    const errors = validateRow(rows[i]!, schema, i + 2); // +2 for 1-indexed + header row
-    allErrors.push(...errors);
-  }
-
-  return {
-    file: storagePath,
-    rowCount: rows.length,
-    errorCount: allErrors.length,
-    errors: allErrors.slice(0, 200), // cap to 200 for log readability
-    valid: allErrors.length === 0,
-    schema: "google-product",
-  };
+  return validateFeedStream({
+    storagePath,
+    schemaName: "google-product",
+    delimiter: "\t",
+    expectedCurrency: options.expectedCurrency,
+  });
 }
 
 /**
@@ -452,35 +658,12 @@ export async function validateMetaFeed(
   options: FeedValidationOptions = {},
 ): Promise<FeedValidationResult> {
   const schemaName = detectMetaSchema(storagePath);
-
-  const buf = await downloadFeedFile(storagePath);
-  if (!buf) {
-    return { file: storagePath, rowCount: 0, errorCount: 1, errors: [{ row: 0, field: "file", message: "File not found in storage", value: storagePath }], valid: false, schema: schemaName };
-  }
-
-  const schema = loadSchema(schemaName) as JsonSchemaNode;
-  const decoded = decodeUtf8(buf, storagePath);
-  const rows = decoded.errors.length ? [] : parseCsv(decoded.content);
-  const allErrors: ValidationError[] = [
-    ...decoded.errors,
-    ...findDuplicateIds(rows),
-    ...findUnexpectedCurrencies(rows, options.expectedCurrency),
-    ...findInvalidPromotions(rows),
-  ];
-
-  for (let i = 0; i < rows.length; i++) {
-    const errors = validateRow(rows[i]!, schema, i + 2);
-    allErrors.push(...errors);
-  }
-
-  return {
-    file: storagePath,
-    rowCount: rows.length,
-    errorCount: allErrors.length,
-    errors: allErrors.slice(0, 200),
-    valid: allErrors.length === 0,
-    schema: schemaName,
-  };
+  return validateFeedStream({
+    storagePath,
+    schemaName,
+    delimiter: ",",
+    expectedCurrency: options.expectedCurrency,
+  });
 }
 
 /**
