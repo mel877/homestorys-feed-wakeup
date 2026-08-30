@@ -8,6 +8,8 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { CanonicalProduct } from "../canonical/types";
 import { computeChecksum } from "../shopify/checksums";
 
+const FROZEN_SOURCE_ROW_INSERT_CHUNK_SIZE = 500;
+
 export interface FrozenSourceBatch {
   batch: FeedExportSourceBatch;
   canonicals: CanonicalProduct[];
@@ -96,17 +98,27 @@ export async function persistFrozenSourceBatch(input: {
       .returning();
     if (!batch) return;
     if (sorted.length > 0) {
-      await tx.insert(feedExportSourceRowsTable).values(sorted.map((canonical, index) => ({
-        sourceBatchId: batch.id,
-        rowIndex: index,
-        canonicalId: canonical.id,
-        productId: canonical.productId,
-        variantId: canonical.variantId,
-        marketCode: canonical.market,
-        language: canonical.language,
-        canonicalJson: canonical as unknown as Record<string, unknown>,
-        checksum: computeChecksum(stableCanonical(canonical)),
-      })));
+      for (
+        let chunkStart = 0;
+        chunkStart < sorted.length;
+        chunkStart += FROZEN_SOURCE_ROW_INSERT_CHUNK_SIZE
+      ) {
+        const chunk = sorted.slice(
+          chunkStart,
+          chunkStart + FROZEN_SOURCE_ROW_INSERT_CHUNK_SIZE,
+        );
+        await tx.insert(feedExportSourceRowsTable).values(chunk.map((canonical, index) => ({
+          sourceBatchId: batch.id,
+          rowIndex: chunkStart + index,
+          canonicalId: canonical.id,
+          productId: canonical.productId,
+          variantId: canonical.variantId,
+          marketCode: canonical.market,
+          language: canonical.language,
+          canonicalJson: canonical as unknown as Record<string, unknown>,
+          checksum: computeChecksum(stableCanonical(canonical)),
+        })));
+      }
     }
     await tx
       .update(feedExportSourceBatchesTable)
