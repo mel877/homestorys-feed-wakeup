@@ -1,0 +1,117 @@
+Implémente uniquement le correctif minimal de publication Meta identifié par le diagnostic.
+
+Aucun pump, aucun feed-plan, aucun export, aucune migration, aucun publish.
+
+1. Identité dédiée aux couches langue Meta durables
+
+Dans durable-feed-finalizer.ts, pour les finalizers :
+
+meta-language-fr
+meta-language-de
+
+utiliser une identité de snapshot distincte des anciens flux complets :
+
+META_LANGUAGE_FR
+META_LANGUAGE_DE
+
+Cette identité dédiée doit être utilisée uniquement pour :
+
+loadPreviousItemCount()
+la désactivation de l’ancien snapshot courant de cette même couche durable
+l’enregistrement du nouveau snapshot
+
+Ne change pas les market_code internes des étapes/build parts existants :
+
+LANG_FR
+LANG_DE
+
+Ils doivent continuer à être utilisés pour charger les batches déjà construits.
+
+Ne toucher à aucun des 7 snapshots Meta pays/base déjà valides.
+
+Ne toucher à Google.
+
+2. Résolution publique /lang/fr.csv et /lang/de.csv
+
+Dans feeds.ts, les routes :
+
+/api/feeds/meta/lang/fr.csv
+/api/feeds/meta/lang/de.csv
+
+doivent résoudre exclusivement les nouveaux snapshots :
+
+META_LANGUAGE_FR
+META_LANGUAGE_DE
+
+Elles ne doivent plus pouvoir sélectionner les anciens snapshots complets LANG_FR / LANG_DE.
+
+3. Désactiver le fallback legacy uniquement pour Meta
+
+Si aucun snapshot Meta courant valide n’est trouvé :
+
+ne jamais servir l’objet legacy ;
+retourner 503 Feed temporarily unavailable ;
+ajouter Cache-Control: no-store.
+
+Conserver le comportement Google existant inchangé.
+
+4. Requeue limité aux deux finalizers langue bloqués
+
+Adapter requeueBlockedMetaFinalizers() pour cette reprise :
+
+cibler uniquement :
+
+channel = meta
+stage = finalize
+status = completed
+checkpoint.result = blocked
+checkpoint.published = false
+checkpoint.fileKey IN ('meta-language-fr', 'meta-language-de')
+
+Exiger exactement 2 lignes.
+
+Si ce n’est pas exactement 2 :
+
+rollback ;
+aucune modification.
+
+Conserver intégralement :
+
+checkpoint
+attempts
+
+Réinitialiser les mêmes champs que la route actuelle.
+
+Le body HTTP reste :
+
+{
+  "syncRunId": "uuid"
+}
+5. Tests obligatoires
+
+Vérifier notamment :
+
+un ancien snapshot LANG_FR/LANG_DE complet n’est jamais utilisé comme précédent pour une nouvelle couche langue ;
+META_LANGUAGE_FR/DE est utilisé pour les nouveaux snapshots ;
+/lang/fr.csv et /lang/de.csv résolvent uniquement ces nouveaux snapshots ;
+absence de snapshot Meta => HTTP 503, jamais legacy ;
+Google garde son fallback actuel ;
+requeue retourne exactement 2 finalizers langue ;
+aucun build/pump/feed-plan n’est lancé.
+
+Lance :
+
+tests ciblés ;
+suite API complète ;
+typecheck ;
+build ;
+git diff --check.
+
+Ne lance aucune opération de production.
+
+À la fin donne uniquement :
+
+fichiers modifiés ;
+tests ;
+build/typecheck ;
+commit.
