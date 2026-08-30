@@ -1,0 +1,152 @@
+mplémente la Task #94 : rendre le cycle nocturne Shopify → feeds entièrement durable et autonome sur Replit Autoscale.
+
+Cette tâche doit réutiliser au maximum l’architecture durable existante. Ne refonds pas les exporters Google/Meta, finalizers, snapshots, canonical builders ou dashboard.
+
+Aucun pump, sync, feed-plan ou publish production ne doit être exécuté pendant l’implémentation.
+
+1. Shopify durable
+
+Ajouter une persistance DB dédiée aux étapes Shopify durables avec migration.
+
+Les workers doivent être stateless et reprendre après redémarrage grâce à :
+
+pending/running/completed/failed ;
+checkpoint/cursor ;
+lease owner ;
+lease expiration ;
+attempts/retries ;
+association au sync_run.
+
+Réutiliser les patterns éprouvés de feed_export_steps : claims atomiques, leases, récupération après interruption et idempotence.
+
+Découper au minimum :
+
+products/variants ;
+market pricing ;
+inventory ;
+translations ;
+image classification ;
+completion gate.
+
+Les opérations longues doivent être divisées en tranches suffisamment courtes pour Autoscale.
+
+Un redémarrage du processus ne doit plus transformer automatiquement tout le cycle en échec irrécupérable : les étapes non terminées doivent pouvoir reprendre.
+
+2. Gate Shopify
+
+Un refresh Shopify ne peut être déclaré réussi que lorsque toutes les phases obligatoires sont terminées et validées.
+
+Vérifier notamment :
+
+fraîcheur pricing ;
+fraîcheur inventory ;
+absence d’étape obligatoire failed ;
+garde-fou CHF existant.
+
+Un refresh incomplet, failed, degraded ou orphaned ne peut jamais déclencher un feed-plan.
+
+3. Feed-plan automatique
+
+Après réussite complète du refresh Shopify :
+
+créer automatiquement exactement UN plan durable Google + Meta ;
+associer le plan au sync_run Shopify source dans les métadonnées ;
+rendre cette création idempotente ;
+ne jamais créer deux plans pour le même refresh ;
+ne pas créer de nouveau plan si un cycle correspondant existe déjà.
+
+Conserver l’endpoint manuel /api/internal/feed-plan pour l’administration.
+
+4. Orchestration externe
+
+Créer/adapter un endpoint interne protégé par INTERNAL_API_SECRET permettant à GitHub de faire avancer le cycle nocturne par tranches courtes :
+
+Shopify durable → completion gate → auto feed-plan → durable feed pump
+
+L’appel doit être idempotent et resumable.
+
+Il doit pouvoir retourner clairement au minimum :
+
+running
+idle
+completed
+failed
+phase actuelle
+5. GitHub Actions
+
+Adapter le workflow pour :
+
+un cycle nocturne à partir de 02:00 UTC ;
+concurrency explicite pour empêcher deux cycles nocturnes simultanés ;
+appels séquentiels, jamais de pumps parallèles ;
+continuer jusqu’à completed ou échec terminal ;
+watchdog maximum 3 heures ;
+utiliser les capacités existantes jusqu’à maxSteps=8 / budgetMs<=40000 lorsque approprié ;
+arrêter rapidement lorsqu’il n’y a plus de travail ;
+permettre workflow_dispatch manuel pour test/maintenance.
+
+Optimiser pour GitHub Actions Free et éviter les réveils inutiles toutes les 30 minutes une fois ce cycle en place.
+
+6. Désactiver l’ancienne architecture concurrente
+
+Une fois le nouveau chemin utilisé :
+
+désactiver l’export Google direct de 03:30 UTC ;
+retirer du Full Sync les exports directs Google et Meta ;
+aucun export direct ne doit pouvoir republier des données anciennes pendant qu’un cycle durable existe.
+
+Ne supprimer aucune route publique de feed.
+
+7. Échecs
+
+Garantir :
+
+Shopify failed → aucun feed-plan.
+
+Pricing/inventory incomplet → aucun feed-plan.
+
+Feed build failed → aucun snapshot invalide.
+
+Finalizer failed → ancien snapshot reste courant.
+
+Cycle réussi → nouveaux snapshots seulement après validations existantes.
+
+Ne jamais supprimer les snapshots précédents avant réussite du nouveau cycle.
+
+8. Tests
+
+Tester notamment :
+
+reprise après redémarrage/lease expiré ;
+idempotence ;
+aucun double feed-plan ;
+aucun plan après Shopify failed ;
+reprise d’une phase partiellement terminée ;
+gate pricing/inventory ;
+orchestration jusqu’au plan durable ;
+ancien snapshot conservé en cas d’échec ;
+exports directs legacy désactivés ;
+concurrence GitHub impossible ;
+comportement manuel existant conservé.
+
+Exécuter :
+
+migrations/tests DB en environnement de test uniquement ;
+tests ciblés ;
+suite API complète ;
+typecheck ;
+builds ;
+git diff --check.
+
+Ne lancer aucune migration production, aucun sync production, aucun pump production, aucun feed-plan production et aucun Publish.
+
+À la fin, donne uniquement :
+
+architecture réellement implémentée ;
+migration créée ;
+fichiers modifiés ;
+tests ;
+build/typecheck ;
+nouveau workflow GitHub proposé ;
+commit ;
+procédure exacte de cutover/test production.
