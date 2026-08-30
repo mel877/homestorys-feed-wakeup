@@ -1,0 +1,39 @@
+Analyse uniquement la Task #94 et propose le correctif minimal pour rendre le cycle nocturne durable et autonome sur l’architecture actuelle.
+
+Lecture seule. Aucun build, publish, pump, feed-plan, migration ou sync.
+
+Contraintes impératives :
+
+conserver Replit Autoscale ;
+ne pas passer en Reserved VM ;
+ne pas ajouter de coût récurrent Replit ;
+utiliser GitHub Actions Free comme wake-up/orchestrateur si utile ;
+conserver le dashboard actuel ;
+conserver la publication atomique existante ;
+ne jamais lancer un nouveau feed durable si les données Shopify nécessaires ne sont pas suffisamment fraîches/validées.
+
+Analyse précisément :
+
+Pourquoi les syncs full et prices deviennent orphaned lors des redémarrages et quelles parties sont aujourd’hui non résumables.
+Vérifie si l’infrastructure existante permet déjà de rendre le sync Shopify durable par étapes avec état DB, leases et reprise, sans réécrire tout le moteur.
+Si oui, décris le découpage minimal nécessaire : produits/variantes, prices, inventory, translations, image classification, etc.
+Si non, indique l’alternative minimale la plus fiable sur Autoscale.
+Détermine comment créer automatiquement le feed-plan uniquement après réussite complète du refresh Shopify requis.
+Vérifie si l’ancien export direct Google de 03:30 UTC et les exports directs du Full Sync doivent être désactivés une fois le pipeline durable autonome, afin d’éviter deux architectures concurrentes et la republication de données anciennes.
+Propose la configuration GitHub minimale permettant de drainer un plan de ~190 étapes avec une marge confortable avant le cycle suivant, sans parallélisme dangereux et sans gaspiller inutilement les minutes GitHub.
+Précise l’ordre nocturne final recommandé et l’heure de chaque étape en UTC.
+Vérifie comment gérer un échec : aucun nouveau snapshot ne doit remplacer l’ancien si Shopify ou le feed durable n’a pas terminé correctement.
+Donne une estimation du nombre de fichiers/code touchés et confirme si une migration DB est nécessaire.
+
+Ne modifie rien.
+
+Termine exactement par :
+
+RECOMMENDED NIGHTLY ARCHITECTURE = ...
+SHOPIFY SYNC CAN BE MADE DURABLE = YES/NO
+DISABLE LEGACY DIRECT EXPORTS = YES/NO
+AUTO PLAN AFTER SUCCESS = YES/NO
+DATABASE MIGRATION REQUIRED = YES/NO
+GITHUB MINUTES ESTIMATE PER NIGHT = ...
+MINIMAL PATCH FILES = ...
+EXPECTED NIGHTLY DURATION = ...
