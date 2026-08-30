@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   advancePricingValidationBatch,
   assertShopifyMarketCurrencies,
+  DURABLE_PRICING_WRITE_VARIANT_BATCH_SIZE,
   selectShopifyMarketPrice,
   syncMarketPricingSlice,
 } from "../src/shopify/sync-markets";
@@ -153,14 +154,145 @@ describe("advancePricingValidationBatch", () => {
 });
 
 describe("syncMarketPricingSlice durable writes", () => {
+  it("uses a bounded batch in the hundreds and advances its checkpoint per batch", async () => {
+    expect(DURABLE_PRICING_WRITE_VARIANT_BATCH_SIZE).toBe(500);
+
+    const upsert = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn().mockReturnValue({
+      onConflictDoUpdate: upsert,
+    });
+    const tx = {
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(async () =>
+            basePrices.map((base, index) => ({
+              id: `variant-${index + 1}`,
+              shopifyGid: base.variantGid,
+            }))),
+        }),
+      }),
+      insert: vi.fn().mockReturnValue({
+        values,
+      }),
+    };
+    const checkpoints: Record<string, unknown>[] = [];
+    const commitUnit = vi.fn(async (
+      checkpoint: Record<string, unknown>,
+      writer: (transaction: typeof tx) => Promise<void>,
+    ) => {
+      checkpoints.push(checkpoint);
+      await writer(tx);
+    });
+    const tracker = { bumpChanged: vi.fn() };
+    const basePrices = Array.from({ length: 501 }, (_, index) => ({
+      variantGid: `gid://shopify/ProductVariant/${index + 1}`,
+      price: "999.00",
+      compareAtPrice: null,
+      productHandle: `product-${index + 1}`,
+      swissPrice: {
+        price: "956.00",
+        compareAtPrice: null,
+        currency: "CHF",
+      },
+    }));
+
+    const result = await syncMarketPricingSlice(
+      {} as never,
+      tracker as never,
+      { stage: "write", mapping: [], priceLists: [], basePrices },
+      async () => true,
+      commitUnit as never,
+    );
+
+    expect(checkpoints).toEqual([
+      expect.objectContaining({ stage: "write", baseIndex: 500, marketIndex: 0 }),
+      expect.objectContaining({ stage: "complete", baseIndex: 501, marketIndex: 0 }),
+    ]);
+    expect(tx.select).toHaveBeenCalledTimes(2);
+    expect(tx.insert).toHaveBeenCalledTimes(2);
+    expect(upsert).toHaveBeenCalledTimes(2);
+    const writtenRows = values.mock.calls.flatMap(([rows]) =>
+      Array.isArray(rows) ? rows : [rows]);
+    expect(new Set(writtenRows.map((row) => row.marketCode))).toEqual(new Set([
+      "AT", "BE_DE", "BE_FR", "CH_DE", "CH_FR", "DE", "FR", "LU_DE",
+    ]));
+    expect(result.completed).toBe(true);
+  });
+
+  it("resumes from the last committed larger batch after interruption", async () => {
+    const upsert = vi.fn().mockResolvedValue(undefined);
+    const tx = {
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(async () =>
+            basePrices.map((base, index) => ({
+              id: `variant-${index + 1}`,
+              shopifyGid: base.variantGid,
+            }))),
+        }),
+      }),
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoUpdate: upsert,
+        }),
+      }),
+    };
+    const commitUnit = vi.fn(async (
+      _checkpoint: Record<string, unknown>,
+      writer: (transaction: typeof tx) => Promise<void>,
+    ) => writer(tx));
+    const tracker = { bumpChanged: vi.fn() };
+    const basePrices = Array.from({ length: 501 }, (_, index) => ({
+      variantGid: `gid://shopify/ProductVariant/${index + 1}`,
+      price: "999.00",
+      compareAtPrice: null,
+      productHandle: `product-${index + 1}`,
+      swissPrice: {
+        price: "956.00",
+        compareAtPrice: null,
+        currency: "CHF",
+      },
+    }));
+    let heartbeatCalls = 0;
+
+    const interrupted = await syncMarketPricingSlice(
+      {} as never,
+      tracker as never,
+      { stage: "write", mapping: [], priceLists: [], basePrices },
+      async () => ++heartbeatCalls === 1,
+      commitUnit as never,
+    );
+
+    expect(interrupted).toMatchObject({
+      completed: false,
+      checkpoint: { stage: "write", baseIndex: 500, marketIndex: 0 },
+    });
+    expect(commitUnit).toHaveBeenCalledOnce();
+
+    const resumed = await syncMarketPricingSlice(
+      {} as never,
+      tracker as never,
+      interrupted.checkpoint,
+      async () => true,
+      commitUnit as never,
+    );
+
+    expect(resumed).toMatchObject({
+      completed: true,
+      checkpoint: { stage: "complete", baseIndex: 501, marketIndex: 0 },
+    });
+    expect(commitUnit).toHaveBeenCalledTimes(2);
+  });
+
   it("commits market writes and their checkpoint as one fenced unit", async () => {
     const upsert = vi.fn().mockResolvedValue(undefined);
     const tx = {
       select: vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([{ id: "variant-1" }]),
-          }),
+          where: vi.fn().mockResolvedValue([{
+            id: "variant-1",
+            shopifyGid: "gid://shopify/ProductVariant/1",
+          }]),
         }),
       }),
       insert: vi.fn().mockReturnValue({

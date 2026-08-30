@@ -10,7 +10,7 @@
  */
 
 import { db, variantsTable, marketVariantsTable } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config";
 import { buildShopifyProductUrl } from "../markets/resolver";
@@ -256,7 +256,7 @@ export function selectShopifyMarketPrice({
 }
 
 export const DURABLE_PRICING_VALIDATION_BATCH_SIZE = 5_000;
-const DURABLE_PRICING_WRITE_VARIANT_BATCH_SIZE = 50;
+export const DURABLE_PRICING_WRITE_VARIANT_BATCH_SIZE = 500;
 
 export type MarketPricingCommitUnit = (
   checkpoint: Record<string, unknown>,
@@ -456,12 +456,24 @@ export async function syncMarketPricingSlice(
         marketIndex: 0,
       };
       await commitUnit(nextCheckpoint, async (tx) => {
+        const batch = basePrices.slice(batchStart, batchEnd);
+        const storedVariants = await tx.select({
+          id: variantsTable.id,
+          shopifyGid: variantsTable.shopifyGid,
+        })
+          .from(variantsTable)
+          .where(inArray(
+            variantsTable.shopifyGid,
+            batch.map((base: any) => base.variantGid),
+          ));
+        const variantsByGid = new Map<string, { id: string; shopifyGid: string }>(
+          storedVariants.map((variant: { id: string; shopifyGid: string }) =>
+            [variant.shopifyGid, variant]),
+        );
+        const writes: Array<typeof marketVariantsTable.$inferInsert> = [];
         for (let baseIndex = batchStart; baseIndex < batchEnd; baseIndex++) {
           const base = basePrices[baseIndex];
-          const [variant] = await tx.select({ id: variantsTable.id })
-            .from(variantsTable)
-            .where(sql`${variantsTable.shopifyGid} = ${base.variantGid}`)
-            .limit(1);
+          const variant = variantsByGid.get(base.variantGid);
           if (!variant) continue;
           const overrides = new Map<string, VariantPrice>();
           for (const list of state.priceLists ?? []) {
@@ -486,7 +498,7 @@ export async function syncMarketPricingSlice(
             });
             const shopifyMarket = entries.get(marketCode) as ShopifyMarket | undefined;
             const root = shopifyMarket ? getMarketBaseUrl(shopifyMarket) : market.base_url;
-            await tx.insert(marketVariantsTable).values({
+            writes.push({
               variantId: variant.id,
               marketCode,
               priceAmount: selected.price,
@@ -497,18 +509,21 @@ export async function syncMarketPricingSlice(
                 ? buildShopifyProductUrl(root, base.productHandle, base.variantGid)
                 : null,
               isEligible: true,
-            }).onConflictDoUpdate({
-              target: [marketVariantsTable.variantId, marketVariantsTable.marketCode],
-              set: {
-                priceAmount: sql`excluded.price_amount`,
-                priceCurrency: sql`excluded.price_currency`,
-                compareAtPriceAmount: sql`excluded.compare_at_price_amount`,
-                productUrl: sql`excluded.product_url`,
-                updatedAt: new Date(),
-              },
             });
             tracker.bumpChanged();
           }
+        }
+        if (writes.length > 0) {
+          await tx.insert(marketVariantsTable).values(writes).onConflictDoUpdate({
+            target: [marketVariantsTable.variantId, marketVariantsTable.marketCode],
+            set: {
+              priceAmount: sql`excluded.price_amount`,
+              priceCurrency: sql`excluded.price_currency`,
+              compareAtPriceAmount: sql`excluded.compare_at_price_amount`,
+              productUrl: sql`excluded.product_url`,
+              updatedAt: new Date(),
+            },
+          });
         }
       });
       index = batchEnd;
