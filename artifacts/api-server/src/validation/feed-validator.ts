@@ -72,9 +72,10 @@ function loadSchema(name: SchemaName): Record<string, unknown> {
  */
 function detectMetaSchema(storagePath: string): SchemaName {
   const filename = storagePath.split("/").pop() ?? storagePath;
-  if (/^meta-base\.csv$/i.test(filename)) return "meta-base";
-  if (/^meta-language-[a-z]{2}\.csv$/i.test(filename)) return "meta-language";
-  if (/^meta-country-[A-Z]{2}\.csv$/i.test(filename)) return "meta-country";
+  const logicalFilename = filename.replace(/\.final-.*-attempt-\d+$/i, "");
+  if (/^meta-base\.csv$/i.test(logicalFilename)) return "meta-base";
+  if (/^meta-language-[a-z]{2}\.csv$/i.test(logicalFilename)) return "meta-language";
+  if (/^meta-country-[A-Z]{2}\.csv$/i.test(logicalFilename)) return "meta-country";
   return "meta-product"; // fallback: full schema for any full-format files
 }
 

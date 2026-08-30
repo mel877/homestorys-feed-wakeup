@@ -195,6 +195,22 @@ describe("validateGoogleFeed", () => {
 describe("validateMetaFeed — base layer (meta-base.csv)", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it.each([
+    ["meta-base.csv", "meta-base"],
+    ["meta-base.csv.final-xxx-attempt-1", "meta-base"],
+    ["meta-language-fr.csv", "meta-language"],
+    ["meta-language-fr.csv.final-xxx-attempt-2", "meta-language"],
+    ["meta-country-CH.csv", "meta-country"],
+    ["meta-country-CH.csv.final-xxx-attempt-1", "meta-country"],
+    ["meta-generic.csv", "meta-product"],
+  ])("detects %s as the %s schema", async (filename, expectedSchema) => {
+    mockDownload.mockResolvedValue(Buffer.from("id\n"));
+
+    const result = await validateMetaFeed(`feeds/meta/${filename}`);
+
+    expect(result.schema).toBe(expectedSchema);
+  });
+
   it("returns file not found error when storage returns null", async () => {
     mockDownload.mockResolvedValue(null);
     const result = await validateMetaFeed("feeds/meta/meta-base.csv");
