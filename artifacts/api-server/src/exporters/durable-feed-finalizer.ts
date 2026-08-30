@@ -186,10 +186,21 @@ export interface ConfiguredDurableFeedFinalizeOptions {
   dryRun: boolean;
 }
 
+function resolveSnapshotMarketCode(input: Pick<
+  ConfiguredDurableFeedFinalizeOptions,
+  "channel" | "fileKey" | "language" | "marketCode"
+>): string {
+  if (input.channel === "meta" && input.fileKey.startsWith("meta-language-")) {
+    return `META_LANGUAGE_${input.language.toUpperCase()}`;
+  }
+  return input.marketCode;
+}
+
 async function finalizeConfiguredDurableFeedFile(
   options: ConfiguredDurableFeedFinalizeOptions,
 ): Promise<DurableFeedFinalizeResult> {
   const definition = resolveDurableFeedFileDefinition(options);
+  const snapshotMarketCode = resolveSnapshotMarketCode(options);
   const expectsCurrency = definition.expectedCurrencyMarket !== null;
   const expectedCurrency = expectsCurrency
     ? resolveExpectedFeedCurrency(
@@ -259,7 +270,7 @@ async function finalizeConfiguredDurableFeedFile(
               ? eq(feedSnapshotsTable.language, options.language)
               : sql`${feedSnapshotsTable.language} IS NULL`,
             options.marketCode
-              ? eq(feedSnapshotsTable.marketCode, options.marketCode)
+              ? eq(feedSnapshotsTable.marketCode, snapshotMarketCode)
               : sql`${feedSnapshotsTable.marketCode} IS NULL`,
             eq(feedSnapshotsTable.isCurrent, true),
           ))
@@ -290,10 +301,11 @@ async function finalizeConfiguredDurableFeedFile(
                 : eq(feedSnapshotsTable.language, snapshot.language),
               snapshot.marketCode === null
                 ? sql`${feedSnapshotsTable.marketCode} IS NULL`
-                : eq(feedSnapshotsTable.marketCode, snapshot.marketCode),
+                : eq(feedSnapshotsTable.marketCode, snapshotMarketCode),
             ));
           await tx.insert(feedSnapshotsTable).values({
             ...snapshot,
+            marketCode: snapshot.marketCode === null ? null : snapshotMarketCode,
             isCurrent: true,
             generatedAt: new Date(),
           });
@@ -419,5 +431,5 @@ const executionDependencies: DurableFeedFinalizationExecutionDependencies = {
 };
 
 export const durableFeedFinalizerTestHooks = process.env.NODE_ENV === "test"
-  ? { finalizeDurableFeedFile }
+  ? { finalizeDurableFeedFile, resolveSnapshotMarketCode }
   : null;

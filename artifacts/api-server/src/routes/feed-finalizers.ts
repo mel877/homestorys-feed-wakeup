@@ -36,7 +36,7 @@ router.post("/feed-finalizers/requeue", async (req, res): Promise<void> => {
         status: "error",
         error: error.message,
         matched: error.matched,
-        expected: 9,
+        expected: 2,
       });
       return;
     }

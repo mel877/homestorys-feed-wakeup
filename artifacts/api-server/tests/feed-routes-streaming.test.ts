@@ -48,12 +48,24 @@ vi.mock("@workspace/db", () => ({
 
 process.env["DEFAULT_OBJECT_STORAGE_BUCKET_ID"] = "test-bucket";
 
-import feedsRouter from "../src/routes/feeds";
+import feedsRouter, { feedRouteTestHooks } from "../src/routes/feeds";
 
 function buildApp(): Express {
   const app = express();
   app.use("/api", feedsRouter);
   return app;
+}
+
+function mockSnapshot(storagePath: string): void {
+  mockDbSelect.mockImplementationOnce(() => ({
+    from: vi.fn(() => ({
+      where: vi.fn(() => ({
+        orderBy: vi.fn(() => ({
+          limit: vi.fn().mockResolvedValue([{ storagePath }]),
+        })),
+      })),
+    })),
+  }));
 }
 
 const publicFeedCases = [
@@ -90,14 +102,36 @@ describe("public feed streaming", () => {
     mockDbSelect.mockImplementation(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
-          limit: vi.fn().mockResolvedValue([]),
+          orderBy: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([]),
+          })),
         })),
       })),
     }));
   });
 
+  it("uses dedicated snapshot identities for durable Meta language routes", () => {
+    expect(feedRouteTestHooks.resolveSnapshotMarketCode(
+      "feeds/meta/meta-language-fr.csv",
+      {
+      channel: "meta",
+      language: "fr",
+      },
+    )).toBe("META_LANGUAGE_FR");
+    expect(feedRouteTestHooks.resolveSnapshotMarketCode(
+      "feeds/meta/meta-language-de.csv",
+      {
+      channel: "meta",
+      language: "de",
+      },
+    )).toBe("META_LANGUAGE_DE");
+  });
+
   for (const [url, storagePath, contentType] of publicFeedCases) {
     it(`streams ${url} from App Storage without buffering`, async () => {
+      if (url.includes("/feeds/meta/") && !url.includes("/showroom/")) {
+        mockSnapshot(storagePath);
+      }
       const response = await request(app).get(url);
 
       expect(response.status).toBe(200);
@@ -125,6 +159,7 @@ describe("public feed streaming", () => {
     "facebookexternalhit/1.1",
   ]) {
     it(`serves the same public feed to ${userAgent}`, async () => {
+      mockSnapshot("feeds/meta/meta-fr.csv");
       const response = await request(app)
         .get("/api/feeds/meta/fr.csv")
         .set("User-Agent", userAgent);
@@ -182,6 +217,15 @@ describe("public feed streaming", () => {
     expect(mockFile).toHaveBeenCalledWith("feeds/google/google-fr-BE_FR.tsv");
   });
 
+  it("returns 503 instead of serving a legacy Meta object when no snapshot exists", async () => {
+    const response = await request(app).get("/api/feeds/meta/lang/fr.csv");
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({ error: "Feed temporarily unavailable" });
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(mockFile).not.toHaveBeenCalled();
+  });
+
   it("keeps serving the deterministic current path when the snapshot database is unavailable", async () => {
     mockDbSelect.mockImplementationOnce(() => ({
       from: vi.fn(() => ({
@@ -199,6 +243,7 @@ describe("public feed streaming", () => {
   });
 
   it("returns 404 before opening a stream when the feed does not exist", async () => {
+    mockSnapshot("feeds/meta/meta-fr.csv");
     mockGetMetadata.mockRejectedValue(
       Object.assign(new Error("No such object"), { code: 404 }),
     );
@@ -228,6 +273,7 @@ describe("public feed streaming", () => {
   });
 
   it("returns a retryable 503 when the source stream fails before sending data", async () => {
+    mockSnapshot("feeds/meta/meta-fr.csv");
     mockCreateReadStream.mockImplementation(() => {
       const stream = new Readable({
         read() {
@@ -253,6 +299,7 @@ describe("public feed streaming", () => {
   });
 
   it("destroys the source if the client disconnects while metadata is loading", async () => {
+    mockSnapshot("feeds/meta/meta-fr.csv");
     let resolveMetadata!: (value: [{ size: string; generation: string }]) => void;
     mockGetMetadata.mockReturnValue(
       new Promise((resolve) => {

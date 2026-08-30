@@ -57,7 +57,7 @@ const syncRunId = "26f87a65-9830-44f2-9d39-67c0b4e5eee8";
 function rows(count: number): Array<Record<string, unknown>> {
   return Array.from({ length: count }, (_, index) => ({
     id: `step-${index}`,
-    market_code: `MARKET_${index}`,
+    market_code: index === 0 ? "LANG_FR" : "LANG_DE",
     language: index % 2 === 0 ? "fr" : "de",
     batch_index: index,
     checkpoint: {
@@ -82,17 +82,17 @@ beforeEach(() => {
 });
 
 describe("requeueBlockedMetaFinalizers", () => {
-  it("commits exactly nine matching finalizers", async () => {
-    mocks.setRows(rows(9));
+  it("commits exactly two matching language finalizers", async () => {
+    mocks.setRows(rows(2));
 
     const result = await requeueBlockedMetaFinalizers(syncRunId);
 
     expect(result).toMatchObject({
-      count: 9,
+      count: 2,
       targets: expect.arrayContaining([
         {
           id: "step-0",
-          marketCode: "MARKET_0",
+          marketCode: "LANG_FR",
           language: "fr",
           batchIndex: 0,
         },
@@ -103,7 +103,7 @@ describe("requeueBlockedMetaFinalizers", () => {
     expect(mocks.rolledBack).toBe(false);
   });
 
-  it.each([8, 10])("rolls back when %i rows match instead of nine", async (count) => {
+  it.each([1, 3])("rolls back when %i rows match instead of two", async (count) => {
     mocks.setRows(rows(count));
 
     await expect(requeueBlockedMetaFinalizers(syncRunId)).rejects.toEqual(
@@ -115,7 +115,7 @@ describe("requeueBlockedMetaFinalizers", () => {
   });
 
   it("does not update checkpoint or attempts", async () => {
-    mocks.setRows(rows(9));
+    mocks.setRows(rows(2));
 
     await requeueBlockedMetaFinalizers(syncRunId);
 
@@ -123,5 +123,14 @@ describe("requeueBlockedMetaFinalizers", () => {
     const setClause = staticSql(query).split("WHERE")[0];
     expect(setClause).not.toContain("checkpoint");
     expect(setClause).not.toContain("attempts");
+  });
+
+  it("targets only the two blocked durable Meta language finalizers", async () => {
+    mocks.setRows(rows(2));
+
+    await requeueBlockedMetaFinalizers(syncRunId);
+
+    const query = staticSql(mocks.execute.mock.calls[0]?.[0]);
+    expect(query).toContain("checkpoint->>'fileKey' IN ('meta-language-fr', 'meta-language-de')");
   });
 });

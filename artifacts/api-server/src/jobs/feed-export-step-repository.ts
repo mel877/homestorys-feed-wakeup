@@ -32,7 +32,7 @@ export interface FeedExportStepResult {
 
 const DEFAULT_LEASE_MS = 4 * 60 * 1_000;
 const DEFAULT_MAX_ATTEMPTS = 5;
-const EXPECTED_META_FINALIZER_REQUEUE_COUNT = 9;
+const EXPECTED_META_FINALIZER_REQUEUE_COUNT = 2;
 
 export class FeedFinalizerRequeueCardinalityError extends Error {
   constructor(public readonly matched: number) {
@@ -148,6 +148,7 @@ export async function requeueBlockedMetaFinalizers(
         AND status = 'completed'
         AND checkpoint->>'result' = 'blocked'
         AND checkpoint->>'published' = 'false'
+        AND checkpoint->>'fileKey' IN ('meta-language-fr', 'meta-language-de')
       RETURNING id, market_code, language, batch_index
     `);
     const rows = result.rows as Array<{

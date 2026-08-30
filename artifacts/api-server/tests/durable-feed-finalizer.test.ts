@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { durableFeedFinalizerTestHooks } from "../src/exporters/durable-feed-finalizer";
 const finalizeDurableFeedFile = durableFeedFinalizerTestHooks!.finalizeDurableFeedFile;
+const resolveSnapshotMarketCode = durableFeedFinalizerTestHooks!.resolveSnapshotMarketCode;
 
 const base = {
   syncRunId: "run-1",
@@ -22,6 +23,36 @@ const base = {
 };
 
 describe("durable feed finalizer", () => {
+  it("uses a dedicated snapshot identity for durable Meta language layers", () => {
+    expect(resolveSnapshotMarketCode({
+      channel: "meta",
+      fileKey: "meta-language-fr",
+      language: "fr",
+      marketCode: "LANG_FR",
+    })).toBe("META_LANGUAGE_FR");
+    expect(resolveSnapshotMarketCode({
+      channel: "meta",
+      fileKey: "meta-language-de",
+      language: "de",
+      marketCode: "LANG_DE",
+    })).toBe("META_LANGUAGE_DE");
+  });
+
+  it("keeps existing snapshot identities for Google and other Meta layers", () => {
+    expect(resolveSnapshotMarketCode({
+      channel: "meta",
+      fileKey: "meta-country-BE",
+      language: "",
+      marketCode: "BE",
+    })).toBe("BE");
+    expect(resolveSnapshotMarketCode({
+      channel: "google",
+      fileKey: "google-language-fr",
+      language: "fr",
+      marketCode: "LANG_FR",
+    })).toBe("LANG_FR");
+  });
+
   it("does not publish or replace a snapshot when validation fails", async () => {
     const publish = vi.fn();
     const recordSnapshot = vi.fn();

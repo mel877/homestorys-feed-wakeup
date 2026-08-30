@@ -101,7 +101,14 @@ async function serveFeedFile(
     generationMode?: "stable" | "snapshot";
   },
 ): Promise<void> {
-  storagePath = await resolvePublishedStoragePath(storagePath, context);
+  const publishedStoragePath = await resolvePublishedStoragePath(storagePath, context);
+  if (!publishedStoragePath) {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Retry-After", "60");
+    res.status(503).json({ error: "Feed temporarily unavailable" });
+    return;
+  }
+  storagePath = publishedStoragePath;
   const startedAt = Date.now();
   const requestId = String(req.id ?? req.headers["x-request-id"] ?? "");
   if (requestId) res.setHeader("X-Request-Id", requestId);
@@ -292,6 +299,32 @@ async function serveFeedFile(
   });
 }
 
+function resolveSnapshotMarketCode(
+  fallbackPath: string,
+  context: {
+    channel: "google" | "meta" | "showroom";
+    language?: string;
+    market?: string;
+  },
+): string | undefined {
+  if (
+    context.channel === "meta" &&
+    context.language &&
+    fallbackPath.includes("/meta-language-")
+  ) {
+    return `META_LANGUAGE_${context.language.toUpperCase()}`;
+  }
+  if (context.market) return context.market;
+  if (context.language) return `LANG_${context.language.toUpperCase()}`;
+  if (context.channel !== "meta") return undefined;
+  if (fallbackPath.endsWith("/meta-base.csv")) return "BASE";
+  const country = fallbackPath.match(/meta-country-([A-Z]{2})\.csv$/);
+  const language = fallbackPath.match(/meta-(?:language-)?([a-z]{2})\.csv$/);
+  return country?.[1] ?? (
+    language?.[1] ? `LANG_${language[1].toUpperCase()}` : undefined
+  );
+}
+
 async function resolvePublishedStoragePath(
   fallbackPath: string,
   context: {
@@ -299,23 +332,9 @@ async function resolvePublishedStoragePath(
     language?: string;
     market?: string;
   },
-): Promise<string> {
+): Promise<string | null> {
   if (context.channel === "showroom") return fallbackPath;
-  let marketCode = context.market;
-  if (!marketCode && context.language) {
-    marketCode = `LANG_${context.language.toUpperCase()}`;
-  }
-  if (!marketCode && context.channel === "meta") {
-    if (fallbackPath.endsWith("/meta-base.csv")) {
-      marketCode = "BASE";
-    } else {
-      const country = fallbackPath.match(/meta-country-([A-Z]{2})\.csv$/);
-      const language = fallbackPath.match(/meta-(?:language-)?([a-z]{2})\.csv$/);
-      marketCode = country?.[1] ?? (
-        language?.[1] ? `LANG_${language[1].toUpperCase()}` : undefined
-      );
-    }
-  }
+  const marketCode = resolveSnapshotMarketCode(fallbackPath, context);
   if (!marketCode) return fallbackPath;
   try {
     const [snapshot] = await db
@@ -328,15 +347,21 @@ async function resolvePublishedStoragePath(
       ))
       .orderBy(desc(feedSnapshotsTable.generatedAt))
       .limit(1);
-    return snapshot?.storagePath ?? fallbackPath;
+    return snapshot?.storagePath ?? (
+      context.channel === "meta" ? null : fallbackPath
+    );
   } catch {
     logger.warn(
       { channel: context.channel, marketCode },
       "Snapshot pointer lookup failed; using legacy current path",
     );
-    return fallbackPath;
+    return context.channel === "meta" ? null : fallbackPath;
   }
 }
+
+export const feedRouteTestHooks = process.env.NODE_ENV === "test"
+  ? { resolveSnapshotMarketCode }
+  : null;
 
 // ── Meta feed routes ──────────────────────────────────────────────────────────
 

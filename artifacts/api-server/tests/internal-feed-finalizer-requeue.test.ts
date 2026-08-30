@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => {
     readonly matched: number;
 
     constructor(matched: number) {
-      super(`Expected exactly 9 blocked Meta finalizer steps, found ${matched}`);
+      super(`Expected exactly 2 blocked Meta finalizer steps, found ${matched}`);
       this.name = "FeedFinalizerRequeueCardinalityError";
       this.matched = matched;
     }
@@ -41,9 +41,10 @@ beforeAll(async () => {
 beforeEach(() => {
   mocks.requeueBlockedMetaFinalizers.mockReset();
   mocks.requeueBlockedMetaFinalizers.mockResolvedValue({
-    count: 9,
+    count: 2,
     targets: [
-      { id: "step-1", marketCode: "BASE", language: "", batchIndex: 0 },
+      { id: "step-1", marketCode: "LANG_FR", language: "fr", batchIndex: 0 },
+      { id: "step-2", marketCode: "LANG_DE", language: "de", batchIndex: 0 },
     ],
   });
 });
@@ -85,7 +86,7 @@ describe("POST /api/internal/feed-finalizers/requeue", () => {
     expect(mocks.requeueBlockedMetaFinalizers).not.toHaveBeenCalled();
   });
 
-  it("returns success for exactly nine requeued finalizers", async () => {
+  it("returns success for exactly two requeued language finalizers", async () => {
     const syncRunId = "26f87a65-9830-44f2-9d39-67c0b4e5eee8";
 
     const res = await request(app)
@@ -94,13 +95,13 @@ describe("POST /api/internal/feed-finalizers/requeue", () => {
       .send({ syncRunId });
 
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ status: "requeued", count: 9 });
+    expect(res.body).toMatchObject({ status: "requeued", count: 2 });
     expect(mocks.requeueBlockedMetaFinalizers).toHaveBeenCalledWith(syncRunId);
   });
 
   it("returns an explicit conflict when the cardinality guard rolls back", async () => {
     mocks.requeueBlockedMetaFinalizers.mockRejectedValueOnce(
-      new FeedFinalizerRequeueCardinalityError(8),
+      new FeedFinalizerRequeueCardinalityError(1),
     );
 
     const res = await request(app)
@@ -111,8 +112,8 @@ describe("POST /api/internal/feed-finalizers/requeue", () => {
     expect(res.status).toBe(409);
     expect(res.body).toMatchObject({
       status: "error",
-      matched: 8,
-      expected: 9,
+      matched: 1,
+      expected: 2,
     });
   });
 
