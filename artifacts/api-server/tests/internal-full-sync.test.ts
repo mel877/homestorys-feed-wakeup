@@ -1,10 +1,8 @@
 /**
  * Tests for the POST /api/internal/sync/full route.
  *
- * Critical invariant: both the scheduler and the API-triggered full-sync path
- * must perform identical post-export steps. Specifically, `fetchAndStoreDiagnostics`
- * must be called after `runGoogleExport` in both paths. This test covers the
- * API/CLI path (the scheduler path is covered by scheduler.test.ts).
+ * Critical invariant: a manual Full Sync refreshes Shopify data only. Feed
+ * planning and publication belong exclusively to the durable nightly cycle.
  */
 
 import { describe, it, expect, vi, beforeAll } from "vitest";
@@ -20,19 +18,10 @@ process.env["INTERNAL_API_SECRET"] = "test-secret-for-diagnostics";
 // ── Hoisted spy declarations ──────────────────────────────────────────────────
 
 const {
-  mockRunFullSyncPipeline,
-  mockFetchAndStoreDiagnostics,
+  mockRunFullSync,
   mockRunJobWithLock,
 } = vi.hoisted(() => ({
-  mockRunFullSyncPipeline: vi.fn().mockResolvedValue({
-    runId: "run-001",
-    status: "completed",
-    channels: {
-      google: { ok: true, status: "ok", issues: [], snapshots: [] },
-      meta: { ok: true, status: "ok", issues: [], snapshots: [] },
-    },
-  }),
-  mockFetchAndStoreDiagnostics: vi.fn().mockResolvedValue({ total: 0, critical: 0, errors: 0, warnings: 0 }),
+  mockRunFullSync: vi.fn().mockResolvedValue("run-001"),
   // runJobWithLock: immediately executes the job function inline (no async delay)
   mockRunJobWithLock: vi.fn().mockImplementation(
     async (_name: string, _type: string, fn: () => Promise<string>) => fn(),
@@ -70,17 +59,10 @@ vi.mock("drizzle-orm", () => ({
 
 // Mock the modules that internal.ts dynamically imports
 vi.mock("../src/shopify/index", () => ({
+  runFullSync: mockRunFullSync,
   runInventorySync: vi.fn().mockResolvedValue("run-inv"),
   runPriceSync: vi.fn().mockResolvedValue("run-price"),
   syncProduct: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock("../src/jobs/full-sync-pipeline", () => ({
-  runFullSyncPipeline: mockRunFullSyncPipeline,
-}));
-
-vi.mock("../src/exporters/google/diagnostics", () => ({
-  fetchAndStoreDiagnostics: mockFetchAndStoreDiagnostics,
 }));
 
 // runJobWithLock: executes the job inline so we can await completion
@@ -136,7 +118,7 @@ beforeAll(async () => {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("POST /api/internal/sync/full — diagnostics reconciliation", () => {
+describe("POST /api/internal/sync/full — Shopify-only refresh", () => {
   const AUTH = { Authorization: "Bearer test-secret-for-diagnostics" };
 
   it("responds immediately with 200 started", async () => {
@@ -147,73 +129,23 @@ describe("POST /api/internal/sync/full — diagnostics reconciliation", () => {
     expect(res.body).toMatchObject({ status: "started", type: "full" });
   });
 
-  it("calls the shared Full Sync pipeline and then reconciles diagnostics", async () => {
-    mockRunFullSyncPipeline.mockClear();
-    mockFetchAndStoreDiagnostics.mockClear();
+  it("calls Shopify Full Sync without invoking the legacy feed pipeline", async () => {
+    mockRunFullSync.mockClear();
 
     await request(app)
       .post("/api/internal/sync/full")
       .set(AUTH);
 
-    // The route is fire-and-forget: res.json() is sent before the job promise chain
-    // resolves.  Poll until all three mocks have been called (vi.waitFor retries
-    // for up to 1 s by default, which is more than enough for the micro-task chain).
     await vi.waitFor(() => {
-      expect(mockRunFullSyncPipeline).toHaveBeenCalledOnce();
+      expect(mockRunFullSync).toHaveBeenCalledOnce();
     });
-    expect(mockFetchAndStoreDiagnostics).toHaveBeenCalledOnce();
   });
 
-  it("fetchAndStoreDiagnostics is called AFTER the shared pipeline (call order)", async () => {
-    const callOrder: string[] = [];
-    mockRunFullSyncPipeline.mockImplementationOnce(async () => {
-      callOrder.push("pipeline");
-      return {
-        runId: "run-001",
-        status: "completed",
-        channels: {
-          google: { ok: true, status: "ok", issues: [], snapshots: [] },
-          meta: { ok: true, status: "ok", issues: [], snapshots: [] },
-        },
-      };
-    });
-    mockFetchAndStoreDiagnostics.mockImplementation(async () => { callOrder.push("diagnostics"); });
-
-    await request(app)
-      .post("/api/internal/sync/full")
-      .set(AUTH);
-
-    // Wait for the async fire-and-forget job to populate callOrder
-    await vi.waitFor(() => {
-      expect(callOrder.length).toBeGreaterThanOrEqual(2);
-    });
-
-    const googleIdx = callOrder.indexOf("pipeline");
-    const diagIdx = callOrder.indexOf("diagnostics");
-    expect(googleIdx).toBeGreaterThanOrEqual(0);
-    expect(diagIdx).toBeGreaterThan(googleIdx);
-
-    // Restore
-    mockFetchAndStoreDiagnostics.mockResolvedValue({ total: 0, critical: 0, errors: 0, warnings: 0 });
-  });
-
-  it("fetchAndStoreDiagnostics is still called when the pipeline records a degraded export", async () => {
-    mockRunFullSyncPipeline.mockResolvedValueOnce({
-      runId: "run-001",
-      status: "degraded",
-      channels: {
-        google: { ok: false, status: "fallback", issues: ["Google API down"], snapshots: [] },
-        meta: { ok: true, status: "ok", issues: [], snapshots: [] },
-      },
-    });
-    mockFetchAndStoreDiagnostics.mockClear();
-
-    await request(app)
-      .post("/api/internal/sync/full")
-      .set(AUTH);
-
-    await vi.waitFor(() => {
-      expect(mockFetchAndStoreDiagnostics).toHaveBeenCalledOnce();
-    });
+  it("keeps the existing scheduler lock around the manual refresh", async () => {
+    expect(mockRunJobWithLock).toHaveBeenCalledWith(
+      "full-sync",
+      "full",
+      expect.any(Function),
+    );
   });
 });

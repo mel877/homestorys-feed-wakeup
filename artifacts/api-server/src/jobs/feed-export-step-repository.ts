@@ -178,15 +178,72 @@ export interface DurableFeedRunPlanInput {
   runId: string;
   metadata: Record<string, unknown>;
   specs: FeedExportStepSpec[];
+  sourceSyncRunId?: string;
+}
+
+export async function findDurableFeedPlanBySource(
+  sourceSyncRunId: string,
+): Promise<{ runId: string } | null> {
+  const result = await db.execute(sql`
+    SELECT id
+    FROM sync_runs
+    WHERE run_type = 'export'
+      AND metadata->>'architecture' = 'durable-feed'
+      AND metadata->>'sourceSyncRunId' = ${sourceSyncRunId}
+    ORDER BY created_at DESC
+    LIMIT 1
+  `);
+  const row = result.rows[0] as { id: string } | undefined;
+  return row ? { runId: String(row.id) } : null;
+}
+
+export async function isValidatedShopifySourceRun(
+  sourceSyncRunId: string,
+): Promise<boolean> {
+  const result = await db.execute(sql`
+    SELECT id
+    FROM sync_runs
+    WHERE id = ${sourceSyncRunId}::uuid
+      AND run_type = 'full'
+      AND status = 'completed'
+      AND metadata->>'architecture' = 'durable-shopify'
+      AND metadata->>'shopifyGate' = 'passed'
+    LIMIT 1
+  `);
+  return result.rows.length === 1;
 }
 
 export async function persistDurableFeedRunPlan(
   input: DurableFeedRunPlanInput,
-): Promise<{ status: "planned" | "conflict"; insertedSteps: number }> {
+): Promise<{
+  status: "planned" | "existing" | "conflict";
+  insertedSteps: number;
+  existingRunId?: string;
+}> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`
       SELECT pg_advisory_xact_lock(hashtext('durable-feed-plan'))
     `);
+
+    if (input.sourceSyncRunId) {
+      const existing = await tx.execute(sql`
+        SELECT id
+        FROM sync_runs
+        WHERE run_type = 'export'
+          AND metadata->>'architecture' = 'durable-feed'
+          AND metadata->>'sourceSyncRunId' = ${input.sourceSyncRunId}
+        ORDER BY created_at DESC
+        LIMIT 1
+      `);
+      const row = existing.rows[0] as { id: string } | undefined;
+      if (row) {
+        return {
+          status: "existing",
+          insertedSteps: 0,
+          existingRunId: String(row.id),
+        };
+      }
+    }
 
     const [active] = await tx
       .select({ id: feedExportStepsTable.id })

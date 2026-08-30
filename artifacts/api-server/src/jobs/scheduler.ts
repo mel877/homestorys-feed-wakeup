@@ -26,7 +26,6 @@ import { eq, and, gt, sql } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config/loader";
 import type { SyncRunType } from "../shopify/sync-run-tracker";
-import type { GoogleRunResult, GoogleMarketResult } from "../exporters/google/runner";
 
 const logger = rootLogger.child({ module: "scheduler" });
 
@@ -246,7 +245,10 @@ export async function startScheduler(): Promise<void> {
         finishedAt: new Date(),
         metadata: sql`COALESCE(${syncRunsTable.metadata}, '{}'::jsonb) || '{"failureReason":"orphaned: process restarted while run was in progress"}'::jsonb`,
       })
-      .where(eq(syncRunsTable.status, "running"))
+      .where(and(
+        eq(syncRunsTable.status, "running"),
+        sql`COALESCE(${syncRunsTable.metadata}->>'architecture', '') <> 'durable-shopify'`,
+      ))
       .returning({ id: syncRunsTable.id });
     if (reaped.length > 0) {
       logger.warn(
@@ -282,137 +284,17 @@ export async function startScheduler(): Promise<void> {
     };
   }
 
-  // Lazy import sync functions to avoid circular dependencies
-  const { runInventorySync, runPriceSync } = await import("../shopify/index");
+  // The durable nightly workflow is the only scheduled Shopify batch writer.
+  // Manual Shopify routes and real-time webhooks remain available.
   const { runRecommendationsSync } = await import("./sync-recommendations");
-  const { runGoogleExport } = await import("../exporters/google/runner");
-  const { runMetaExportInFreshProcess } = await import("../exporters/meta/fresh-process");
 
   const jobs: JobDefinition[] = [
-    {
-      name: "full-sync",
-      runType: "full",
-      schedule: parseCronToSchedule(scheduleConfig.full),
-      requiresShopify: true,
-      run: async () => {
-        const { runFullSyncPipeline } = await import("./full-sync-pipeline");
-        const { runId } = await runFullSyncPipeline();
-        // Reconcile Merchant Center diagnostics after Google export
-        // (snapshot replacement: marks prior issues resolved, inserts fresh state)
-        const { fetchAndStoreDiagnostics } = await import("../exporters/google/diagnostics");
-        await fetchAndStoreDiagnostics().catch((err) =>
-          logger.error({ err }, "Google diagnostics reconciliation failed after full sync"),
-        );
-        return runId;
-      },
-    },
-    {
-      name: "inventory-sync",
-      runType: "inventory",
-      schedule: parseCronToSchedule(scheduleConfig.inventory),
-      requiresShopify: true,
-      run: async () => runInventorySync(),
-    },
-    {
-      name: "price-sync",
-      runType: "prices",
-      schedule: parseCronToSchedule(scheduleConfig.prices),
-      requiresShopify: true,
-      run: async () => runPriceSync(),
-    },
     {
       name: "recommendations-sync",
       runType: "recommendations",
       schedule: parseCronToSchedule(scheduleConfig.recommendations),
       requiresShopify: false,
       run: async () => runRecommendationsSync(),
-    },
-    // ── Standalone nightly Google export ──────────────────────────────────────
-    // Runs AFTER full sync (02:00) and recommendations (03:00) at 03:30 UTC.
-    // Reads from the already-synced canonical DB — no Shopify API calls needed.
-    // Per-market errors are isolated by the runner: one failing market does not
-    // abort the others. Export lock prevents overlap with full-sync re-export.
-    {
-      // runType "google-export" is intentionally distinct from "export" so that
-      // withExportLock's DB guard (which queries for runType="export" rows) does
-      // not treat this job's own tracker row as a conflicting export and deadlock.
-      name: "google-export",
-      runType: "google-export",
-      schedule: parseCronToSchedule(scheduleConfig.google),
-      requiresShopify: false,
-      run: async () => {
-        const { SyncRunTracker } = await import("../shopify/sync-run-tracker");
-        const { withExportLock } = await import("../exporters/export-lock");
-
-        const tracker = new SyncRunTracker();
-        // Use "google-export" runType (not "export") so withExportLock's DB guard,
-        // which queries for runType="export" rows, never sees this job's own row.
-        const runId = await tracker.start("google-export", {
-          trigger: "scheduled",
-          scheduler: "google-export",
-        });
-
-        // withExportLock<T> returns T so we can capture the result without
-        // relying on let-mutation across async closure boundaries (TypeScript
-        // narrows let-closures to the initialiser type and loses the assignment).
-        type MarketSummary = { rows: number; published: boolean; error?: string };
-
-        let exportError: string | null = null;
-        const exportResult: GoogleRunResult | null = await withExportLock(
-          async (): Promise<GoogleRunResult | null> => {
-            return runGoogleExport({ syncRunId: runId }).catch((err) => {
-              exportError = err instanceof Error ? err.message : String(err);
-              logger.error({ err: exportError }, "Standalone Google export failed");
-              return null;
-            });
-          },
-        ).catch((err) => {
-          logger.error({ err }, "Google export: could not acquire export lock");
-          exportError = err instanceof Error ? err.message : String(err);
-          return null;
-        });
-
-        // Summarise per-market outcomes for the dashboard run-detail view.
-        const byMarketSummary: Record<string, MarketSummary> = exportResult
-          ? Object.fromEntries(
-              Object.entries(exportResult.byMarket).map(([code, mkt]: [string, GoogleMarketResult]) => [
-                code,
-                { rows: mkt.rows, published: mkt.published, ...(mkt.error ? { error: mkt.error } : {}) },
-              ]),
-            )
-          : {};
-
-        const failedMarkets = Object.values(byMarketSummary).filter((m) => m.error).length;
-
-        // Record outcomes in the sync_run row — visible on the dashboard.
-        await db
-          .update(syncRunsTable)
-          .set({
-            metadata: sql`COALESCE(${syncRunsTable.metadata}, '{}'::jsonb) || ${JSON.stringify({
-              trigger: "scheduled",
-              googleExport: exportError ? "failed" : failedMarkets > 0 ? "partial" : "ok",
-              errorMessage: exportError,
-              failedMarkets,
-              byMarket: byMarketSummary,
-              durationMs: exportResult?.durationMs ?? null,
-            })}::jsonb`,
-          })
-          .where(eq(syncRunsTable.id, runId))
-          .catch((err) =>
-            logger.error({ err, runId }, "Failed to record Google export outcome in sync_run"),
-          );
-
-        // Reconcile Merchant Center diagnostics after a successful export.
-        if (!exportError) {
-          const { fetchAndStoreDiagnostics } = await import("../exporters/google/diagnostics");
-          await fetchAndStoreDiagnostics().catch((err) =>
-            logger.error({ err }, "Google diagnostics reconciliation failed after standalone export"),
-          );
-        }
-
-        await tracker.complete();
-        return runId;
-      },
     },
   ];
 

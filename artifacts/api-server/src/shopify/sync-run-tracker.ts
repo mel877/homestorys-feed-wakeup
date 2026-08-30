@@ -73,6 +73,17 @@ export class SyncRunTracker {
     return this.runId;
   }
 
+  /**
+   * Attach a stateless worker to an existing durable run. The worker may update
+   * counters/checkpoints, but lifecycle completion remains owned by the durable
+   * orchestrator.
+   */
+  attach(runId: string): void {
+    this.runId = runId;
+    this.startedAt = new Date();
+    this.stats = { read: 0, changed: 0, created: 0, deleted: 0, errors: 0, warnings: 0, apiCalls: 0 };
+  }
+
   private async flush(): Promise<void> {
     if (!this.runId) return;
     await db

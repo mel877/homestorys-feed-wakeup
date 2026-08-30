@@ -269,13 +269,8 @@ router.post("/dashboard/sync-runs/trigger", requireDashboardAuth, async (req, re
         logger.info({ job: job.jobName }, "Dashboard trigger: job starting");
 
         if (runType === "full") {
-          const { runFullSyncPipeline } = await import("../../jobs/full-sync-pipeline");
-          const { fetchAndStoreDiagnostics } = await import("../../exporters/google/diagnostics");
-          const pipelineResult = await runFullSyncPipeline();
-          runId = pipelineResult.runId;
-          await fetchAndStoreDiagnostics().catch((err: unknown) =>
-            logger.error({ err, runId }, "Dashboard trigger: Google diagnostics reconciliation failed"),
-          );
+          const { runFullSync } = await import("../../shopify/index");
+          runId = await runFullSync();
         } else if (runType === "inventory") {
           const { runInventorySync } = await import("../../shopify/index");
           runId = await runInventorySync();

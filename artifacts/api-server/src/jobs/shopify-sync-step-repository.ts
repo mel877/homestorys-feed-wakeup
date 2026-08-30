@@ -1,0 +1,304 @@
+import {
+  db,
+  shopifySyncStepsTable,
+  syncRunsTable,
+  type ShopifySyncStep,
+} from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
+import { failStep, type FeedExportStepState } from "./feed-export-step-state";
+
+export const SHOPIFY_PHASES = [
+  "products",
+  "pricing",
+  "inventory",
+  "translations",
+  "images",
+  "completion",
+] as const;
+export type ShopifySyncPhase = typeof SHOPIFY_PHASES[number];
+
+const DEFAULT_LEASE_MS = 15 * 60_000;
+const DEFAULT_MAX_ATTEMPTS = 5;
+
+function mapRow(row: Record<string, unknown>): ShopifySyncStep {
+  return {
+    id: String(row.id),
+    syncRunId: String(row.sync_run_id),
+    phase: String(row.phase),
+    sequence: Number(row.sequence),
+    batchIndex: Number(row.batch_index),
+    cursor: (row.cursor as Record<string, unknown> | null) ?? null,
+    checkpoint: (row.checkpoint as Record<string, unknown> | null) ?? null,
+    status: String(row.status),
+    attempts: Number(row.attempts),
+    leaseOwner: (row.lease_owner as string | null) ?? null,
+    leaseExpiresAt: (row.lease_expires_at as Date | null) ?? null,
+    availableAt: (row.available_at as Date | null) ?? null,
+    startedAt: (row.started_at as Date | null) ?? null,
+    completedAt: (row.completed_at as Date | null) ?? null,
+    lastError: (row.last_error as string | null) ?? null,
+    createdAt: row.created_at as Date,
+    updatedAt: row.updated_at as Date,
+  } as ShopifySyncStep;
+}
+
+export async function ensureDurableShopifyRun(
+  cycleKey: string,
+): Promise<{ runId: string; created: boolean }> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('durable-shopify-cycle'))`);
+    const existing = await tx.execute(sql`
+      SELECT id
+      FROM sync_runs
+      WHERE run_type = 'full'
+        AND metadata->>'architecture' = 'durable-shopify'
+        AND metadata->>'nightlyCycleKey' = ${cycleKey}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    const row = existing.rows[0] as { id: string } | undefined;
+    if (row) return { runId: String(row.id), created: false };
+
+    const [run] = await tx
+      .insert(syncRunsTable)
+      .values({
+        runType: "full",
+        status: "running",
+        metadata: {
+          architecture: "durable-shopify",
+          trigger: "nightly",
+          nightlyCycleKey: cycleKey,
+        },
+      })
+      .returning({ id: syncRunsTable.id });
+    const runId = run!.id;
+    await tx.insert(shopifySyncStepsTable).values(
+      SHOPIFY_PHASES.map((phase, sequence) => ({
+        syncRunId: runId,
+        phase,
+        sequence,
+        batchIndex: 0,
+        status: "pending",
+        attempts: 0,
+        availableAt: new Date(),
+      })),
+    );
+    return { runId, created: true };
+  });
+}
+
+export async function claimNextShopifySyncStep(
+  syncRunId: string,
+  workerId: string,
+  options: { leaseMs?: number; now?: Date } = {},
+): Promise<{ step: ShopifySyncStep; reclaimed: boolean } | null> {
+  const now = options.now ?? new Date();
+  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  const result = await db.transaction(async (tx) => {
+    const claimed = await tx.execute(sql`
+      WITH candidate AS (
+        SELECT candidate_step.id
+        FROM shopify_sync_steps AS candidate_step
+        WHERE candidate_step.sync_run_id = ${syncRunId}::uuid
+          AND (
+            (candidate_step.status = 'pending'
+              AND (candidate_step.available_at IS NULL OR candidate_step.available_at <= ${now}))
+            OR
+            (candidate_step.status = 'running'
+              AND candidate_step.lease_expires_at IS NOT NULL
+              AND candidate_step.lease_expires_at <= ${now})
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM shopify_sync_steps AS prerequisite
+            WHERE prerequisite.sync_run_id = candidate_step.sync_run_id
+              AND prerequisite.sequence < candidate_step.sequence
+              AND prerequisite.status <> 'completed'
+          )
+        ORDER BY candidate_step.sequence, candidate_step.batch_index
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      UPDATE shopify_sync_steps AS step
+      SET status = 'running',
+          attempts = step.attempts + 1,
+          lease_owner = ${workerId},
+          lease_expires_at = ${new Date(now.getTime() + leaseMs)},
+          available_at = NULL,
+          started_at = COALESCE(step.started_at, ${now}),
+          last_error = NULL,
+          updated_at = ${now}
+      FROM candidate
+      WHERE step.id = candidate.id
+      RETURNING step.*
+    `);
+    const row = claimed.rows[0] as Record<string, unknown> | undefined;
+    return row ? mapRow(row) : null;
+  });
+  return result ? { step: result, reclaimed: result.attempts > 1 } : null;
+}
+
+export async function completeShopifySyncStep(
+  stepId: string,
+  workerId: string,
+  output: { checkpoint?: Record<string, unknown> | null } = {},
+): Promise<boolean> {
+  const rows = await db
+    .update(shopifySyncStepsTable)
+    .set({
+      status: "completed",
+      checkpoint: output.checkpoint,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(shopifySyncStepsTable.id, stepId),
+      eq(shopifySyncStepsTable.status, "running"),
+      eq(shopifySyncStepsTable.leaseOwner, workerId),
+    ))
+    .returning({ id: shopifySyncStepsTable.id });
+  return rows.length === 1;
+}
+
+export async function failShopifySyncStep(
+  stepId: string,
+  workerId: string,
+  error: unknown,
+  maxAttempts = DEFAULT_MAX_ATTEMPTS,
+): Promise<"retry" | "failed" | "conflict"> {
+  const [current] = await db
+    .select()
+    .from(shopifySyncStepsTable)
+    .where(eq(shopifySyncStepsTable.id, stepId))
+    .limit(1);
+  if (!current || current.status !== "running" || current.leaseOwner !== workerId) {
+    return "conflict";
+  }
+  const next = failStep(
+    {
+      status: current.status,
+      attempts: current.attempts,
+      availableAt: current.availableAt,
+      leaseExpiresAt: current.leaseExpiresAt,
+      leaseOwner: current.leaseOwner,
+      completedAt: current.completedAt,
+      lastError: current.lastError,
+    } as FeedExportStepState,
+    workerId,
+    new Date(),
+    error instanceof Error ? error.message : String(error),
+    maxAttempts,
+  );
+  const rows = await db
+    .update(shopifySyncStepsTable)
+    .set({
+      status: next.status,
+      availableAt: next.availableAt,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastError: next.lastError,
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(shopifySyncStepsTable.id, stepId),
+      eq(shopifySyncStepsTable.status, "running"),
+      eq(shopifySyncStepsTable.leaseOwner, workerId),
+    ))
+    .returning({ id: shopifySyncStepsTable.id });
+  if (rows.length !== 1) return "conflict";
+  return next.status === "failed" ? "failed" : "retry";
+}
+
+export async function releaseExpiredShopifySyncLeases(): Promise<number> {
+  const rows = await db
+    .update(shopifySyncStepsTable)
+    .set({
+      status: "pending",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      availableAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(sql`
+      ${shopifySyncStepsTable.status} = 'running'
+      AND ${shopifySyncStepsTable.leaseExpiresAt} IS NOT NULL
+      AND ${shopifySyncStepsTable.leaseExpiresAt} <= NOW()
+    `)
+    .returning({ id: shopifySyncStepsTable.id });
+  return rows.length;
+}
+
+export async function getShopifySyncStepSummary(syncRunId: string): Promise<{
+  total: number;
+  pending: number;
+  running: number;
+  completed: number;
+  failed: number;
+}> {
+  const rows = await db
+    .select({
+      status: shopifySyncStepsTable.status,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(shopifySyncStepsTable)
+    .where(eq(shopifySyncStepsTable.syncRunId, syncRunId))
+    .groupBy(shopifySyncStepsTable.status);
+  const summary = { total: 0, pending: 0, running: 0, completed: 0, failed: 0 };
+  for (const row of rows) {
+    const count = Number(row.count);
+    summary.total += count;
+    if (row.status in summary && row.status !== "total") {
+      summary[row.status as "pending" | "running" | "completed" | "failed"] = count;
+    }
+  }
+  return summary;
+}
+
+export async function validateShopifyCompletionGate(
+  syncRunId: string,
+): Promise<{ ok: boolean; reasons: string[] }> {
+  const reasons: string[] = [];
+  const summary = await getShopifySyncStepSummary(syncRunId);
+  if (summary.failed > 0) reasons.push("mandatory Shopify step failed");
+  if (summary.total !== SHOPIFY_PHASES.length || summary.completed !== SHOPIFY_PHASES.length) {
+    reasons.push("mandatory Shopify steps incomplete");
+  }
+  const freshness = await db.execute(sql`
+    SELECT phase, completed_at
+    FROM shopify_sync_steps
+    WHERE sync_run_id = ${syncRunId}::uuid
+      AND phase IN ('pricing', 'inventory')
+      AND status = 'completed'
+      AND completed_at >= (
+        SELECT started_at FROM sync_runs WHERE id = ${syncRunId}::uuid
+      )
+  `);
+  const freshPhases = new Set(freshness.rows.map((row) => String(row.phase)));
+  if (!freshPhases.has("pricing")) reasons.push("pricing freshness not validated");
+  if (!freshPhases.has("inventory")) reasons.push("inventory freshness not validated");
+  return { ok: reasons.length === 0, reasons };
+}
+
+export async function completeDurableShopifyRun(syncRunId: string): Promise<void> {
+  await db.update(syncRunsTable).set({
+    status: "completed",
+    finishedAt: new Date(),
+    metadata: sql`COALESCE(${syncRunsTable.metadata}, '{}'::jsonb) || '{"shopifyGate":"passed","swissCurrencyGuard":true}'::jsonb`,
+  }).where(eq(syncRunsTable.id, syncRunId));
+}
+
+export async function failDurableShopifyRun(
+  syncRunId: string,
+  reasons: string[],
+): Promise<void> {
+  await db.update(syncRunsTable).set({
+    status: "failed",
+    finishedAt: new Date(),
+    metadata: sql`COALESCE(${syncRunsTable.metadata}, '{}'::jsonb) || ${JSON.stringify({
+      failureReason: reasons.join("; "),
+      shopifyGate: "failed",
+    })}::jsonb`,
+  }).where(eq(syncRunsTable.id, syncRunId));
+}

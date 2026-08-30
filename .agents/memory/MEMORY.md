@@ -22,3 +22,4 @@
 - [Production export proxy timeout](production-export-proxy-timeout.md) — public dashboard requests abort near 300s while export may continue; never retry without checking the persisted run.
 - [Durable feed pump boundaries](durable-feed-pump-boundaries.md) — build deterministic versioned parts in bounded calls; only a complete-file barrier may validate and publish.
 - [Production migration baseline](production-migration-baseline.md) — production has no Drizzle journal; use a reviewed Publish schema diff until migration history is deliberately baselined.
+- [Nightly cycle ownership](nightly-cycle-ownership.md) — GitHub is the sole scheduled Shopify/feed batch orchestrator; never re-add competing in-process Shopify or direct export schedules.

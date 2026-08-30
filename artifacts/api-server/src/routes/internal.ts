@@ -29,6 +29,7 @@ import { tryAcquireMarketPriceWriteLock } from "../shopify/market-price-write-lo
 import feedPumpRouter from "./feed-pump";
 import feedPlanRouter from "./feed-plan";
 import feedFinalizersRouter from "./feed-finalizers";
+import nightlyCycleRouter from "./nightly-cycle";
 
 const SWISS_PRICE_REPAIR_JOB_NAME = "swiss-price-repair";
 const SWISS_PRICE_REPAIR_OPERATION = "repair:swiss-prices";
@@ -97,6 +98,7 @@ router.use(requireInternalAuth);
 router.use(feedPumpRouter);
 router.use(feedPlanRouter);
 router.use(feedFinalizersRouter);
+router.use(nightlyCycleRouter);
 
 // ── Sync trigger routes ────────────────────────────────────────────────────────
 
@@ -284,15 +286,8 @@ router.post("/sync/full", (req, res) => {
   getRunJobWithLock()
     .then((withLock) =>
       withLock("full-sync", "full", async () => {
-        const { runFullSyncPipeline } = await import("../jobs/full-sync-pipeline");
-        const { fetchAndStoreDiagnostics } = await import("../exporters/google/diagnostics");
-        const { runId } = await runFullSyncPipeline();
-        // Reconcile Merchant Center diagnostics after Google export
-        // (identical to the scheduler path — all trigger paths must behave the same)
-        await fetchAndStoreDiagnostics().catch((err) =>
-          logger.error({ err }, "Google diagnostics reconciliation failed after full sync"),
-        );
-        return runId;
+        const { runFullSync } = await import("../shopify/index");
+        return runFullSync();
       }),
     )
     .then((runId) =>

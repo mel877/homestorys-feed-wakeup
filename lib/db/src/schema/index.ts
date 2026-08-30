@@ -12,3 +12,4 @@ export * from "./webhook-events";
 export * from "./config-versions";
 export * from "./feed-export-steps";
 export * from "./feed-export-sources";
+export * from "./shopify-sync-steps";

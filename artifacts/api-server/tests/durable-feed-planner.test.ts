@@ -37,6 +37,8 @@ function dependencies(
       insertedSteps: 38,
     }),
     now: () => new Date("2026-08-29T17:00:00.000Z"),
+    validateSourceRun: vi.fn().mockResolvedValue(true),
+    findExistingPlan: vi.fn().mockResolvedValue(null),
     ...overrides,
   };
 }
@@ -82,6 +84,71 @@ describe("planDurableFeedRun", () => {
 
     expect(result.status).toBe("conflict");
     expect(result.totalSteps).toBe(0);
+  });
+
+  it("creates a source-linked nightly plan without weakening manual confirmation", async () => {
+    const deps = dependencies();
+
+    await planDurableFeedRun({
+      trigger: "nightly",
+      sourceSyncRunId: "shopify-run-1",
+      idempotencyKey: "shopify-run-1",
+    }, deps);
+
+    expect(deps.persistPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceSyncRunId: "shopify-run-1",
+        metadata: expect.objectContaining({
+          trigger: "nightly",
+          sourceSyncRunId: "shopify-run-1",
+          idempotencyKey: "shopify-run-1",
+        }),
+      }),
+    );
+  });
+
+  it("returns the existing plan for an already planned Shopify refresh", async () => {
+    const deps = dependencies({
+      findExistingPlan: vi.fn().mockResolvedValue({
+        runId: "feed-run-existing",
+      }),
+    });
+
+    const result = await planDurableFeedRun({
+      trigger: "nightly",
+      sourceSyncRunId: "shopify-run-1",
+      idempotencyKey: "shopify-run-1",
+    }, deps);
+
+    expect(result.status).toBe("existing");
+    expect(result.runId).toBe("feed-run-existing");
+    expect(deps.listActiveProductIds).not.toHaveBeenCalled();
+    expect(deps.persistPlan).not.toHaveBeenCalled();
+  });
+
+  it("rejects a nightly plan that is not tied to a validated source run", async () => {
+    const deps = dependencies();
+
+    await expect(planDurableFeedRun({
+      trigger: "nightly",
+      sourceSyncRunId: "shopify-run-1",
+      idempotencyKey: "different-run",
+    }, deps)).rejects.toThrow("validated source sync run id");
+    expect(deps.persistPlan).not.toHaveBeenCalled();
+  });
+
+  it("refuses a nightly plan when the source Shopify gate is not completed", async () => {
+    const deps = dependencies({
+      validateSourceRun: vi.fn().mockResolvedValue(false),
+    });
+
+    await expect(planDurableFeedRun({
+      trigger: "nightly",
+      sourceSyncRunId: "shopify-run-failed",
+      idempotencyKey: "shopify-run-failed",
+    }, deps)).rejects.toThrow("did not pass the Shopify completion gate");
+    expect(deps.listActiveProductIds).not.toHaveBeenCalled();
+    expect(deps.persistPlan).not.toHaveBeenCalled();
   });
 
   it("does not persist a plan when a product fingerprint is missing", async () => {
