@@ -1,0 +1,131 @@
+Task: Add complete per-market Meta catalog feeds by composing the existing durable Meta snapshots. Do not redesign or rebuild the existing feed engine.
+
+CONTEXT
+The current durable Meta architecture already publishes and validates:
+1. /api/feeds/meta/base.csv
+   Contains shared product attributes such as:
+   id, item_group_id, gtin, mpn, brand, condition, image_link,
+   additional_image_link, lifestyle_image_link, google_product_category,
+   product_type, color, material, age_group, gender, return_policy_info,
+   custom_label_0..4
+
+2. /api/feeds/meta/lang/fr.csv and /api/feeds/meta/lang/de.csv
+   Contains:
+   id, title, description, link
+
+3. /api/feeds/meta/country/{COUNTRY}.csv
+   Contains:
+   id, price, sale_price, sale_price_effective_date, availability, shipping
+
+These files are intentionally partial. Meta Commerce Manager needs one complete primary catalog feed per market.
+
+OBJECTIVE
+Add complete Meta market feeds that deterministically join the already-published durable BASE + LANGUAGE + COUNTRY snapshots by exact product id.
+
+The resulting market feed must contain all relevant fields from the three sources in one CSV row, including at minimum:
+id
+item_group_id
+gtin
+mpn
+brand
+condition
+image_link
+additional_image_link
+lifestyle_image_link
+google_product_category
+product_type
+color
+material
+age_group
+gender
+return_policy_info
+custom_label_0
+custom_label_1
+custom_label_2
+custom_label_3
+custom_label_4
+title
+description
+link
+price
+sale_price
+sale_price_effective_date
+availability
+shipping
+
+MARKETS / LANGUAGE
+FR -> fr
+BE_FR -> fr
+BE_DE -> de
+DE -> de
+AT -> de
+LU_DE -> de
+CH_FR -> fr
+CH_DE -> de
+
+IMPORTANT
+- Preserve the existing exact IDs. Never invent or transform IDs during the join.
+- Respect the existing market-specific IDs used by the durable snapshots.
+- Switzerland MUST remain CHF. Never convert EUR to CHF internally.
+- Keep all existing exclusion rules.
+- Do not modify Google feed behavior.
+- Do not modify the existing base/language/country feed URLs or their snapshots.
+- Do not modify the guardrail threshold.
+- Do not reintroduce excluded or archived products.
+- Do not replace atomic publication.
+- Do not alter the durable Shopify/nightly architecture.
+- Do not add a new paid service.
+- Do not run Publish automatically.
+
+PUBLIC ROUTES
+Expose one stable public CSV URL per market, preferably:
+ /api/feeds/meta/market/FR.csv
+ /api/feeds/meta/market/BE_FR.csv
+ /api/feeds/meta/market/BE_DE.csv
+ /api/feeds/meta/market/DE.csv
+ /api/feeds/meta/market/AT.csv
+ /api/feeds/meta/market/LU_DE.csv
+ /api/feeds/meta/market/CH_FR.csv
+ /api/feeds/meta/market/CH_DE.csv
+
+DURABILITY
+Market feeds must follow the existing durable/atomic snapshot architecture:
+- generate candidate
+- validate complete Meta schema
+- validate unique IDs
+- validate row integrity
+- validate price/sale_price rules
+- enforce configured market currency
+- CH_FR and CH_DE must contain CHF only
+- preserve previous valid market snapshot on failure
+- atomically publish only after successful validation
+- integrate market-feed finalization into the existing durable Meta feed-plan/nightly cycle rather than generating them synchronously on HTTP request.
+
+DASHBOARD
+Extend the existing Meta dashboard to display these complete MARKET feeds with product count, generated timestamp, freshness/status and public URL. Do not remove the existing BASE/LANGUAGE/COUNTRY rows.
+
+TESTS
+Add targeted tests for:
+- correct deterministic join
+- FR complete schema
+- DE complete schema
+- BE_FR and BE_DE
+- CH_FR and CH_DE CHF only
+- missing component row behavior
+- duplicate IDs
+- exclusions remain excluded
+- sale_price < price when sale_price exists
+- atomic publication / previous snapshot preservation
+- public route serving the current snapshot
+- nightly feed-plan includes the market finalizers
+
+Run targeted tests, full API tests, typecheck, build and schema diff.
+
+At the end:
+1. Review the implementation for blockers.
+2. Fix blockers found.
+3. Give me the exact commit hash.
+4. Give me test counts/results.
+5. State whether schema/database migration is required.
+6. State whether it is safe to Publish.
+7. DO NOT Publish.
