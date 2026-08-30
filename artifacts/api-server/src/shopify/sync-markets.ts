@@ -255,6 +255,65 @@ export function selectShopifyMarketPrice({
   return selected;
 }
 
+export const DURABLE_PRICING_VALIDATION_BATCH_SIZE = 5_000;
+const DURABLE_PRICING_WRITE_VARIANT_BATCH_SIZE = 50;
+
+export type MarketPricingCommitUnit = (
+  checkpoint: Record<string, unknown>,
+  writer: (tx: any) => Promise<void>,
+) => Promise<void>;
+
+export function advancePricingValidationBatch(input: {
+  checkpoint: Record<string, any>;
+  markets: Record<string, { country: string; currency: string }>;
+  maxChecks?: number;
+}): Record<string, any> {
+  const swissMarkets = Object.entries(input.markets)
+    .filter(([, market]) => market.country === "CH");
+  const basePrices = input.checkpoint.basePrices ?? [];
+  const maxChecks = Math.max(
+    1,
+    input.maxChecks ?? DURABLE_PRICING_VALIDATION_BATCH_SIZE,
+  );
+  let marketIndex = Number(input.checkpoint.validateMarketIndex ?? 0);
+  let baseIndex = Number(input.checkpoint.validateBaseIndex ?? 0);
+  let checked = 0;
+
+  while (checked < maxChecks) {
+    const marketEntry = swissMarkets[marketIndex];
+    if (!marketEntry) {
+      return {
+        ...input.checkpoint,
+        stage: "write",
+        baseIndex: 0,
+        marketIndex: 0,
+      };
+    }
+    const base = basePrices[baseIndex];
+    if (!base) {
+      marketIndex++;
+      baseIndex = 0;
+      continue;
+    }
+    const [marketCode, market] = marketEntry;
+    selectShopifyMarketPrice({
+      marketCode,
+      country: market.country,
+      configuredCurrency: market.currency,
+      base,
+      override: undefined,
+    });
+    baseIndex++;
+    checked++;
+  }
+
+  return {
+    ...input.checkpoint,
+    validateMarketIndex: marketIndex,
+    validateBaseIndex: baseIndex,
+  };
+}
+
 /**
  * The HTTP durable variant deliberately retains its intermediate Shopify
  * responses in the step checkpoint.  This makes the read/validate/write
@@ -266,6 +325,7 @@ export async function syncMarketPricingSlice(
   tracker: SyncRunTracker,
   checkpoint: Record<string, unknown>,
   heartbeat: () => Promise<boolean>,
+  commitUnit?: MarketPricingCommitUnit,
 ): Promise<{ completed: boolean; checkpoint: Record<string, unknown> }> {
   const state = checkpoint as Record<string, any>;
   const config = loadConfig();
@@ -363,29 +423,13 @@ export async function syncMarketPricingSlice(
   if (state.stage === "validate") {
     // Do not move this validation into the write stage: that would allow a
     // non-CHF Swiss price to partially update another market.
-    const swissMarkets = Object.entries(ourMarkets).filter(([, market]) => market.country === "CH");
-    const marketIndex = Number(state.validateMarketIndex ?? 0);
-    const baseIndex = Number(state.validateBaseIndex ?? 0);
-    const marketEntry = swissMarkets[marketIndex];
-    if (!marketEntry) {
-      return { completed: false, checkpoint: { ...state, stage: "write", baseIndex: 0 } };
-    }
     if (!await heartbeat()) return { completed: false, checkpoint: state };
-    const [marketCode, market] = marketEntry;
-    const base = (state.basePrices ?? [])[baseIndex];
-    if (!base) {
-      return {
-        completed: false,
-        checkpoint: { ...state, validateMarketIndex: marketIndex + 1, validateBaseIndex: 0 },
-      };
-    }
-    selectShopifyMarketPrice({
-      marketCode, country: market.country, configuredCurrency: market.currency,
-      base, override: undefined,
-    });
     return {
       completed: false,
-      checkpoint: { ...state, validateMarketIndex: marketIndex, validateBaseIndex: baseIndex + 1 },
+      checkpoint: advancePricingValidationBatch({
+        checkpoint: state,
+        markets: ourMarkets,
+      }),
     };
   }
 
@@ -394,6 +438,86 @@ export async function syncMarketPricingSlice(
   let marketIndex = Number(state.marketIndex ?? 0);
   const markets = Object.entries(ourMarkets);
   const entries = new Map((state.mapping ?? []).map((entry: any) => [entry.code, entry.market]));
+  if (commitUnit) {
+    while (index < basePrices.length) {
+      if (!await heartbeat()) {
+        return { completed: false, checkpoint: { ...state, baseIndex: index, marketIndex } };
+      }
+      const batchStart = index;
+      const batchEnd = Math.min(
+        basePrices.length,
+        batchStart + DURABLE_PRICING_WRITE_VARIANT_BATCH_SIZE,
+      );
+      const firstMarketIndex = marketIndex;
+      const nextCheckpoint = {
+        ...state,
+        stage: batchEnd >= basePrices.length ? "complete" : "write",
+        baseIndex: batchEnd,
+        marketIndex: 0,
+      };
+      await commitUnit(nextCheckpoint, async (tx) => {
+        for (let baseIndex = batchStart; baseIndex < batchEnd; baseIndex++) {
+          const base = basePrices[baseIndex];
+          const [variant] = await tx.select({ id: variantsTable.id })
+            .from(variantsTable)
+            .where(sql`${variantsTable.shopifyGid} = ${base.variantGid}`)
+            .limit(1);
+          if (!variant) continue;
+          const overrides = new Map<string, VariantPrice>();
+          for (const list of state.priceLists ?? []) {
+            for (const code of list.marketCodes) {
+              const found = list.prices.find(
+                (price: VariantPrice) => price.variantGid === base.variantGid,
+              );
+              if (found) overrides.set(code, found);
+            }
+          }
+          const startMarket = baseIndex === batchStart ? firstMarketIndex : 0;
+          for (let nextMarketIndex = startMarket;
+            nextMarketIndex < markets.length;
+            nextMarketIndex++) {
+            const [marketCode, market] = markets[nextMarketIndex]!;
+            const selected = selectShopifyMarketPrice({
+              marketCode,
+              country: market.country,
+              configuredCurrency: market.currency,
+              base,
+              override: overrides.get(marketCode),
+            });
+            const shopifyMarket = entries.get(marketCode) as ShopifyMarket | undefined;
+            const root = shopifyMarket ? getMarketBaseUrl(shopifyMarket) : market.base_url;
+            await tx.insert(marketVariantsTable).values({
+              variantId: variant.id,
+              marketCode,
+              priceAmount: selected.price,
+              priceCurrency: selected.currency,
+              compareAtPriceAmount: selected.compareAtPrice,
+              availability: "out_of_stock",
+              productUrl: root
+                ? buildShopifyProductUrl(root, base.productHandle, base.variantGid)
+                : null,
+              isEligible: true,
+            }).onConflictDoUpdate({
+              target: [marketVariantsTable.variantId, marketVariantsTable.marketCode],
+              set: {
+                priceAmount: sql`excluded.price_amount`,
+                priceCurrency: sql`excluded.price_currency`,
+                compareAtPriceAmount: sql`excluded.compare_at_price_amount`,
+                productUrl: sql`excluded.product_url`,
+                updatedAt: new Date(),
+              },
+            });
+            tracker.bumpChanged();
+          }
+        }
+      });
+      index = batchEnd;
+      marketIndex = 0;
+      if (index >= basePrices.length) {
+        return { completed: true, checkpoint: nextCheckpoint };
+      }
+    }
+  }
   // Continue across variants while the caller's deadline/lease heartbeat allows
   // it.  `marketIndex` is deliberately persisted after every committed upsert.
   while (index < basePrices.length) {

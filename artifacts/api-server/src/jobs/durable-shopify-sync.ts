@@ -124,6 +124,12 @@ export async function executeDefaultPhase(
           tracker,
           checkpointValue(step),
           async () => Date.now() < context.deadlineMs && context.heartbeat(),
+          async (checkpoint, writer) => commitShopifySyncUnit({
+            stepId: step.id,
+            workerId: context.workerId,
+            checkpoint,
+            writer,
+          }),
         ));
         return result.completed
           ? { status: "completed", checkpoint: result.checkpoint }
