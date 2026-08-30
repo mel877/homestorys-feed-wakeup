@@ -1,0 +1,89 @@
+Investigate ONLY the durable nightly Shopify pricing phase issue observed in production.
+
+PRODUCTION CONTEXT
+
+The currently deployed production commit is:
+3788a03bb888ffd7681498e97b2fd70bae8e69d6
+
+A clean manual GitHub nightly workflow was started with:
+cycleKey = 2026-08-29
+
+The GitHub workflow is healthy and repeatedly receives valid HTTP responses from:
+POST /api/internal/nightly-cycle
+
+However, the cycle has remained for a long time at:
+
+status=running
+phase=pricing
+
+There are no 5-minute HTTP timeouts anymore. Requests return normally, but the cycle does not advance from pricing to inventory.
+
+An older orphaned run also exists:
+sourceSyncRunId = 9a148ca1-b6fe-467b-84aa-fb349bf217c0
+nightlyCycleKey = 2026-08-30
+status = running
+
+DO NOT modify production or call production endpoints.
+
+OBJECTIVE
+
+Inspect the current code and determine why a durable nightly cycle can repeatedly return:
+status=running, phase=pricing
+without eventually advancing to inventory.
+
+IMPORTANT:
+This is a targeted investigation/fix.
+Do NOT redesign the nightly architecture.
+Do NOT modify Google feed behavior.
+Do NOT modify the newly completed Task #99 Meta MARKET feed implementation unless required for compatibility.
+Do NOT modify exclusions.
+Do NOT modify the 10% feed guardrail.
+Do NOT modify CHF logic.
+Do NOT add a paid service.
+Do NOT Publish.
+Do NOT run a production sync or production nightly-cycle.
+
+CHECK SPECIFICALLY
+
+1. Whether pricing is actually processed in bounded durable slices.
+2. Whether pricing progress/checkpoint is persisted atomically.
+3. Whether every successful pricing slice advances its checkpoint.
+4. Whether a completed pricing phase can transition to inventory.
+5. Whether the same pricing slice can be replayed indefinitely.
+6. Whether lease ownership/expiry can prevent progress.
+7. Whether a zero-work or already-current pricing slice can loop forever.
+8. Whether source run / cycleKey state can incorrectly resolve to the older orphaned run.
+9. Whether the 2026-08-29 cycle could be reusing or waiting on state belonging to the 2026-08-30 orphan.
+10. Whether GitHub polling every ~2 seconds can interfere with lease/progress behavior.
+11. Whether any error is swallowed and converted back to status=running.
+12. Whether pricing has an explicit durable completion condition.
+
+If a code defect is found:
+- implement the smallest safe fix;
+- add regression tests reproducing the stuck-pricing condition;
+- preserve atomic transaction/checkpoint guarantees;
+- preserve resume/idempotency behavior.
+
+Then run:
+- targeted tests;
+- full API test suite;
+- API typecheck;
+- API build;
+- git diff --check.
+
+Review the fix for blockers before completion.
+
+At the end STOP and report:
+- root cause;
+- whether a code change was required;
+- exact commit hash if changed;
+- files changed;
+- targeted test results;
+- full API test results;
+- typecheck/build results;
+- whether DB migration is required;
+- whether it is safe to Publish together with Task #99;
+- exact recommended recovery procedure for the currently stuck production cycles AFTER Publish.
+
+DO NOT Publish.
+DO NOT call production.
