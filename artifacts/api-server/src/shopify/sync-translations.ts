@@ -61,6 +61,15 @@ interface TranslatableResourcesResponse {
   };
 }
 
+export interface TranslationSyncCursor {
+  localeIndex: number;
+  cursor: string | null;
+  /** Offset inside a checkpointed Shopify page; avoids replay after lease loss. */
+  resourceIndex?: number;
+  page?: TranslatableResource[];
+  nextPageCursor?: string | null;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Extract just the numeric Shopify ID from a GID. */
@@ -109,6 +118,67 @@ export async function syncTranslations(
   }
 
   logger.info("Translation sync complete");
+}
+
+/** Process exactly one Shopify cursor page.  The regular sync above deliberately
+ * remains a full drain for CLI/manual callers. */
+export async function syncTranslationsPage(
+  client: ShopifyClient,
+  tracker: SyncRunTracker,
+  state: TranslationSyncCursor,
+  beforeWrite?: () => Promise<boolean>,
+): Promise<{ completed: boolean; cursor: TranslationSyncCursor }> {
+  const languages = loadConfig().languages.languages;
+  const primary = languages.find((language) => language.primary) ?? languages[0]!;
+  const locales = languages.map((language) => language.code).filter((locale) => locale !== primary.code);
+  if (state.localeIndex >= locales.length) return { completed: true, cursor: state };
+  const locale = locales[state.localeIndex]!;
+  const products = await db.select({
+    id: productsTable.id, shopifyGid: productsTable.shopifyGid,
+  }).from(productsTable).where(eq(productsTable.status, "active"));
+  const productByGid = new Map(products.map((product) => [product.shopifyGid, product]));
+  let page = state.page;
+  let nextPageCursor = state.nextPageCursor;
+  if (!page) {
+    const result = await client.request<TranslatableResourcesResponse>(
+      TRANSLATABLE_RESOURCES_QUERY, { locale, cursor: state.cursor }, { expectedCost: 20 },
+    );
+    tracker.bumpApiCalls();
+    page = result.translatableResources.nodes;
+    nextPageCursor = result.translatableResources.pageInfo.hasNextPage
+      ? result.translatableResources.pageInfo.endCursor : null;
+  }
+  for (let resourceIndex = state.resourceIndex ?? 0; resourceIndex < page.length; resourceIndex++) {
+    const resource = page[resourceIndex]!;
+    const product = productByGid.get(resource.resourceId);
+    if (!product) continue;
+    const values: Record<string, string | null> = {};
+    for (const translation of resource.translations) {
+      if (translation.value) values[translation.key] = translation.value;
+    }
+    const title = values.title ?? null;
+    const description = values.body_html ?? null;
+    const handle = values.handle ?? null;
+    if (!title && !description && !handle) continue;
+    if (beforeWrite && !await beforeWrite()) {
+      return {
+        completed: false,
+        cursor: { ...state, page, nextPageCursor, resourceIndex },
+      };
+    }
+    await db.insert(productTranslationsTable).values({
+      productId: product.id, language: locale, title: title ?? "", description, handle,
+    }).onConflictDoUpdate({
+      target: [productTranslationsTable.productId, productTranslationsTable.language],
+      set: { ...(title !== null ? { title } : {}), description, handle, updatedAt: new Date() },
+    });
+    tracker.bumpChanged();
+    tracker.bumpRead();
+  }
+  const next: TranslationSyncCursor = nextPageCursor
+    ? { localeIndex: state.localeIndex, cursor: nextPageCursor }
+    : { localeIndex: state.localeIndex + 1, cursor: null };
+  return { completed: next.localeIndex >= locales.length, cursor: next };
 }
 
 async function syncLocale(

@@ -27,6 +27,7 @@ const BULK_OPERATION_FIELDS = `
   fileSize
   createdAt
   completedAt
+  query
 `;
 
 const CREATE_BULK_OPERATION = `
@@ -43,6 +44,42 @@ const POLL_BULK_OPERATION = `
     currentBulkOperation { ${BULK_OPERATION_FIELDS} }
   }
 `;
+const GET_BULK_OPERATION = `
+  query BulkOperation($id: ID!) {
+    node(id: $id) {
+      ... on BulkOperation { ${BULK_OPERATION_FIELDS} }
+    }
+  }
+`;
+
+/** Read the current bulk operation exactly once.  Durable workers must use this
+ * instead of pollBulkOperation, which intentionally waits between requests. */
+export async function getCurrentBulkOperation(
+  client: ShopifyClient,
+): Promise<BulkOperation | null> {
+  const result = await client.request<{ currentBulkOperation: BulkOperation | null }>(
+    POLL_BULK_OPERATION,
+    {},
+    { expectedCost: 1 },
+  );
+  return result.currentBulkOperation;
+}
+
+/** Fetch the operation we persisted, rather than treating an unrelated current
+ * operation as ours. */
+export async function getBulkOperationById(
+  client: ShopifyClient,
+  id: string,
+): Promise<BulkOperation | null> {
+  const result = await client.request<{ node: BulkOperation | null }>(
+    GET_BULK_OPERATION, { id }, { expectedCost: 1 },
+  );
+  return result.node;
+}
+
+export function normalizeBulkQuery(query: string): string {
+  return query.replace(/#[^\n]*/g, "").replace(/\s+/g, " ").trim();
+}
 
 const CANCEL_BULK_OPERATION = `
   mutation BulkOperationCancel($id: ID!) {

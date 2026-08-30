@@ -1,0 +1,130 @@
+Corrige uniquement le premier cycle durable Shopify selon le diagnostic production du cycle 2026-08-30.
+
+Aucun Publish, migration production, sync production, feed-plan, pump ou nightly-cycle ne doit être lancé pendant cette tâche.
+
+Problèmes confirmés :
+
+/api/internal/nightly-cycle a dépassé le timeout HTTP Replit de 300 secondes pendant la phase products.
+maxSteps=1 limite les phases mais une phase peut encore durer plusieurs minutes.
+le checkpoint sync_runs.batchIdx=89 est écrit mais n’est pas consommé à la reprise.
+shopify_sync_steps.cursor/checkpoint restent NULL.
+le worker peut continuer après expiration de son lease.
+GitHub tente actuellement de parser avec jq une réponse non JSON après 502/503/504.
+1. Rendre les phases Shopify réellement incrémentales
+
+Chaque appel /api/internal/nightly-cycle doit effectuer une tranche courte de travail et répondre idéalement en moins de 25–30 secondes, avec une marge importante sous le timeout Replit.
+
+Pour chaque phase Shopify durable :
+
+persister la progression réellement reprenable dans shopify_sync_steps.cursor et/ou checkpoint ;
+relire cette progression lors du prochain claim ;
+ne jamais recommencer depuis zéro si une tranche précédente est validée ;
+conserver l’idempotence.
+
+Pour products, persister au minimum :
+
+état/stade de l’opération Shopify Bulk ;
+Shopify bulk operation ID lorsque nécessaire ;
+résultat disponible/téléchargé ;
+prochain batch à traiter ;
+curseur ou identifiant permettant une reprise exacte.
+
+Ne pas attendre une opération Shopify Bulk pendant plusieurs minutes dans une seule requête HTTP. Si elle est encore en cours, persister son ID/état et retourner running.
+
+Une fois le Bulk disponible, traiter seulement autant de batches SQL que permis par le budget de la tranche, sauvegarder le prochain batch, puis rendre la main.
+
+Appliquer le même principe de tranches courtes aux phases pricing, inventory, translations et images lorsqu’elles peuvent dépasser le budget HTTP.
+
+2. Leases
+
+Corriger le comportement des leases :
+
+un worker ne doit jamais continuer silencieusement après expiration de son lease ;
+renouveler le lease pendant une tranche active lorsque nécessaire ;
+avant chaque nouveau sous-lot significatif, vérifier que le worker possède encore le lease ;
+si le lease est perdu, arrêter proprement la tranche sans poursuivre les écritures ;
+une reprise après lease expiré doit être sûre et utiliser le checkpoint persisté.
+3. Budget HTTP
+
+L’orchestrateur doit disposer d’un budget applicatif explicite inférieur au timeout Replit.
+
+Objectif :
+
+chaque appel HTTP termine normalement en moins de 30–40 secondes ;
+l’état running signifie qu’une nouvelle tranche peut être appelée ;
+completed uniquement lorsque tout le cycle est réellement terminé ;
+aucun long polling Shopify synchrone de plusieurs minutes.
+4. Workflow GitHub
+
+Adapter le workflow nocturne afin que :
+
+le même cycleKey soit toujours réutilisé ;
+les HTTP 502, 503 et 504 soient considérés comme transitoires ;
+leur corps ne soit jamais envoyé directement à jq ;
+le code HTTP et le body soient capturés séparément ;
+jq soit appelé uniquement sur une réponse 2xx JSON valide ;
+502/503/504 déclenchent une attente puis un retry du même cycle ;
+les autres erreurs HTTP soient affichées proprement et terminent le workflow ;
+les appels restent strictement séquentiels ;
+le watchdog global de 3 heures soit conservé.
+5. Cycle production existant
+
+Ne modifie PAS le run production 9a148ca1-b6fe-467b-84aa-fb349bf217c0.
+
+Ne tente pas de le reprendre ou de le terminer pendant le Build.
+
+Après le correctif, indique seulement quelle procédure sûre devra être utilisée pour clôturer/reprendre ce cycle une fois la nouvelle version publiée.
+
+6. Garanties à conserver
+
+Ne modifie pas :
+
+canonical builders ;
+garde-fou CHF ;
+exporters Google/Meta ;
+finalizers ;
+publication atomique ;
+snapshots ;
+dashboard ;
+logique d’exclusion.
+
+Aucun feed-plan ne doit être créé tant que le gate Shopify n’est pas passé.
+
+7. Tests obligatoires
+
+Ajouter/tester au minimum :
+
+products Bulk encore en cours → sauvegarde de l’operation ID + réponse rapide running ;
+Bulk terminé → reprise depuis l’operation ID existant ;
+traitement partiel des batches → checkpoint persisté ;
+prochain appel → reprise au batch suivant, sans retraitement des batches validés ;
+lease renouvelé pendant travail ;
+lease perdu → worker arrête la tranche ;
+lease expiré → second worker peut reprendre depuis checkpoint ;
+pricing/inventory/translations/images respectent le budget de tranche ;
+aucun feed-plan avant completion gate ;
+502/503/504 GitHub → retry sans jq sur HTML ;
+JSON 2xx → parsing normal ;
+completed → workflow termine avec succès.
+
+Exécuter :
+
+tests ciblés ;
+suite API complète ;
+typecheck ;
+build ;
+git diff --check.
+
+Ne faire aucune opération production.
+
+À la fin retourne uniquement :
+
+fichiers modifiés ;
+mécanisme exact de checkpoint/reprise ;
+durée maximale visée par appel ;
+comportement des leases ;
+modification workflow GitHub ;
+tests ;
+build/typecheck ;
+commit ;
+procédure recommandée pour traiter en sécurité le cycle production 2026-08-30 après Publish.

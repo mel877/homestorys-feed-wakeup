@@ -30,6 +30,9 @@ const PAGE_SIZE = 50;
 export async function classifyStoredImages(options?: {
   productId?: string;
   signal?: AbortSignal;
+  /** Durable workers use one database page per HTTP slice. */
+  maxPages?: number;
+  beforeChunk?: () => Promise<boolean>;
 }): Promise<{ classified: number; failed: number; pages: number }> {
   let classified = 0;
   let failed = 0;
@@ -69,6 +72,9 @@ export async function classifyStoredImages(options?: {
     // Process PAGE_SIZE images in CLASSIFY_CONCURRENCY chunks
     for (let i = 0; i < batch.length; i += CLASSIFY_CONCURRENCY) {
       if (options?.signal?.aborted) break;
+      if (options?.beforeChunk && !await options.beforeChunk()) {
+        return { classified, failed, pages };
+      }
 
       const chunk = batch.slice(i, i + CLASSIFY_CONCURRENCY);
       await Promise.all(
@@ -118,6 +124,7 @@ export async function classifyStoredImages(options?: {
         }),
       );
     }
+    if (options?.maxPages && pages >= options.maxPages) break;
   }
 
   logger.info({ classified, failed, pages }, "Image classification drain complete");

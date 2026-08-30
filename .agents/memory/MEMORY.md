@@ -23,3 +23,4 @@
 - [Durable feed pump boundaries](durable-feed-pump-boundaries.md) — build deterministic versioned parts in bounded calls; only a complete-file barrier may validate and publish.
 - [Production migration baseline](production-migration-baseline.md) — production has no Drizzle journal; use a reviewed Publish schema diff until migration history is deliberately baselined.
 - [Nightly cycle ownership](nightly-cycle-ownership.md) — GitHub is the sole scheduled Shopify/feed batch orchestrator; never re-add competing in-process Shopify or direct export schedules.
+- [Durable external-job checkpoints](durable-external-job-checkpoints.md) — data commits and cursor advancement need one lease-fenced transaction; external job creation also needs durable correlation.

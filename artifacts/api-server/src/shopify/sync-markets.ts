@@ -255,6 +255,191 @@ export function selectShopifyMarketPrice({
   return selected;
 }
 
+/**
+ * The HTTP durable variant deliberately retains its intermediate Shopify
+ * responses in the step checkpoint.  This makes the read/validate/write
+ * boundary deterministic: in particular every CH contextual price is
+ * validated before the first market_variants write.
+ */
+export async function syncMarketPricingSlice(
+  client: ShopifyClient,
+  tracker: SyncRunTracker,
+  checkpoint: Record<string, unknown>,
+  heartbeat: () => Promise<boolean>,
+): Promise<{ completed: boolean; checkpoint: Record<string, unknown> }> {
+  const state = checkpoint as Record<string, any>;
+  const config = loadConfig();
+  const ourMarkets = config.markets.markets;
+  assertShopifyMarketCurrencies(ourMarkets);
+
+  if (!state.stage) {
+    if (!await heartbeat()) return { completed: false, checkpoint: state };
+    const response = await client.request<{ markets: { nodes: ShopifyMarket[] } }>(
+      MARKETS_QUERY, {}, { expectedCost: 5 },
+    );
+    tracker.bumpApiCalls();
+    const mapping = response.markets.nodes.flatMap((market) => {
+      const code = matchMarketCode(market, ourMarkets);
+      return code ? [{ code, market }] : [];
+    });
+    return { completed: false, checkpoint: {
+      stage: "priceLists", mapping, priceLists: [], priceListsCursor: null,
+    } };
+  }
+
+  if (state.stage === "priceLists") {
+    if (!await heartbeat()) return { completed: false, checkpoint: state };
+    const response = await client.request<any>(
+      PRICE_LISTS_QUERY, { cursor: state.priceListsCursor }, { expectedCost: 20 },
+    );
+    tracker.bumpApiCalls();
+    const mapping = new Map((state.mapping ?? []).map((entry: any) => [entry.market.id, entry.code]));
+    const priceLists = [...(state.priceLists ?? [])];
+    for (const list of response.priceLists.nodes) {
+      const marketCodes = (list.catalog?.markets?.nodes ?? [])
+        .map((market: any) => mapping.get(market.id)).filter(Boolean);
+      if (!marketCodes.length) continue;
+      priceLists.push({
+        id: list.id, marketCodes,
+        prices: list.prices.nodes.map((price: any) => ({
+          variantGid: price.variant.id, price: price.price.amount,
+          compareAtPrice: price.compareAtPrice?.amount ?? null, currency: price.price.currencyCode,
+        })),
+        cursor: list.prices.pageInfo.hasNextPage ? list.prices.pageInfo.endCursor : null,
+      });
+    }
+    const cursor = response.priceLists.pageInfo.hasNextPage
+      ? response.priceLists.pageInfo.endCursor : null;
+    return { completed: false, checkpoint: cursor
+      ? { ...state, priceLists, priceListsCursor: cursor }
+      : { ...state, stage: "priceListPrices", priceLists, priceListIndex: 0 } };
+  }
+
+  if (state.stage === "priceListPrices") {
+    const lists = [...(state.priceLists ?? [])];
+    const index = Number(state.priceListIndex ?? 0);
+    const list = lists[index];
+    if (!list) return { completed: false, checkpoint: { ...state, stage: "basePrices", baseCursor: null, basePrices: [] } };
+    if (!list.cursor) {
+      return { completed: false, checkpoint: { ...state, priceListIndex: index + 1 } };
+    }
+    if (!await heartbeat()) return { completed: false, checkpoint: state };
+    const response = await client.request<any>(
+      PRICE_LIST_PRICES_QUERY, { priceListId: list.id, cursor: list.cursor }, { expectedCost: 20 },
+    );
+    tracker.bumpApiCalls();
+    list.prices.push(...response.priceList.prices.nodes.map((price: any) => ({
+      variantGid: price.variant.id, price: price.price.amount,
+      compareAtPrice: price.compareAtPrice?.amount ?? null, currency: price.price.currencyCode,
+    })));
+    list.cursor = response.priceList.prices.pageInfo.hasNextPage
+      ? response.priceList.prices.pageInfo.endCursor : null;
+    lists[index] = list;
+    return { completed: false, checkpoint: { ...state, priceLists: lists } };
+  }
+
+  if (state.stage === "basePrices") {
+    if (!await heartbeat()) return { completed: false, checkpoint: state };
+    const response = await client.request<any>(
+      BASE_PRICES_QUERY, { cursor: state.baseCursor }, { expectedCost: 30 },
+    );
+    tracker.bumpApiCalls();
+    const basePrices = [...(state.basePrices ?? []), ...response.productVariants.edges.map(({ node }: any) => ({
+      variantGid: node.id, price: node.price, compareAtPrice: node.compareAtPrice,
+      productHandle: node.product.handle,
+      swissPrice: node.contextualPricing ? {
+        price: node.contextualPricing.price.amount,
+        compareAtPrice: node.contextualPricing.compareAtPrice?.amount ?? null,
+        currency: node.contextualPricing.price.currencyCode,
+      } : null,
+    }))];
+    const cursor = response.productVariants.pageInfo.hasNextPage
+      ? response.productVariants.pageInfo.endCursor : null;
+    return { completed: false, checkpoint: cursor
+      ? { ...state, basePrices, baseCursor: cursor }
+      : { ...state, basePrices, stage: "validate" } };
+  }
+
+  if (state.stage === "validate") {
+    // Do not move this validation into the write stage: that would allow a
+    // non-CHF Swiss price to partially update another market.
+    const swissMarkets = Object.entries(ourMarkets).filter(([, market]) => market.country === "CH");
+    const marketIndex = Number(state.validateMarketIndex ?? 0);
+    const baseIndex = Number(state.validateBaseIndex ?? 0);
+    const marketEntry = swissMarkets[marketIndex];
+    if (!marketEntry) {
+      return { completed: false, checkpoint: { ...state, stage: "write", baseIndex: 0 } };
+    }
+    if (!await heartbeat()) return { completed: false, checkpoint: state };
+    const [marketCode, market] = marketEntry;
+    const base = (state.basePrices ?? [])[baseIndex];
+    if (!base) {
+      return {
+        completed: false,
+        checkpoint: { ...state, validateMarketIndex: marketIndex + 1, validateBaseIndex: 0 },
+      };
+    }
+    selectShopifyMarketPrice({
+      marketCode, country: market.country, configuredCurrency: market.currency,
+      base, override: undefined,
+    });
+    return {
+      completed: false,
+      checkpoint: { ...state, validateMarketIndex: marketIndex, validateBaseIndex: baseIndex + 1 },
+    };
+  }
+
+  const basePrices = state.basePrices ?? [];
+  let index = Number(state.baseIndex ?? 0);
+  let marketIndex = Number(state.marketIndex ?? 0);
+  const markets = Object.entries(ourMarkets);
+  const entries = new Map((state.mapping ?? []).map((entry: any) => [entry.code, entry.market]));
+  // Continue across variants while the caller's deadline/lease heartbeat allows
+  // it.  `marketIndex` is deliberately persisted after every committed upsert.
+  while (index < basePrices.length) {
+    if (!await heartbeat()) {
+      return { completed: false, checkpoint: { ...state, baseIndex: index, marketIndex } };
+    }
+    const base = basePrices[index];
+    const [variant] = await db.select({ id: variantsTable.id })
+      .from(variantsTable).where(sql`${variantsTable.shopifyGid} = ${base.variantGid}`).limit(1);
+    if (variant) {
+      const overrides = new Map<string, VariantPrice>();
+      for (const list of state.priceLists ?? []) {
+        for (const code of list.marketCodes) {
+          const found = list.prices.find((price: VariantPrice) => price.variantGid === base.variantGid);
+          if (found) overrides.set(code, found);
+        }
+      }
+      for (; marketIndex < markets.length; marketIndex++) {
+        if (!await heartbeat()) {
+          return { completed: false, checkpoint: { ...state, baseIndex: index, marketIndex } };
+        }
+        const [marketCode, market] = markets[marketIndex]!;
+        const selected = selectShopifyMarketPrice({ marketCode, country: market.country,
+          configuredCurrency: market.currency, base, override: overrides.get(marketCode) });
+        const shopifyMarket = entries.get(marketCode) as ShopifyMarket | undefined;
+        const root = shopifyMarket ? getMarketBaseUrl(shopifyMarket) : market.base_url;
+        await db.insert(marketVariantsTable).values({
+          variantId: variant.id, marketCode, priceAmount: selected.price, priceCurrency: selected.currency,
+          compareAtPriceAmount: selected.compareAtPrice, availability: "out_of_stock",
+          productUrl: root ? buildShopifyProductUrl(root, base.productHandle, base.variantGid) : null,
+          isEligible: true,
+        }).onConflictDoUpdate({
+          target: [marketVariantsTable.variantId, marketVariantsTable.marketCode],
+          set: { priceAmount: sql`excluded.price_amount`, priceCurrency: sql`excluded.price_currency`,
+            compareAtPriceAmount: sql`excluded.compare_at_price_amount`,
+            productUrl: sql`excluded.product_url`, updatedAt: new Date() },
+        });
+        tracker.bumpChanged();
+      }
+    }
+    index++;
+    marketIndex = 0;
+  }
+  return { completed: true, checkpoint: { ...state, stage: "complete", baseIndex: index, marketIndex: 0 } };
+}
+
 async function fetchAllPriceListPrices(
   client: ShopifyClient,
   priceListId: string,

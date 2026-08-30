@@ -13,7 +13,7 @@ import { eq, sql } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config";
 import type { ShopifyClient } from "./client";
-import { runBulkQuery } from "./bulk-ops";
+import { downloadBulkResults, runBulkQuery } from "./bulk-ops";
 import type { SyncRunTracker } from "./sync-run-tracker";
 import type { BulkNode } from "./types";
 
@@ -24,7 +24,7 @@ const logger = rootLogger.child({ module: "sync-inventory" });
 // Bulk operations use standard GraphQL connection syntax (edges/node).
 // Shopify flattens the JSONL output with __parentId for child records.
 // inventoryItem node → __parentId unset; inventoryLevel → __parentId = inventoryItem GID.
-const BULK_INVENTORY_QUERY = `
+export const BULK_INVENTORY_QUERY = `
 {
   inventoryItems {
     edges {
@@ -116,10 +116,18 @@ function chunks<T>(arr: T[], size: number): T[][] {
 
 // ── Main sync ─────────────────────────────────────────────────────────────────
 
+export interface InventorySyncSliceOptions {
+  bulkResultUrl?: string;
+  startBatchIndex?: number;
+  beforeBatch?: () => Promise<boolean>;
+  beforeFinalize?: () => Promise<boolean>;
+}
+
 export async function syncInventory(
   client: ShopifyClient,
   tracker: SyncRunTracker,
-): Promise<void> {
+  options: InventorySyncSliceOptions = {},
+): Promise<{ completed: boolean; nextBatchIndex: number }> {
   logger.info("Starting inventory sync via bulk operation");
 
   // Load variant GID → DB ID map
@@ -139,7 +147,10 @@ export async function syncInventory(
   const levelsByItem = new Map<string, InventoryLevelNode[]>();
 
   let nodeCount = 0;
-  for await (const node of runBulkQuery<BulkNode>(client, BULK_INVENTORY_QUERY)) {
+  const bulkNodes = options.bulkResultUrl
+    ? downloadBulkResults<BulkNode>(options.bulkResultUrl)
+    : runBulkQuery<BulkNode>(client, BULK_INVENTORY_QUERY);
+  for await (const node of bulkNodes) {
     nodeCount++;
     tracker.bumpApiCalls();
 
@@ -179,7 +190,12 @@ export async function syncInventory(
   }
 
   // Upsert in batches
-  for (const batch of chunks(rows, 200)) {
+  const batches = chunks(rows, 200);
+  for (const [batchIndex, batch] of batches.entries()) {
+    if (batchIndex < (options.startBatchIndex ?? 0)) continue;
+    if (options.beforeBatch && !await options.beforeBatch()) {
+      return { completed: false, nextBatchIndex: batchIndex };
+    }
     await db
       .insert(inventoryLevelsTable)
       .values(batch)
@@ -199,9 +215,13 @@ export async function syncInventory(
 
   logger.info({ rows: rows.length }, "Inventory levels upserted");
 
+  if (options.beforeFinalize && !await options.beforeFinalize()) {
+    return { completed: false, nextBatchIndex: batches.length };
+  }
   // Update market_variants.availability from aggregated inventory
   await updateMarketAvailability(tracker);
   logger.info("Inventory sync complete");
+  return { completed: true, nextBatchIndex: batches.length };
 }
 
 /**

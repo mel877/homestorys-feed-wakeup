@@ -10,7 +10,7 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config";
 import type { ShopifyClient } from "./client";
-import { runBulkQuery } from "./bulk-ops";
+import { downloadBulkResults, runBulkQuery } from "./bulk-ops";
 import { computeChecksum, hashUrl, hasChanged } from "./checksums";
 import type { SyncRunTracker } from "./sync-run-tracker";
 import type {
@@ -29,7 +29,7 @@ const logger = rootLogger.child({ module: "sync-products" });
 // Bulk operations use standard GraphQL connection syntax (edges/node).
 // Shopify flattens the JSONL output and sets __parentId for child records.
 // No pagination args — bulk ops automatically return all records.
-const BULK_PRODUCTS_QUERY = `
+export const BULK_PRODUCTS_QUERY = `
 {
   products {
     edges {
@@ -408,10 +408,19 @@ function chunks<T>(arr: T[], size: number): T[][] {
 
 // ── Main sync ─────────────────────────────────────────────────────────────────
 
+export interface ProductSyncSliceOptions {
+  /** A completed durable bulk URL. Omit for the legacy non-durable flow. */
+  bulkResultUrl?: string;
+  startBatchIndex?: number;
+  beforeBatch?: () => Promise<boolean>;
+  beforeFinalize?: () => Promise<boolean>;
+}
+
 export async function syncProducts(
   client: ShopifyClient,
   tracker: SyncRunTracker,
-): Promise<void> {
+  options: ProductSyncSliceOptions = {},
+): Promise<{ completed: boolean; nextBatchIndex: number }> {
   // Derive primary locale from config (Shopify default = "de"; marked primary:true in languages.yaml).
   // syncProducts stores the Shopify base content under this locale code so that
   // syncTranslations can fill in every other locale from the Shopify translation API.
@@ -449,7 +458,10 @@ export async function syncProducts(
   const imagesByProduct = new Map<string, BulkImageNode[]>();
 
   let nodeCount = 0;
-  for await (const node of runBulkQuery<BulkNode>(client, BULK_PRODUCTS_QUERY)) {
+  const bulkNodes = options.bulkResultUrl
+    ? downloadBulkResults<BulkNode>(options.bulkResultUrl)
+    : runBulkQuery<BulkNode>(client, BULK_PRODUCTS_QUERY);
+  for await (const node of bulkNodes) {
     nodeCount++;
     tracker.bumpApiCalls();
 
@@ -482,6 +494,11 @@ export async function syncProducts(
   const productBatches = chunks([...products.entries()], 25);
 
   for (const [batchIdx, batch] of productBatches.entries()) {
+    // A committed batch is never replayed after a durable hand-off.
+    if (batchIdx < (options.startBatchIndex ?? 0)) continue;
+    if (options.beforeBatch && !await options.beforeBatch()) {
+      return { completed: false, nextBatchIndex: batchIdx };
+    }
     await db.transaction(async (tx) => {
       for (const [productGid, node] of batch) {
         // ── Product upsert ──────────────────────────────────────────────────
@@ -646,6 +663,9 @@ export async function syncProducts(
   }
 
   // Mark products not seen in this sync as archived (deleted from Shopify)
+  if (options.beforeFinalize && !await options.beforeFinalize()) {
+    return { completed: false, nextBatchIndex: productBatches.length };
+  }
   const seenGids = [...products.keys()];
   if (seenGids.length > 0) {
     const archivedCount = await markDeletedProducts(seenGids);
@@ -656,6 +676,7 @@ export async function syncProducts(
   }
 
   logger.info(tracker.getStats(), "Product sync complete");
+  return { completed: true, nextBatchIndex: productBatches.length };
 }
 
 /** Mark products in DB that were NOT returned by Shopify as archived. */

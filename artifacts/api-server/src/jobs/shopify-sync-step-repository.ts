@@ -157,6 +157,60 @@ export async function completeShopifySyncStep(
       eq(shopifySyncStepsTable.id, stepId),
       eq(shopifySyncStepsTable.status, "running"),
       eq(shopifySyncStepsTable.leaseOwner, workerId),
+      sql`${shopifySyncStepsTable.leaseExpiresAt} > NOW()`,
+    ))
+    .returning({ id: shopifySyncStepsTable.id });
+  return rows.length === 1;
+}
+
+export async function renewShopifySyncStepLease(
+  stepId: string,
+  workerId: string,
+  options: { leaseMs?: number; now?: Date } = {},
+): Promise<boolean> {
+  const now = options.now ?? new Date();
+  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  const rows = await db
+    .update(shopifySyncStepsTable)
+    .set({
+      leaseExpiresAt: new Date(now.getTime() + leaseMs),
+      updatedAt: now,
+    })
+    .where(and(
+      eq(shopifySyncStepsTable.id, stepId),
+      eq(shopifySyncStepsTable.status, "running"),
+      eq(shopifySyncStepsTable.leaseOwner, workerId),
+      sql`${shopifySyncStepsTable.leaseExpiresAt} > ${now}`,
+    ))
+    .returning({ id: shopifySyncStepsTable.id });
+  return rows.length === 1;
+}
+
+export async function saveShopifySyncStepProgress(
+  stepId: string,
+  workerId: string,
+  output: {
+    cursor?: Record<string, unknown> | null;
+    checkpoint?: Record<string, unknown> | null;
+  },
+): Promise<boolean> {
+  const now = new Date();
+  const rows = await db
+    .update(shopifySyncStepsTable)
+    .set({
+      status: "pending",
+      cursor: output.cursor,
+      checkpoint: output.checkpoint,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      availableAt: now,
+      updatedAt: now,
+    })
+    .where(and(
+      eq(shopifySyncStepsTable.id, stepId),
+      eq(shopifySyncStepsTable.status, "running"),
+      eq(shopifySyncStepsTable.leaseOwner, workerId),
+      sql`${shopifySyncStepsTable.leaseExpiresAt} > ${now}`,
     ))
     .returning({ id: shopifySyncStepsTable.id });
   return rows.length === 1;

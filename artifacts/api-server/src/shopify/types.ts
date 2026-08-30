@@ -142,6 +142,8 @@ export interface BulkOperation {
   fileSize: string | null;
   createdAt: string;
   completedAt: string | null;
+  /** Admin API BulkOperation.query, used only to safely recover a create gap. */
+  query?: string | null;
 }
 
 // ── Shopify GraphQL rate limit info ──────────────────────────────────────────

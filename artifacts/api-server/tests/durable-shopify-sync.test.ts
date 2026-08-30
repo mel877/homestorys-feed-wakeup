@@ -38,7 +38,12 @@ function dependencies(
     ensureRun: vi.fn().mockResolvedValue({ runId: "shopify-run-1", created: false }),
     releaseExpiredLeases: vi.fn().mockResolvedValue(0),
     claimNext: vi.fn().mockResolvedValue(null),
-    executePhase: vi.fn().mockResolvedValue({ checkpoint: { done: true } }),
+    renewLease: vi.fn().mockResolvedValue(true),
+    saveProgress: vi.fn().mockResolvedValue(true),
+    executePhase: vi.fn().mockResolvedValue({
+      status: "completed",
+      checkpoint: { done: true },
+    }),
     completeStep: vi.fn().mockResolvedValue(true),
     failStep: vi.fn().mockResolvedValue("retry"),
     getSummary: vi.fn().mockResolvedValue({
@@ -80,12 +85,134 @@ describe("durable Shopify sync", () => {
     }, deps);
 
     expect(result.status).toBe("running");
-    expect(deps.executePhase).toHaveBeenCalledWith(products.step, "worker-1");
+    expect(deps.executePhase).toHaveBeenCalledWith(
+      products.step,
+      expect.objectContaining({
+        workerId: "worker-1",
+        budgetMs: 25_000,
+      }),
+    );
     expect(deps.completeStep).toHaveBeenCalledWith(
       products.step.id,
       "worker-1",
       { checkpoint: { done: true } },
     );
+  });
+
+  it("persists a partial phase checkpoint without completing the step", async () => {
+    const products = claim("products");
+    const deps = dependencies({
+      claimNext: vi.fn().mockResolvedValue(products),
+      executePhase: vi.fn().mockResolvedValue({
+        status: "running",
+        cursor: { nextBatchIndex: 4 },
+        checkpoint: {
+          stage: "batches",
+          operationId: "gid://shopify/BulkOperation/1",
+          resultUrl: "https://example.test/results.jsonl",
+        },
+      }),
+    });
+
+    const result = await runDurableShopifySyncSlice({
+      cycleKey: "2026-08-30",
+      workerId: "worker-1",
+      maxSteps: 1,
+    }, deps);
+
+    expect(result.status).toBe("running");
+    expect(deps.saveProgress).toHaveBeenCalledWith(
+      products.step.id,
+      "worker-1",
+      {
+        cursor: { nextBatchIndex: 4 },
+        checkpoint: {
+          stage: "batches",
+          operationId: "gid://shopify/BulkOperation/1",
+          resultUrl: "https://example.test/results.jsonl",
+        },
+      },
+    );
+    expect(deps.completeStep).not.toHaveBeenCalled();
+  });
+
+  it.each(["pricing", "inventory", "translations", "images"] as const)(
+    "provides a bounded deadline to the %s phase",
+    async (phase) => {
+      const step = claim(phase);
+      const executePhase = vi.fn().mockImplementation(async (_step, context) => ({
+        status: "running" as const,
+        checkpoint: {
+          budgetMs: context.budgetMs,
+          hasFutureDeadline: context.deadlineMs >= Date.now(),
+        },
+      }));
+      const deps = dependencies({
+        claimNext: vi.fn().mockResolvedValue(step),
+        executePhase,
+      });
+
+      await runDurableShopifySyncSlice({
+        cycleKey: "2026-08-30",
+        workerId: "worker-1",
+        maxSteps: 1,
+        budgetMs: 1_000,
+      }, deps);
+
+      expect(executePhase).toHaveBeenCalledWith(
+        step.step,
+        expect.objectContaining({ budgetMs: 1_000, deadlineMs: expect.any(Number) }),
+      );
+      expect(deps.saveProgress).toHaveBeenCalledWith(
+        step.step.id,
+        "worker-1",
+        expect.objectContaining({
+          checkpoint: expect.objectContaining({ hasFutureDeadline: true }),
+        }),
+      );
+    },
+  );
+
+  it("passes persisted translation resource progress back into the phase", async () => {
+    const translations = claim("translations");
+    translations.step.cursor = {
+      localeIndex: 1,
+      cursor: "shopify-page-2",
+      resourceIndex: 42,
+      page: [{ resourceId: "gid://shopify/Product/42", translations: [] }],
+    };
+    const deps = dependencies({
+      claimNext: vi.fn().mockResolvedValue(translations),
+      executePhase: vi.fn().mockResolvedValue({
+        status: "running",
+        cursor: { ...translations.step.cursor, resourceIndex: 43 },
+      }),
+    });
+    await runDurableShopifySyncSlice({ cycleKey: "2026-08-30", workerId: "worker-1" }, deps);
+    expect(deps.saveProgress).toHaveBeenCalledWith(
+      translations.step.id, "worker-1",
+      expect.objectContaining({ cursor: expect.objectContaining({ resourceIndex: 43 }) }),
+    );
+  });
+
+  it("stops before executing a phase when its lease can no longer be renewed", async () => {
+    const products = claim("products");
+    const deps = dependencies({
+      claimNext: vi.fn().mockResolvedValue(products),
+      renewLease: vi.fn().mockResolvedValue(false),
+    });
+
+    const result = await runDurableShopifySyncSlice({
+      cycleKey: "2026-08-30",
+      workerId: "worker-1",
+      maxSteps: 1,
+    }, deps);
+
+    expect(result.status).toBe("running");
+    expect(result.error).toBe("Shopify step lease ownership was lost");
+    expect(deps.executePhase).not.toHaveBeenCalled();
+    expect(deps.completeStep).not.toHaveBeenCalled();
+    expect(deps.saveProgress).not.toHaveBeenCalled();
   });
 
   it("reclaims an expired lease and resumes from the persisted checkpoint", async () => {
@@ -105,7 +232,7 @@ describe("durable Shopify sync", () => {
     expect(result.reclaimed).toBe(1);
     expect(deps.executePhase).toHaveBeenCalledWith(
       expect.objectContaining({ checkpoint: { marketIndex: 3 } }),
-      "worker-1",
+      expect.objectContaining({ workerId: "worker-1" }),
     );
   });
 
@@ -114,6 +241,7 @@ describe("durable Shopify sync", () => {
     const deps = dependencies({
       claimNext: vi.fn().mockResolvedValue(completion),
       executePhase: vi.fn().mockResolvedValue({
+        status: "completed",
         checkpoint: { gate: { ok: false, reasons: ["pricing stale"] } },
       }),
       getSummary: vi.fn().mockResolvedValue({
