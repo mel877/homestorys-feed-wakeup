@@ -1,0 +1,83 @@
+Implémente uniquement le correctif minimal du dashboard pour qu’il reflète les snapshots durables publiés.
+
+Aucun pump, aucun feed-plan, aucun export, aucune migration, aucun publish automatique.
+
+Google
+
+Dans artifacts/api-server/src/routes/dashboard/google.ts :
+
+les compteurs, dates et informations de fichiers affichés comme état publié doivent provenir exclusivement des feed_snapshots courants (is_current=true) ;
+ne plus utiliser feed_items pour décrire le contenu actuellement publié ;
+conserver feed_items uniquement si nécessaire pour une autre section explicitement technique, mais ne jamais le présenter comme le nombre de produits du flux publié.
+
+Les valeurs publiées attendues doivent donc refléter les snapshots durables actuels, par exemple :
+
+CH_DE = 21 540
+CH_FR = 21 540
+LANG_DE = 107 468
+LANG_FR = 64 504
+
+Ne hardcoder aucun compteur.
+
+Meta
+
+Dans artifacts/api-server/src/routes/dashboard/meta.ts :
+
+charger uniquement les snapshots Meta is_current=true ;
+ignorer les anciens snapshots historiques qui ne correspondent pas aux identités durables courantes ;
+ne conserver que les identités publiées attendues :
+BASE
+AT
+BE
+CH
+DE
+FR
+LU
+META_LANGUAGE_FR
+META_LANGUAGE_DE
+
+Dans artifacts/dashboard/src/pages/meta.tsx :
+
+mapper explicitement :
+META_LANGUAGE_FR → /api/feeds/meta/lang/fr.csv
+META_LANGUAGE_DE → /api/feeds/meta/lang/de.csv
+ne jamais interpréter ces deux identités comme des codes pays ;
+les autres snapshots pays continuent à utiliser /api/feeds/meta/country/:market.csv.
+Domaine public
+
+Conserver la logique actuelle basée sur :
+
+window.location.protocol + "//" + window.location.host
+
+Ne hardcoder aucun domaine.
+
+Le dashboard ouvert via :
+https://homestorys-flux.eteamsys.be/dashboard/
+doit donc naturellement afficher les URLs sur ce domaine.
+
+Tests
+
+Ajouter uniquement les tests ciblés nécessaires :
+
+Google dashboard lit les compteurs depuis les snapshots courants ;
+Meta ignore les snapshots historiques ;
+META_LANGUAGE_FR/DE sont mappés vers /lang/fr.csv et /lang/de.csv ;
+aucun flux n’est généré ;
+aucune donnée métier n’est modifiée.
+
+Lance :
+
+tests ciblés ;
+suite API complète ;
+typecheck ;
+build dashboard + API si nécessaire ;
+git diff --check.
+
+À la fin donne uniquement :
+
+fichiers modifiés ;
+tests ;
+build/typecheck ;
+commit.
+
+Ne lance aucune opération de production.
