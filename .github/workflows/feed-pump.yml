@@ -19,7 +19,7 @@ jobs:
           test -n "$FEED_PUMP_URL"
           test -n "$INTERNAL_API_SECRET"
           curl --fail-with-body --silent --show-error \
-            --max-time 45 \
+            --max-time 240 \
             --retry 1 \
             --retry-delay 2 \
             -X POST "$FEED_PUMP_URL" \
