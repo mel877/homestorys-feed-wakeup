@@ -1,40 +1,84 @@
-name: Wake durable feed pump
+name: Durable nightly Shopify and feed cycle
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 2 * * *"
   workflow_dispatch:
-  
+    inputs:
+      cycle_key:
+        description: "UTC cycle key (YYYY-MM-DD); defaults to today"
+        required: false
+        type: string
+
 concurrency:
-  group: durable-feed-pump
+  group: durable-nightly-feed-cycle
   cancel-in-progress: false
-  
+
 jobs:
-  feed-pump:
+  nightly-cycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
+
     steps:
-      - name: Advance one durable feed slice
+      - name: Advance durable cycle sequentially
         env:
-          FEED_PUMP_URL: ${{ vars.FEED_PUMP_URL }}
+          NIGHTLY_CYCLE_URL: ${{ vars.NIGHTLY_CYCLE_URL }}
           INTERNAL_API_SECRET: ${{ secrets.INTERNAL_API_SECRET }}
+          REQUESTED_CYCLE_KEY: ${{ inputs.cycle_key }}
+
         run: |
-          set -eu
-          test -n "$FEED_PUMP_URL"
+          set -euo pipefail
+
+          test -n "$NIGHTLY_CYCLE_URL"
           test -n "$INTERNAL_API_SECRET"
 
-          for i in $(seq 1 30); do
-            echo "=== Pump $i/30 ==="
+          cycle_key="${REQUESTED_CYCLE_KEY:-$(date -u +%F)}"
+          deadline=$((SECONDS + 10740))
 
-            curl --fail-with-body --silent --show-error \
-              --max-time 240 \
-              --retry 1 \
-              --retry-delay 2 \
-              -X POST "$FEED_PUMP_URL" \
-              -H "Authorization: Bearer $INTERNAL_API_SECRET" \
-              -H "Content-Type: application/json" \
-              --data '{"budgetMs":30000,"maxSteps":4}'
+          echo "Starting durable nightly cycle: $cycle_key"
 
-            echo
-            sleep 2
+          while (( SECONDS < deadline )); do
+            response="$(
+              curl --fail-with-body --silent --show-error \
+                --max-time 600 \
+                --retry 2 \
+                --retry-delay 5 \
+                -X POST "$NIGHTLY_CYCLE_URL" \
+                -H "Authorization: Bearer $INTERNAL_API_SECRET" \
+                -H "Content-Type: application/json" \
+                --data "{\"cycleKey\":\"$cycle_key\"}"
+            )"
+
+            status="$(jq -r '.status // "failed"' <<<"$response")"
+            phase="$(jq -r '.phase // "unknown"' <<<"$response")"
+
+            echo "Nightly cycle status=$status phase=$phase"
+
+            case "$status" in
+              completed)
+                echo "Durable nightly cycle completed successfully."
+                exit 0
+                ;;
+
+              failed)
+                jq . <<<"$response"
+                exit 1
+                ;;
+
+              running)
+                sleep 2
+                ;;
+
+              idle)
+                sleep 10
+                ;;
+
+              *)
+                jq . <<<"$response"
+                exit 1
+                ;;
+            esac
           done
+
+          echo "Nightly cycle exceeded its three-hour watchdog" >&2
+          exit 1
