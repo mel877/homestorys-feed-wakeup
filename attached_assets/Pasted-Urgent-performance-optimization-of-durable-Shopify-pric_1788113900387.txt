@@ -1,0 +1,99 @@
+Urgent performance optimization of durable Shopify pricing — production cycle is still too slow.
+
+CONTEXT
+
+Production contains:
+- Task #99 complete Meta MARKET feeds
+- durable pricing fix 4fb6af7
+
+A resumed nightly cycle with:
+cycleKey = 2026-08-29
+
+has now been running for more than 25 minutes and still reports:
+
+status=running
+phase=pricing
+
+The previous fix correctly increased CHF validation to batches of 5,000 checks per slice.
+
+However, the implementation report states that pricing writes are still processed in batches of only 50 variants per durable slice.
+
+OBJECTIVE
+
+Determine whether the current 50-variant pricing write batch is now the dominant reason the pricing phase still requires an excessive number of nightly-cycle polls.
+
+This is a PERFORMANCE optimization only.
+
+DO NOT:
+- redesign the nightly architecture;
+- change Google or Meta feed logic;
+- change exclusions;
+- change CHF source-of-truth rules;
+- change the 10% guardrail;
+- change product selection;
+- add a paid service;
+- call production;
+- run a sync;
+- Publish.
+
+ANALYZE
+
+1. Calculate the approximate number of pricing write slices required for the current catalogue with the 50-variant batch.
+2. Account for all markets written during pricing, not only CH validation.
+3. Estimate expected wall-clock pricing duration with the GitHub polling loop.
+4. Determine the largest SAFE bounded write batch that remains comfortably below:
+   - Replit request timeout;
+   - transaction/lease limits;
+   - reasonable PostgreSQL transaction size.
+5. Prefer a batch in the hundreds or low thousands if tests demonstrate it is safe.
+6. Do NOT simply increase limits blindly.
+
+TARGET
+
+The pricing phase for the current Homestorys catalogue should be capable of completing in minutes/tens of minutes, not hours, while preserving durable resume guarantees.
+
+IF SAFE
+
+Implement the smallest change necessary to increase pricing write throughput.
+
+Preserve:
+- writes + checkpoint in the same transaction;
+- lease fencing;
+- rollback semantics;
+- idempotent resume;
+- compatibility with the currently running cycle checkpoint;
+- existing CHF validation behavior.
+
+Also inspect whether GitHub's 2-second sleep materially contributes to excessive runtime. If reducing/removing it is safe and useful, adjust only the workflow polling delay. Do not introduce concurrency.
+
+TEST
+
+Add/adjust regression tests covering:
+- larger bounded pricing write slices;
+- checkpoint advancement;
+- resume after interruption;
+- lease expiry rollback;
+- completion transition pricing -> inventory.
+
+Run:
+- targeted tests;
+- full API tests;
+- API typecheck;
+- API build;
+- git diff --check;
+- blocker review.
+
+AT THE END REPORT:
+
+- exact reason current pricing still takes so long;
+- current estimated number of polls with batch=50;
+- new batch size if changed;
+- estimated number of polls after optimization;
+- expected pricing wall-clock time after optimization;
+- exact commit hash;
+- tests/results;
+- migration required yes/no;
+- whether current cycleKey=2026-08-29 can safely resume after Publish;
+- exact recovery procedure.
+
+DO NOT PUBLISH.
