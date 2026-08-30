@@ -1,0 +1,36 @@
+Diagnostic ciblé uniquement. Aucune modification, aucun build, aucun publish, aucun pump.
+
+Nous avons maintenant deux problèmes identifiés sur le cycle durable 26f87a65-9830-44f2-9d39-67c0b4e5eee8.
+
+Google :
+La correction prévue est de ne plus bloquer sur le fingerprint enregistré plusieurs heures auparavant lors de la planification. Le contrôle bloquant doit comparer un fingerprint métier before puis after immédiatement autour de la capture des canonicals, en excluant les champs purement techniques comme updated_at.
+
+Ne rediagnostique pas tout Google. Vérifie simplement que cette correction peut être faite sans affaiblir les garanties métier et indique les fichiers exacts à modifier et les tests de régression nécessaires.
+
+Meta / finalisation :
+La finalisation meta-base a fait crasher Node avec :
+
+FATAL ERROR: Ineffective mark-compacts near heap limit
+Allocation failed - JavaScript heap out of memory
+
+environ 1.9 GiB de heap utilisée.
+
+Analyse précisément le chemin de executeDurableFeedFinalizationStep pour meta-base et identifie :
+
+le ou les fichiers/lignes qui matérialisent en mémoire l’ensemble du feed ou un volume trop important ;
+si l’assemblage, la validation, le calcul de checksum/hash, la lecture des parts ou atomicPublish charge le fichier complet en mémoire ;
+quelle est la correction minimale permettant une finalisation streaming / bornée en mémoire, sans modifier le contenu du feed ;
+comment conserver exactement :
+ordre déterministe ;
+header unique ;
+validation existante ;
+checksum/manifest ;
+guardrail ;
+atomic publish ;
+snapshot/pointer transactionnel ;
+ancien feed public conservé en cas d’échec ;
+les tests précis à ajouter pour prouver qu’un feed de taille production peut être finalisé sans charger tout son contenu en mémoire.
+
+Vérifie également que l’étape meta-base restée running après le crash sera correctement récupérée par le mécanisme de lease/recovery après correction, sans intervention SQL manuelle.
+
+Je veux uniquement le diagnostic et le plan de correction minimale. Ne modifie rien.
