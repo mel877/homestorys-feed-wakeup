@@ -1,0 +1,89 @@
+Production verification after pricing fix — investigate only, then fix if required.
+
+CONTEXT
+
+Task #99 Meta MARKET feeds was completed in:
+e679a889191cb62dfe1e26725c87312d75b8053a
+
+The durable pricing fix was completed in:
+4fb6af752c6d368ffcb40abe40bca215142b3aa3
+
+Production was republished after that work.
+
+Production /api/health currently reports:
+gitCommit=d2a1d39f670a5e90f689349cd304be1802961de2
+
+The currently active GitHub workflow #52 has now been running for approximately 1h43 and has produced more than 1,000 successful polls, but it still repeatedly returns:
+
+status=running
+phase=pricing
+
+The workflow itself started BEFORE the latest production republish.
+
+IMPORTANT:
+Do not call production mutation endpoints.
+Do not start a sync.
+Do not start a nightly cycle.
+Do not publish.
+Do not redesign the architecture.
+Do not change Google feeds, Meta MARKET feeds, exclusions, CHF rules, or the 10% guardrail.
+
+FIRST VERIFY SOURCE STATE
+
+1. Verify whether current HEAD contains BOTH:
+   - e679a889 Meta MARKET implementation
+   - 4fb6af752 pricing progress fix.
+
+2. Explain why production health reports d2a1d39f670a rather than 4fb6af7 and determine whether d2a1d39 contains the pricing fix and Meta MARKET implementation.
+
+3. Inspect the durable pricing implementation and determine what happens when an already-running pre-deployment pricing step continues polling after the application is republished.
+
+4. Determine whether an old valid lease/checkpoint can prevent the newly deployed code from reclaiming and advancing the pricing step.
+
+5. Determine whether the current pricing step can return status=running without performing any actual progress.
+
+6. Determine whether the 5,000-check validation batching introduced in 4fb6af7 is actually reachable for an existing pricing checkpoint created before that commit.
+
+7. Check for any checkpoint compatibility problem, stale lease, stage value, cursor value, or completion-condition problem that can cause infinite running.
+
+8. Calculate an upper bound on the expected number of nightly-cycle calls required for pricing with the current production catalogue. It must not require hundreds/thousands of calls after the fix.
+
+IF A DEFECT EXISTS
+
+Implement ONLY the smallest safe correction.
+
+Add a regression test reproducing the exact stuck/resume scenario.
+
+Preserve:
+- atomic writes + checkpoint;
+- lease ownership;
+- idempotent resume;
+- existing checkpoints;
+- CHF source-of-truth behavior;
+- all existing feed behavior.
+
+Then run:
+- targeted tests;
+- complete API tests;
+- API typecheck;
+- API build;
+- git diff --check;
+- blocker review.
+
+DO NOT PUBLISH.
+
+AT COMPLETION REPORT:
+
+- whether current HEAD contains e679a889 and 4fb6af7;
+- relationship between d2a1d39 and those commits;
+- exact reason workflow #52 is still stuck in pricing;
+- whether #52 can safely be cancelled;
+- whether the same cycleKey=2026-08-29 should be resumed or a new cycle should be created;
+- root cause;
+- exact commit if another fix was necessary;
+- tests/results;
+- DB migration required yes/no;
+- safe to publish yes/no;
+- exact post-publish recovery procedure.
+
+STOP after reporting.
