@@ -1,0 +1,79 @@
+Implémente uniquement les deux corrections minimales suivantes.
+Ne refactorise pas l’architecture durable au-delà de ce qui est nécessaire.
+
+1. Google — fingerprint source
+
+Corriger le protocole de première capture dans :
+
+artifacts/api-server/src/jobs/feed-export-source-repository.ts
+artifacts/api-server/src/exporters/durable-feed-builders.ts
+éventuellement durable-feed-planner.ts uniquement si nécessaire
+
+Règles :
+
+conserver les productIds figés au planning ;
+le fingerprint bloquant doit être un fingerprint métier, excluant les champs techniques volatils comme updated_at ;
+calculer before juste avant la lecture des canonicals ;
+lire/construire les canonicals ;
+calculer after immédiatement après ;
+bloquer uniquement si before !== after ;
+une modification intervenue avant la capture doit être acceptée et gelée ;
+une modification métier pendant la capture doit rester bloquante ;
+un batch source déjà complete doit continuer à être relu sans consulter la source vivante ;
+ne pas modifier exclusions, CHF, promotions, mapping Google/Meta, marchés ou logique de batch.
+
+Le fingerprint de planning peut rester uniquement pour audit.
+
+2. Validation des feeds — supprimer le plein-buffer
+
+Corriger artifacts/api-server/src/validation/feed-validator.ts.
+
+La cause OOM confirmée est downloadFeedFile() qui charge le feed complet puis crée Buffer + string + lignes CSV + objets + erreurs.
+
+Remplacer cette validation par une validation streaming et bornée en mémoire, en utilisant openFeedFileReadStream.
+
+Le parseur CSV streaming doit conserver exactement :
+
+virgules dans les champs quotés ;
+guillemets échappés ;
+champs multilignes ;
+CRLF et LF ;
+numéros de lignes exacts ;
+validation schema/champs/enums/patterns/devises/promotions identique.
+
+Ne conserver que les 200 premières erreurs en mémoire, mais maintenir le compteur total exact.
+
+Pour les doublons, conserver une détection exacte. Si nécessaire, utiliser des partitions temporaires déterministes traitées une par une. Pas de Bloom filter ni de méthode probabiliste.
+
+Ne modifie pas l’assembleur streaming actuel, la compression, le guardrail, les manifests, le SHA-256, le snapshot transactionnel ni le pointeur public.
+
+L’ancien feed public doit rester intact si validation/finalisation échoue.
+
+3. Tests
+
+Ajouter uniquement les tests nécessaires pour prouver :
+
+updated_at seul ne change pas le fingerprint métier ;
+changement de quantité/prix/disponibilité/traduction/image change le fingerprint ;
+changement avant capture accepté ;
+changement métier pendant capture bloqué ;
+batch complete relu sans source vivante ;
+validateur n’utilise plus downloadFeedFile ;
+CSV streaming correct avec quotes/multilignes/CRLF/LF ;
+plus de 200 erreurs : compteur exact, seulement 200 stockées ;
+doublons exacts ;
+gros feed validé sous heap limité sans OOM ;
+ancien snapshot conservé en cas d’échec.
+
+Exécute les tests ciblés, puis la suite complète API, typecheck, build et git diff --check.
+
+Ne lance aucun pump, aucun feed-plan, aucune migration, aucun export et aucun publish.
+
+À la fin, donne-moi :
+
+fichiers modifiés ;
+résumé du diff ;
+tests ciblés ;
+total tests passés ;
+typecheck/build ;
+commit créé.
