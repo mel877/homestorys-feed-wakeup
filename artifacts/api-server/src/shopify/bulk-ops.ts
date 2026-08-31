@@ -199,6 +199,24 @@ const TERMINAL: Set<BulkOperationStatus> = new Set([
   "EXPIRED",
 ]);
 
+export const SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR =
+  "Cannot create products bulk operation: an unrelated Shopify bulk operation is active";
+export const SHOPIFY_BULK_CONTENTION_ERROR =
+  "Cannot create inventory bulk operation: an unrelated Shopify bulk operation is active";
+
+export type CurrentBulkOperationDecision = "adopt" | "block" | "create";
+
+export function decideCurrentBulkOperation(
+  current: BulkOperation | null,
+  expectedQuery: string,
+): CurrentBulkOperationDecision {
+  if (!current) return "create";
+  if (normalizeBulkQuery(current.query ?? "") === normalizeBulkQuery(expectedQuery)) {
+    return "adopt";
+  }
+  return TERMINAL.has(current.status) ? "create" : "block";
+}
+
 // ── Core functions ────────────────────────────────────────────────────────────
 
 /**

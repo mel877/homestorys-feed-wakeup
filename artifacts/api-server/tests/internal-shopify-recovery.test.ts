@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
+    clearPendingShopifyContentionBackoff: vi.fn(),
     requeueFailedShopifyStep: vi.fn(),
     ShopifyStepRequeueError: MockShopifyStepRequeueError,
   };
@@ -37,6 +38,14 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  mocks.clearPendingShopifyContentionBackoff.mockReset();
+  mocks.clearPendingShopifyContentionBackoff.mockResolvedValue({
+    sourceSyncRunId: "b096d776-af60-47a6-bffe-5c824ef1985e",
+    step: "inventory",
+    stepId: "inventory-step",
+    status: "pending",
+    attempts: 8,
+  });
   mocks.requeueFailedShopifyStep.mockReset();
   mocks.requeueFailedShopifyStep.mockResolvedValue({
     sourceSyncRunId: "b096d776-af60-47a6-bffe-5c824ef1985e",
@@ -44,6 +53,70 @@ beforeEach(() => {
     stepId: "inventory-step",
     status: "pending",
     attempts: 0,
+  });
+});
+
+describe("POST /api/internal/shopify/clear-contention-backoff", () => {
+  const validBody = {
+    sourceSyncRunId: "b096d776-af60-47a6-bffe-5c824ef1985e",
+    step: "inventory",
+  };
+
+  it("requires the internal API secret", async () => {
+    const res = await request(app)
+      .post("/api/internal/shopify/clear-contention-backoff")
+      .send(validBody);
+
+    expect(res.status).toBe(401);
+    expect(mocks.clearPendingShopifyContentionBackoff).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid bodies and non-inventory steps", async () => {
+    for (const body of [
+      {},
+      { ...validBody, step: "products" },
+      { ...validBody, extra: true },
+      { ...validBody, sourceSyncRunId: "not-a-uuid" },
+    ]) {
+      const res = await request(app)
+        .post("/api/internal/shopify/clear-contention-backoff")
+        .set("Authorization", "Bearer shopify-recovery-test-secret")
+        .send(body);
+
+      expect(res.status).toBe(400);
+    }
+    expect(mocks.clearPendingShopifyContentionBackoff).not.toHaveBeenCalled();
+  });
+
+  it("clears only the requested pending inventory contention backoff", async () => {
+    const res = await request(app)
+      .post("/api/internal/shopify/clear-contention-backoff")
+      .set("Authorization", "Bearer shopify-recovery-test-secret")
+      .send(validBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      status: "backoff-cleared",
+      sourceSyncRunId: validBody.sourceSyncRunId,
+      step: "inventory",
+      stepStatus: "pending",
+      attempts: 8,
+    });
+    expect(mocks.clearPendingShopifyContentionBackoff).toHaveBeenCalledWith(validBody);
+  });
+
+  it("returns a conflict when the pending step is not safe to accelerate", async () => {
+    mocks.clearPendingShopifyContentionBackoff.mockRejectedValueOnce(
+      new mocks.ShopifyStepRequeueError("Only the exact pending inventory contention backoff can be cleared"),
+    );
+
+    const res = await request(app)
+      .post("/api/internal/shopify/clear-contention-backoff")
+      .set("Authorization", "Bearer shopify-recovery-test-secret")
+      .send(validBody);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ status: "error" });
   });
 });
 

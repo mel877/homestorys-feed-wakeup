@@ -7,4 +7,4 @@ For resumable batch work, commit each data unit and advance its durable cursor i
 
 **Why:** External bulk jobs and database writes create two failure windows: the process can disappear after creating the remote job but before saving its ID, or after committing data but before advancing the cursor. Idempotent upserts reduce damage but do not provide exact continuation.
 
-**How to apply:** Correlate/adopt remote jobs using a stable remote field such as the normalized Shopify BulkOperation query. Inside every product, inventory, pricing, or translation unit, lease-check, write data, and advance the step cursor atomically.
+**How to apply:** Correlate/adopt remote jobs using a stable remote field such as the normalized Shopify BulkOperation query. Shopify may retain a terminal `currentBulkOperation`: adopt it when its query matches, but only treat a mismatched non-terminal operation as contention. Inside every product, inventory, pricing, or translation unit, lease-check, write data, and advance the step cursor atomically.

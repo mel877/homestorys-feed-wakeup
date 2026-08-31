@@ -4,7 +4,14 @@ import { getShopifyClient } from "../shopify/client";
 import { SyncRunTracker } from "../shopify/sync-run-tracker";
 import { syncProducts } from "../shopify/sync-products";
 import { BULK_PRODUCTS_QUERY } from "../shopify/sync-products";
-import { createBulkOperation, getBulkOperationById, getCurrentBulkOperation, normalizeBulkQuery } from "../shopify/bulk-ops";
+import {
+  createBulkOperation,
+  decideCurrentBulkOperation,
+  getBulkOperationById,
+  getCurrentBulkOperation,
+  SHOPIFY_BULK_CONTENTION_ERROR,
+  SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR,
+} from "../shopify/bulk-ops";
 import { syncMarketPricingSlice } from "../shopify/sync-markets";
 import { syncInventory } from "../shopify/sync-inventory";
 import { BULK_INVENTORY_QUERY } from "../shopify/sync-inventory";
@@ -30,11 +37,10 @@ import {
 
 export const REQUIRED_SHOPIFY_PHASES = SHOPIFY_PHASES;
 export const MAX_SHOPIFY_SLICE_STEPS = 2;
-const SHOPIFY_BULK_CONTENTION_REASON = "an unrelated Shopify bulk operation is active";
-export const SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR =
-  `Cannot create products bulk operation: ${SHOPIFY_BULK_CONTENTION_REASON}`;
-export const SHOPIFY_BULK_CONTENTION_ERROR =
-  `Cannot create inventory bulk operation: ${SHOPIFY_BULK_CONTENTION_REASON}`;
+export {
+  SHOPIFY_BULK_CONTENTION_ERROR,
+  SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR,
+} from "../shopify/bulk-ops";
 const SHOPIFY_BULK_CONTENTION_ERRORS = new Set([
   SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR,
   SHOPIFY_BULK_CONTENTION_ERROR,
@@ -214,10 +220,11 @@ async function executeProductsSlice(
   if (!operationId) {
     if (!await context.heartbeat()) return { status: "running", checkpoint };
     const current = await getCurrentBulkOperation(client);
-    if (current) {
-      if (normalizeBulkQuery(current.query ?? "") !== normalizeBulkQuery(BULK_PRODUCTS_QUERY)) {
-          throw new Error(SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR);
-      }
+    const decision = decideCurrentBulkOperation(current, BULK_PRODUCTS_QUERY);
+    if (decision === "block") {
+      throw new Error(SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR);
+    }
+    if (decision === "adopt" && current) {
       return {
         status: "running",
         checkpoint: { ...checkpoint, stage: "polling", operationId: current.id },
@@ -309,10 +316,11 @@ async function executeInventorySlice(
   if (!operationId) {
     if (!await context.heartbeat()) return { status: "running", checkpoint };
     const current = await getCurrentBulkOperation(client);
-    if (current) {
-      if (normalizeBulkQuery(current.query ?? "") !== normalizeBulkQuery(BULK_INVENTORY_QUERY)) {
-        throw new Error(SHOPIFY_BULK_CONTENTION_ERROR);
-      }
+    const decision = decideCurrentBulkOperation(current, BULK_INVENTORY_QUERY);
+    if (decision === "block") {
+      throw new Error(SHOPIFY_BULK_CONTENTION_ERROR);
+    }
+    if (decision === "adopt" && current) {
       return { status: "running", checkpoint: { ...checkpoint, stage: "polling", operationId: current.id } };
     }
     operationId = await createBulkOperation(client, BULK_INVENTORY_QUERY);

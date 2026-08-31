@@ -5,6 +5,7 @@ import {
   type ShopifySyncStep,
 } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
+import { SHOPIFY_BULK_CONTENTION_ERROR } from "../shopify/bulk-ops";
 import { failStep, type FeedExportStepState } from "./feed-export-step-state";
 
 export const SHOPIFY_PHASES = [
@@ -425,6 +426,123 @@ export async function requeueFailedShopifyStep(input: {
       stepId: String(updated.rows[0]!.id),
       status: "pending",
       attempts: 0,
+    };
+  });
+}
+
+export async function clearPendingShopifyContentionBackoff(input: {
+  sourceSyncRunId: string;
+  step: "inventory";
+}): Promise<{
+  sourceSyncRunId: string;
+  step: "inventory";
+  stepId: string;
+  status: "pending";
+  attempts: number;
+}> {
+  return db.transaction(async (tx) => {
+    const runResult = await tx.execute(sql`
+      SELECT id
+      FROM sync_runs
+      WHERE id = ${input.sourceSyncRunId}::uuid
+        AND run_type = 'full'
+        AND metadata->>'architecture' = 'durable-shopify'
+      FOR UPDATE
+    `);
+    if (runResult.rows.length !== 1) {
+      throw new ShopifyStepRequeueError("Shopify sync run was not found", 404);
+    }
+
+    const stepResult = await tx.execute(sql`
+      SELECT
+        id,
+        status,
+        attempts,
+        last_error,
+        cursor,
+        checkpoint,
+        lease_owner,
+        lease_expires_at,
+        available_at
+      FROM shopify_sync_steps
+      WHERE sync_run_id = ${input.sourceSyncRunId}::uuid
+        AND phase = 'inventory'
+        AND batch_index = 0
+      FOR UPDATE
+    `);
+    const step = stepResult.rows[0] as {
+      id: string;
+      status: string;
+      attempts: number;
+      last_error: string | null;
+      cursor: unknown;
+      checkpoint: unknown;
+      lease_owner: string | null;
+      lease_expires_at: Date | null;
+      available_at: Date | null;
+    } | undefined;
+    if (!step) {
+      throw new ShopifyStepRequeueError("Inventory step was not found", 404);
+    }
+    if (
+      step.status !== "pending" ||
+      step.last_error !== SHOPIFY_BULK_CONTENTION_ERROR ||
+      step.cursor !== null ||
+      step.checkpoint !== null ||
+      step.lease_owner !== null ||
+      step.lease_expires_at !== null
+    ) {
+      throw new ShopifyStepRequeueError(
+        "Only the exact pending inventory contention backoff can be cleared",
+      );
+    }
+
+    const prerequisites = await tx.execute(sql`
+      SELECT phase, status
+      FROM shopify_sync_steps
+      WHERE sync_run_id = ${input.sourceSyncRunId}::uuid
+        AND phase IN ('products', 'pricing')
+      FOR UPDATE
+    `);
+    const completedPrerequisites = new Set(
+      prerequisites.rows
+        .filter((row) => String(row.status) === "completed")
+        .map((row) => String(row.phase)),
+    );
+    if (!completedPrerequisites.has("products") || !completedPrerequisites.has("pricing")) {
+      throw new ShopifyStepRequeueError(
+        "Products and pricing must be completed before inventory backoff can be cleared",
+      );
+    }
+
+    const updated = await tx.execute(sql`
+      UPDATE shopify_sync_steps
+      SET available_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ${step.id}::uuid
+        AND sync_run_id = ${input.sourceSyncRunId}::uuid
+        AND phase = 'inventory'
+        AND batch_index = 0
+        AND status = 'pending'
+        AND last_error = ${SHOPIFY_BULK_CONTENTION_ERROR}
+        AND cursor IS NULL
+        AND checkpoint IS NULL
+        AND lease_owner IS NULL
+        AND lease_expires_at IS NULL
+      RETURNING id, attempts
+    `);
+    if (updated.rows.length !== 1) {
+      throw new ShopifyStepRequeueError(
+        "Inventory contention backoff changed while it was being cleared",
+      );
+    }
+
+    return {
+      sourceSyncRunId: input.sourceSyncRunId,
+      step: "inventory",
+      stepId: String(updated.rows[0]!.id),
+      status: "pending",
+      attempts: Number(updated.rows[0]!.attempts),
     };
   });
 }
