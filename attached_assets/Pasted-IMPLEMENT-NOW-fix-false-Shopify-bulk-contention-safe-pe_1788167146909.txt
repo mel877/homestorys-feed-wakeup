@@ -1,0 +1,122 @@
+IMPLEMENT NOW — fix false Shopify bulk contention + safe pending backoff clear
+
+URGENT deadline:
+New Google + Meta feeds must be operational before late morning today.
+
+Root cause is confirmed.
+
+AFFECTED RUN
+sourceSyncRunId:
+b096d776-af60-47a6-bffe-5c824ef1985e
+
+cycleKey:
+2026-08-29
+
+CONFIRMED BUG
+
+In:
+artifacts/api-server/src/jobs/durable-shopify-sync.ts
+
+Both executeInventorySlice() and executeProductsSlice() treat any non-null currentBulkOperation with a mismatched query as active contention.
+
+They do NOT check currentBulkOperation.status.
+
+Therefore terminal operations such as:
+COMPLETED
+CANCELED
+FAILED
+EXPIRED
+
+are incorrectly treated as blocking.
+
+IMPLEMENT ONLY:
+
+1. Make the pre-creation currentBulkOperation guard status-aware for BOTH:
+   - products
+   - inventory
+
+2. Preserve create-gap recovery behavior:
+
+   If current query matches the expected query:
+   - adopt/reuse its operationId regardless of status
+
+   Else if current status is ACTIVE:
+   - CREATED
+   - RUNNING
+   - CANCELING
+   then throw the existing exact contention error.
+
+   Else if current status is TERMINAL:
+   - COMPLETED
+   - CANCELED
+   - FAILED
+   - EXPIRED
+   ignore that historical operation and create the expected bulk operation.
+
+3. Prefer a shared helper/predicate to avoid duplicate logic.
+
+4. Add regression tests covering:
+   - mismatched COMPLETED operation does NOT block products
+   - mismatched COMPLETED operation does NOT block inventory
+   - mismatched RUNNING operation DOES block
+   - matching query remains adoptable for crash recovery
+   - terminal mismatched FAILED/CANCELED/EXPIRED ignored
+
+5. Add a narrowly protected internal recovery action for CURRENT pending contention backoff only.
+
+It must:
+- require INTERNAL_API_SECRET
+- require sourceSyncRunId
+- require step=inventory
+- require status=pending
+- require exact last_error:
+  "Cannot create inventory bulk operation: an unrelated Shopify bulk operation is active"
+- require cursor NULL
+- require checkpoint NULL
+- require no active lease
+- require products=completed
+- require pricing=completed
+- update ONLY:
+  available_at = NOW()
+  updated_at = NOW()
+- preserve attempts
+- preserve last_error
+- preserve run identity
+- preserve cycleKey
+- preserve all business data
+- never create a new cycle
+
+6. Reuse an existing protected route if appropriate; otherwise add one small internal endpoint.
+
+DO NOT:
+- change Google
+- change Meta
+- change CHF
+- change exclusions
+- change guardrail 10%
+- change pricing
+- change product selection
+- change retry policy beyond this bug
+- call production
+- call Shopify
+- run sync
+- Publish
+
+VALIDATE:
+- targeted tests
+- full API tests
+- typecheck
+- build
+- git diff --check
+- blocker review
+
+AT END REPORT:
+- exact commit hash
+- exact recovery endpoint
+- exact authenticated request to clear ONLY inventory available_at for run b096d776-af60-47a6-bffe-5c824ef1985e
+- confirmation that attempts are preserved
+- confirmation that only available_at and updated_at change
+- migration required yes/no
+- whether cycleKey=2026-08-29 resumes safely
+- tests/results
+- DO NOT PUBLISH
