@@ -30,6 +30,15 @@ import {
 
 export const REQUIRED_SHOPIFY_PHASES = SHOPIFY_PHASES;
 export const MAX_SHOPIFY_SLICE_STEPS = 2;
+const SHOPIFY_BULK_CONTENTION_REASON = "an unrelated Shopify bulk operation is active";
+export const SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR =
+  `Cannot create products bulk operation: ${SHOPIFY_BULK_CONTENTION_REASON}`;
+export const SHOPIFY_BULK_CONTENTION_ERROR =
+  `Cannot create inventory bulk operation: ${SHOPIFY_BULK_CONTENTION_REASON}`;
+const SHOPIFY_BULK_CONTENTION_ERRORS = new Set([
+  SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR,
+  SHOPIFY_BULK_CONTENTION_ERROR,
+]);
 
 export interface ShopifySyncClaim {
   step: ShopifySyncStep & { phase: ShopifySyncPhase };
@@ -70,6 +79,7 @@ export interface DurableShopifySyncDependencies {
     stepId: string,
     workerId: string,
     error: unknown,
+    maxAttempts?: number | null,
   ): Promise<"retry" | "failed" | "conflict">;
   getSummary(runId: string): Promise<ShopifyStepSummary>;
   validateGate(runId: string): Promise<{ ok: boolean; reasons: string[] }>;
@@ -206,7 +216,7 @@ async function executeProductsSlice(
     const current = await getCurrentBulkOperation(client);
     if (current) {
       if (normalizeBulkQuery(current.query ?? "") !== normalizeBulkQuery(BULK_PRODUCTS_QUERY)) {
-        throw new Error("Cannot create products bulk operation: an unrelated Shopify bulk operation is active");
+          throw new Error(SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR);
       }
       return {
         status: "running",
@@ -301,7 +311,7 @@ async function executeInventorySlice(
     const current = await getCurrentBulkOperation(client);
     if (current) {
       if (normalizeBulkQuery(current.query ?? "") !== normalizeBulkQuery(BULK_INVENTORY_QUERY)) {
-        throw new Error("Cannot create inventory bulk operation: an unrelated Shopify bulk operation is active");
+        throw new Error(SHOPIFY_BULK_CONTENTION_ERROR);
       }
       return { status: "running", checkpoint: { ...checkpoint, stage: "polling", operationId: current.id } };
     }
@@ -456,13 +466,17 @@ export async function runDurableShopifySyncSlice(
       }
       processed++;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const maxAttempts = SHOPIFY_BULK_CONTENTION_ERRORS.has(message)
+        ? null
+        : undefined;
       const failure = await dependencies.failStep(
         claim.step.id,
         workerId,
         error,
+        maxAttempts,
       );
       if (failure === "failed") {
-        const message = error instanceof Error ? error.message : String(error);
         await dependencies.failRun(runId, [message]);
         return {
           status: "failed",
@@ -479,7 +493,7 @@ export async function runDurableShopifySyncSlice(
         phase,
         processed,
         reclaimed,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       };
     }
   }

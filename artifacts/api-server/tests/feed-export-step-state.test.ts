@@ -124,4 +124,27 @@ describe("feed export step state", () => {
     });
     expect(failed.availableAt).toBeNull();
   });
+
+  it("keeps transient contention retryable while capping the backoff", () => {
+    const failed = failStep(
+      step({
+        status: "running",
+        attempts: 20,
+        leaseOwner: "worker-a",
+        leaseExpiresAt: new Date("2026-08-29T16:00:30.000Z"),
+      }),
+      "worker-a",
+      now,
+      "Cannot create inventory bulk operation: an unrelated Shopify bulk operation is active",
+      null,
+    );
+
+    expect(failed).toMatchObject({
+      status: "pending",
+      attempts: 20,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+    expect(failed.availableAt?.toISOString()).toBe("2026-08-29T17:00:00.000Z");
+  });
 });

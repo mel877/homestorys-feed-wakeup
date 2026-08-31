@@ -30,6 +30,7 @@ import feedPumpRouter from "./feed-pump";
 import feedPlanRouter from "./feed-plan";
 import feedFinalizersRouter from "./feed-finalizers";
 import nightlyCycleRouter from "./nightly-cycle";
+import shopifyRecoveryRouter from "./shopify-recovery";
 
 const SWISS_PRICE_REPAIR_JOB_NAME = "swiss-price-repair";
 const SWISS_PRICE_REPAIR_OPERATION = "repair:swiss-prices";
@@ -99,6 +100,7 @@ router.use(feedPumpRouter);
 router.use(feedPlanRouter);
 router.use(feedFinalizersRouter);
 router.use(nightlyCycleRouter);
+router.use(shopifyRecoveryRouter);
 
 // ── Sync trigger routes ────────────────────────────────────────────────────────
 

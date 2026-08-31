@@ -27,6 +27,16 @@ export class ShopifySyncLeaseLostError extends Error {
   }
 }
 
+export class ShopifyStepRequeueError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: 404 | 409 = 409,
+  ) {
+    super(message);
+    this.name = "ShopifyStepRequeueError";
+  }
+}
+
 /** Commit one durable business unit and its resumable position as one database
  * transaction.  The lock and second conditional update protect against a worker
  * whose lease expired while it was performing the business write. */
@@ -269,7 +279,7 @@ export async function failShopifySyncStep(
   stepId: string,
   workerId: string,
   error: unknown,
-  maxAttempts = DEFAULT_MAX_ATTEMPTS,
+  maxAttempts: number | null = DEFAULT_MAX_ATTEMPTS,
 ): Promise<"retry" | "failed" | "conflict"> {
   const [current] = await db
     .select()
@@ -312,6 +322,111 @@ export async function failShopifySyncStep(
     .returning({ id: shopifySyncStepsTable.id });
   if (rows.length !== 1) return "conflict";
   return next.status === "failed" ? "failed" : "retry";
+}
+
+function isEmptyProgress(value: unknown): boolean {
+  return value === null ||
+    (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
+}
+
+export async function requeueFailedShopifyStep(input: {
+  sourceSyncRunId: string;
+  step: "inventory";
+}): Promise<{
+  sourceSyncRunId: string;
+  step: "inventory";
+  stepId: string;
+  status: "pending";
+  attempts: 0;
+}> {
+  return db.transaction(async (tx) => {
+    const runResult = await tx.execute(sql`
+      SELECT id
+      FROM sync_runs
+      WHERE id = ${input.sourceSyncRunId}::uuid
+        AND run_type = 'full'
+        AND metadata->>'architecture' = 'durable-shopify'
+      FOR UPDATE
+    `);
+    if (runResult.rows.length !== 1) {
+      throw new ShopifyStepRequeueError("Shopify sync run was not found", 404);
+    }
+
+    const stepResult = await tx.execute(sql`
+      SELECT id, status, cursor, checkpoint
+      FROM shopify_sync_steps
+      WHERE sync_run_id = ${input.sourceSyncRunId}::uuid
+        AND phase = 'inventory'
+        AND batch_index = 0
+      FOR UPDATE
+    `);
+    const step = stepResult.rows[0] as {
+      id: string;
+      status: string;
+      cursor: unknown;
+      checkpoint: unknown;
+    } | undefined;
+    if (!step) {
+      throw new ShopifyStepRequeueError("Inventory step was not found", 404);
+    }
+    if (step.status === "completed") {
+      throw new ShopifyStepRequeueError("Completed Shopify steps cannot be requeued");
+    }
+    if (step.status !== "failed") {
+      throw new ShopifyStepRequeueError("Only failed Shopify steps can be requeued");
+    }
+    if (!isEmptyProgress(step.cursor) || !isEmptyProgress(step.checkpoint)) {
+      throw new ShopifyStepRequeueError(
+        "Only a failed inventory step with an empty checkpoint can be requeued",
+      );
+    }
+
+    const prerequisites = await tx.execute(sql`
+      SELECT phase, status
+      FROM shopify_sync_steps
+      WHERE sync_run_id = ${input.sourceSyncRunId}::uuid
+        AND phase IN ('products', 'pricing')
+      FOR UPDATE
+    `);
+    const completedPrerequisites = new Set(
+      prerequisites.rows
+        .filter((row) => String(row.status) === "completed")
+        .map((row) => String(row.phase)),
+    );
+    if (!completedPrerequisites.has("products") || !completedPrerequisites.has("pricing")) {
+      throw new ShopifyStepRequeueError(
+        "Products and pricing must be completed before inventory can be requeued",
+      );
+    }
+
+    const updated = await tx.execute(sql`
+      UPDATE shopify_sync_steps
+      SET status = 'pending',
+          attempts = 0,
+          available_at = NOW(),
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          last_error = NULL,
+          completed_at = NULL,
+          updated_at = NOW()
+      WHERE id = ${step.id}::uuid
+        AND sync_run_id = ${input.sourceSyncRunId}::uuid
+        AND phase = 'inventory'
+        AND status = 'failed'
+      RETURNING id
+    `);
+    if (updated.rows.length !== 1) {
+      throw new ShopifyStepRequeueError("Inventory step changed while it was being requeued");
+    }
+
+    return {
+      sourceSyncRunId: input.sourceSyncRunId,
+      step: "inventory",
+      stepId: String(updated.rows[0]!.id),
+      status: "pending",
+      attempts: 0,
+    };
+  });
 }
 
 export async function releaseExpiredShopifySyncLeases(): Promise<number> {

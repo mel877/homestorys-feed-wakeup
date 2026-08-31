@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   REQUIRED_SHOPIFY_PHASES,
   runDurableShopifySyncSlice,
+  SHOPIFY_BULK_CONTENTION_ERROR,
   type DurableShopifySyncDependencies,
   type ShopifySyncClaim,
 } from "../src/jobs/durable-shopify-sync";
@@ -308,5 +309,105 @@ describe("durable Shopify sync", () => {
     expect(result.status).toBe("failed");
     expect(deps.completeRun).not.toHaveBeenCalled();
     expect(deps.failRun).toHaveBeenCalled();
+  });
+
+  it("keeps unrelated bulk-operation contention retryable after five attempts", async () => {
+    const inventory = claim("inventory", 5);
+    const failStep = vi.fn().mockResolvedValue("retry");
+    const deps = dependencies({
+      claimNext: vi.fn().mockResolvedValue(inventory),
+      executePhase: vi.fn().mockRejectedValue(new Error(SHOPIFY_BULK_CONTENTION_ERROR)),
+      failStep,
+    });
+
+    const result = await runDurableShopifySyncSlice({
+      cycleKey: "2026-08-29",
+      workerId: "worker-1",
+      maxSteps: 1,
+    }, deps);
+
+    expect(result).toMatchObject({
+      status: "running",
+      phase: "inventory",
+      error: SHOPIFY_BULK_CONTENTION_ERROR,
+    });
+    expect(failStep).toHaveBeenCalledWith(
+      inventory.step.id,
+      "worker-1",
+      expect.any(Error),
+      null,
+    );
+    expect(deps.failRun).not.toHaveBeenCalled();
+  });
+
+  it("does not classify a different error containing the contention text as transient", async () => {
+    const inventory = claim("inventory", 5);
+    const failStep = vi.fn().mockResolvedValue("failed");
+    const wrappedError = `Inventory parser failed after: ${SHOPIFY_BULK_CONTENTION_ERROR}`;
+    const deps = dependencies({
+      claimNext: vi.fn().mockResolvedValue(inventory),
+      executePhase: vi.fn().mockRejectedValue(new Error(wrappedError)),
+      failStep,
+    });
+
+    const result = await runDurableShopifySyncSlice({
+      cycleKey: "2026-08-29",
+      workerId: "worker-1",
+      maxSteps: 1,
+    }, deps);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      phase: "inventory",
+      error: wrappedError,
+    });
+    expect(failStep).toHaveBeenCalledWith(
+      inventory.step.id,
+      "worker-1",
+      expect.any(Error),
+      undefined,
+    );
+    expect(deps.failRun).toHaveBeenCalledWith("shopify-run-1", [wrappedError]);
+  });
+
+  it("continues from recovered inventory into translations after contention clears", async () => {
+    const inventory = claim("inventory", 6);
+    const translations = claim("translations");
+    const deps = dependencies({
+      claimNext: vi.fn()
+        .mockResolvedValueOnce(inventory)
+        .mockResolvedValueOnce(translations),
+      executePhase: vi.fn().mockResolvedValue({
+        status: "completed",
+        checkpoint: { completedAt: "2026-08-31T07:00:00.000Z" },
+      }),
+      getSummary: vi.fn().mockResolvedValue({
+        total: 6,
+        pending: 2,
+        running: 0,
+        completed: 4,
+        failed: 0,
+      }),
+    });
+
+    const result = await runDurableShopifySyncSlice({
+      cycleKey: "2026-08-29",
+      workerId: "worker-1",
+      maxSteps: 2,
+    }, deps);
+
+    expect(result).toMatchObject({ status: "running", processed: 2 });
+    expect(deps.completeStep).toHaveBeenNthCalledWith(
+      1,
+      inventory.step.id,
+      "worker-1",
+      { checkpoint: { completedAt: "2026-08-31T07:00:00.000Z" } },
+    );
+    expect(deps.completeStep).toHaveBeenNthCalledWith(
+      2,
+      translations.step.id,
+      "worker-1",
+      { checkpoint: { completedAt: "2026-08-31T07:00:00.000Z" } },
+    );
   });
 });

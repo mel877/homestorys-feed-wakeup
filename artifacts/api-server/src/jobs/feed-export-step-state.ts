@@ -66,10 +66,10 @@ export function failStep(
   workerId: string,
   now: Date,
   error: string,
-  maxAttempts: number,
+  maxAttempts: number | null,
 ): FeedExportStepState {
   assertLeaseOwner(step, workerId);
-  const exhausted = step.attempts >= maxAttempts;
+  const exhausted = maxAttempts !== null && step.attempts >= maxAttempts;
   const backoffMs = Math.min(
     RETRY_BASE_MS * Math.pow(2, Math.max(0, step.attempts - 1)),
     RETRY_MAX_MS,
