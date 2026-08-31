@@ -1,0 +1,98 @@
+Implement Task #100 now.
+
+URGENT deadline:
+Google + Meta feeds must be operational before late morning today.
+
+Use the completed read-only diagnosis as source of truth.
+
+FAILED RUN
+sourceSyncRunId:
+b096d776-af60-47a6-bffe-5c824ef1985e
+
+FAILED STEP:
+inventory
+
+STORED ERROR:
+Cannot create inventory bulk operation: an unrelated Shopify bulk operation is active
+
+CURRENT STATE:
+- products = completed
+- pricing = completed
+- inventory = failed, attempts=5
+- translations = pending
+- images = pending
+- completion = pending
+- inventory checkpoint/cursor = empty
+- no inventory business writes were committed
+
+OBJECTIVE
+
+Make Shopify bulk-operation contention recoverable without changing any feed/business logic, and provide a safe targeted recovery mechanism for this exact failed inventory step.
+
+IMPLEMENT ONLY:
+
+1. Treat:
+   "an unrelated Shopify bulk operation is active"
+   as a TRANSIENT contention condition.
+
+2. For this condition:
+   - do not permanently fail the durable Shopify step after 5 short retries;
+   - return it to a claimable/pending state;
+   - apply bounded backoff;
+   - do not busy-loop;
+   - preserve leases/checkpoints/idempotency.
+
+3. Add a narrowly protected internal recovery route or existing recovery mechanism that can requeue ONLY a failed durable Shopify step for a specified sourceSyncRunId + step name.
+
+Recovery must:
+- require INTERNAL_API_SECRET;
+- reject completed steps;
+- reject steps with non-empty unsafe/incompatible checkpoints if applicable;
+- preserve products/pricing completed state;
+- preserve sourceSyncRunId;
+- reset only inventory status/attempt retry metadata necessary to make it claimable;
+- never create a new cycle;
+- never clear business data.
+
+4. Ensure cycleKey=2026-08-29 remains linked to:
+b096d776-af60-47a6-bffe-5c824ef1985e
+
+5. Add tests for:
+- transient Shopify bulk contention;
+- bounded backoff;
+- step does not become terminal failed from contention;
+- targeted inventory requeue;
+- cannot requeue completed step;
+- existing products/pricing untouched;
+- resume inventory -> translations after contention clears.
+
+DO NOT:
+- change Google feeds;
+- change Meta feeds;
+- change CHF logic;
+- change exclusions;
+- change guardrail 10%;
+- change pricing/products logic;
+- add migration unless absolutely unavoidable;
+- call production;
+- call Shopify;
+- run a sync;
+- create a new cycle;
+- Publish.
+
+VALIDATE:
+- targeted tests
+- full API tests
+- API typecheck
+- API build
+- git diff --check
+- blocker review
+
+AT END REPORT:
+- exact commit hash
+- exact recovery endpoint/mechanism
+- exact authenticated request needed to requeue ONLY inventory for sourceSyncRunId b096d776-af60-47a6-bffe-5c824ef1985e
+- whether migration required
+- whether existing cycleKey=2026-08-29 resumes safely
+- tests/results
+- DO NOT PUBLISH
