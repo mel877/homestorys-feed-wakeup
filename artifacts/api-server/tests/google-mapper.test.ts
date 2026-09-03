@@ -132,6 +132,7 @@ function makeConfig(): AppConfig {
         AT: { country: "AT", language: "de", currency: "EUR" },
         CH_DE: { country: "CH", language: "de", currency: "CHF" },
         CH_FR: { country: "CH", language: "fr", currency: "CHF" },
+        LU_DE: { country: "LU", language: "de", currency: "EUR" },
       },
       language_masters: {
         fr: { markets: ["BE_FR", "FR"] },
@@ -262,6 +263,30 @@ describe("Google product API identifier contract", () => {
 });
 
 describe("mapToGoogleResource", () => {
+  it.each([
+    ["FR", "fr", "https://shop-fr.homestorys.com/products/fauteuil?variant=101", "https://shop.homestorys.com/fr/products/fauteuil?variant=101"],
+    ["BE_FR", "fr", "https://shop-fr.homestorys.com/products/fauteuil?variant=102", "https://shop.homestorys.com/fr/products/fauteuil?variant=102"],
+    ["DE", "de", "https://shop-de.homestorys.com/products/sessel?variant=103", "https://shop.homestorys.com/products/sessel?variant=103"],
+    ["BE_DE", "de", "https://shop-de.homestorys.com/products/sessel?variant=104", "https://shop.homestorys.com/products/sessel?variant=104"],
+    ["AT", "de", "https://shop-de.homestorys.com/products/sessel?variant=105", "https://shop.homestorys.com/products/sessel?variant=105"],
+    ["LU_DE", "de", "https://shop-de.homestorys.com/products/sessel?variant=106", "https://shop.homestorys.com/products/sessel?variant=106"],
+    ["CH_FR", "fr", "https://shop.homestorys.com/fr-ch/products/fauteuil?variant=107", "https://shop.homestorys.com/fr-ch/products/fauteuil?variant=107"],
+    ["CH_DE", "de", "https://shop.homestorys.com/de-ch/products/sessel?variant=108", "https://shop.homestorys.com/de-ch/products/sessel?variant=108"],
+  ] as const)(
+    "normalizes %s links for both Google API and TSV without changing the product path or variant",
+    (market, language, productUrl, expectedLink) => {
+      const canonical = makeCanonical({ market, language, productUrl });
+      const resource = mapToGoogleResource(canonical, makeConfig())!;
+      const row = mapToGoogleRow(canonical, makeConfig())!;
+
+      expect(resource.link).toBe(expectedLink);
+      expect(row.link).toBe(expectedLink);
+      expect(resource.offerId).toBe(canonical.variantId);
+      expect(row.price).toBe(`${canonical.price.amount.toFixed(2)} ${canonical.price.currency}`);
+      expect(row.availability).toBe("in stock");
+    },
+  );
+
   it("returns null when primary image is missing", () => {
     const canonical = makeCanonical({ primaryImage: null });
     const config = makeConfig();

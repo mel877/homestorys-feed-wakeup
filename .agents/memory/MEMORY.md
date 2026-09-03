@@ -26,3 +26,4 @@
 - [Durable external-job checkpoints](durable-external-job-checkpoints.md) — data commits and cursor advancement need one lease-fenced transaction; external job creation also needs durable correlation.
 - [Meta market snapshot composition](meta-market-snapshot-composition.md) — filter shared COUNTRY rows by exact market-ID suffix; resolve market snapshots by marketCode plus language.
 - [Durable pricing progress](durable-pricing-progress.md) — batch pure validation work per poll; fence market-price writes and their checkpoint in one transaction.
+- [Canonical feed URL paths](canonical-feed-url-paths.md) — non-Swiss German product links use the canonical origin root; `/de/products/...` currently returns 404.

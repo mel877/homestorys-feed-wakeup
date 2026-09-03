@@ -23,6 +23,7 @@ import type { CanonicalProduct } from "../../canonical/types";
 import type { AppConfig } from "../../config/schemas";
 import { isValidSalePrice } from "../../promotions/index";
 import { buildFeedDescription } from "../feed-content";
+import { normalizeMarketProductLink } from "../product-link";
 import { buildMarketShipping } from "../shipping";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -438,7 +439,7 @@ export function mapToGoogleResource(
     offerId: canonical.variantId,
     title: canonical.title.slice(0, 150),
     description: buildDescription(canonical),
-    link: canonical.productUrl,
+    link: normalizeMarketProductLink(canonical.productUrl, canonical.market),
     imageLink: canonical.primaryImage.url,
     additionalImageLinks,
     lifestyleImageLinks,

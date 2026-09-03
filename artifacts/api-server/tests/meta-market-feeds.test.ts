@@ -52,6 +52,41 @@ const country = (
 
 describe("complete Meta market feed composition", () => {
   it.each([
+    ["FR", "EUR", "https://shop-fr.homestorys.com/products/fauteuil?variant=201", "https://shop.homestorys.com/fr/products/fauteuil?variant=201"],
+    ["BE_FR", "EUR", "https://shop-fr.homestorys.com/products/fauteuil?variant=202", "https://shop.homestorys.com/fr/products/fauteuil?variant=202"],
+    ["DE", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=203", "https://shop.homestorys.com/products/sessel?variant=203"],
+    ["BE_DE", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=204", "https://shop.homestorys.com/products/sessel?variant=204"],
+    ["AT", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=205", "https://shop.homestorys.com/products/sessel?variant=205"],
+    ["LU_DE", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=206", "https://shop.homestorys.com/products/sessel?variant=206"],
+    ["CH_FR", "CHF", "https://shop.homestorys.com/fr-ch/products/fauteuil?variant=207", "https://shop.homestorys.com/fr-ch/products/fauteuil?variant=207"],
+    ["CH_DE", "CHF", "https://shop.homestorys.com/de-ch/products/sessel?variant=208", "https://shop.homestorys.com/de-ch/products/sessel?variant=208"],
+  ] as const)(
+    "normalizes only the %s MARKET link and preserves every other Meta field",
+    (marketCode, currency, sourceLink, expectedLink) => {
+      const id = `variant-1_${marketCode}`;
+      const languageRow = { ...language(id), link: sourceLink };
+      const expectedWithoutNormalizedLink = {
+        ...base(id),
+        ...languageRow,
+        ...country(id, currency),
+      };
+      const rows = composeMetaMarketRows({
+        marketCode,
+        expectedCurrency: currency,
+        baseRows: [base(id)],
+        languageRows: [languageRow],
+        countryRows: [country(id, currency)],
+      });
+      const { link, ...actualWithoutLink } = rows[0]!;
+      const { link: originalLink, ...expectedWithoutLink } = expectedWithoutNormalizedLink;
+
+      expect(link).toBe(expectedLink);
+      expect(actualWithoutLink).toEqual(expectedWithoutLink);
+      expect(languageRow.link).toBe(originalLink);
+    },
+  );
+
+  it.each([
     ["FR", "fr", "EUR"],
     ["BE_FR", "fr", "EUR"],
     ["BE_DE", "de", "EUR"],
@@ -79,6 +114,7 @@ describe("complete Meta market feed composition", () => {
     expect(result).toEqual([{
       ...base("variant-1_FR"),
       ...language("variant-1_FR"),
+      link: "https://shop.homestorys.com/fr/variant-1_FR",
       ...country("variant-1_FR"),
     }]);
     expect(Object.keys(result[0]!)).toEqual(META_MARKET_FEED_HEADERS);

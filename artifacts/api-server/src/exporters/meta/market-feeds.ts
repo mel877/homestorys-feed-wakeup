@@ -6,6 +6,7 @@ import {
   openFeedFileReadStream,
 } from "../../lib/storage";
 import { parseDelimitedRecords } from "../../validation/feed-validator";
+import { normalizeMarketProductLink } from "../product-link";
 import {
   META_BASE_HEADERS,
   META_COUNTRY_HEADERS,
@@ -102,6 +103,7 @@ export function composeMetaMarketRows(input: {
       return {
         ...baseRow,
         ...languageRow,
+        link: normalizeMarketProductLink(languageRow.link, input.marketCode),
         ...countryRow,
       };
     });
