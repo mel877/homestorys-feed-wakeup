@@ -53,6 +53,107 @@ export interface RequeuedMetaFinalizers {
   }>;
 }
 
+export class DurableFeedRunAbandonError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = "DurableFeedRunAbandonError";
+  }
+}
+
+export interface AbandonedDurableFeedRun {
+  syncRunId: string;
+  abandonedSteps: number;
+}
+
+export async function abandonDurableFeedRun(
+  syncRunId: string,
+): Promise<AbandonedDurableFeedRun> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      SELECT pg_advisory_xact_lock(hashtext('durable-feed-plan'))
+    `);
+
+    const runResult = await tx.execute(sql`
+      SELECT
+        id,
+        run_type,
+        status,
+        metadata->>'architecture' AS architecture
+      FROM sync_runs
+      WHERE id = ${syncRunId}::uuid
+      FOR UPDATE
+    `);
+    const run = runResult.rows[0] as {
+      id: string;
+      run_type: string;
+      status: string;
+      architecture: string | null;
+    } | undefined;
+
+    if (!run) {
+      throw new DurableFeedRunAbandonError("Durable feed run was not found", 404);
+    }
+    if (run.run_type !== "export") {
+      throw new DurableFeedRunAbandonError(
+        "Only export runs can be abandoned as durable feed runs",
+        409,
+      );
+    }
+    if (run.architecture !== "durable-feed") {
+      throw new DurableFeedRunAbandonError(
+        "Run is not a durable feed run",
+        409,
+      );
+    }
+    if (run.status !== "failed") {
+      throw new DurableFeedRunAbandonError(
+        "Durable feed run must already be failed before abandonment",
+        409,
+      );
+    }
+
+    const activeStepsResult = await tx.execute(sql`
+      SELECT id, status
+      FROM feed_export_steps
+      WHERE sync_run_id = ${syncRunId}::uuid
+        AND status IN ('pending', 'running')
+      FOR UPDATE
+    `);
+    const activeSteps = activeStepsResult.rows as Array<{
+      id: string;
+      status: string;
+    }>;
+    if (activeSteps.some((step) => step.status === "running")) {
+      throw new DurableFeedRunAbandonError(
+        "Durable feed run has running steps and cannot be abandoned",
+        409,
+      );
+    }
+
+    const abandoned = await tx.execute(sql`
+      UPDATE feed_export_steps
+      SET
+        status = 'failed',
+        available_at = NULL,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        last_error = 'abandoned: obsolete pre-Task #101 run',
+        updated_at = NOW()
+      WHERE sync_run_id = ${syncRunId}::uuid
+        AND status = 'pending'
+      RETURNING id
+    `);
+
+    return {
+      syncRunId,
+      abandonedSteps: abandoned.rows.length,
+    };
+  });
+}
+
 function toState(step: FeedExportStep): FeedExportStepState {
   return {
     status: step.status as FeedExportStepState["status"],

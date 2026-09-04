@@ -29,6 +29,7 @@ import { tryAcquireMarketPriceWriteLock } from "../shopify/market-price-write-lo
 import feedPumpRouter from "./feed-pump";
 import feedPlanRouter from "./feed-plan";
 import feedFinalizersRouter from "./feed-finalizers";
+import feedRunsRouter from "./feed-runs";
 import nightlyCycleRouter from "./nightly-cycle";
 import shopifyRecoveryRouter from "./shopify-recovery";
 
@@ -99,6 +100,7 @@ router.use(requireInternalAuth);
 router.use(feedPumpRouter);
 router.use(feedPlanRouter);
 router.use(feedFinalizersRouter);
+router.use(feedRunsRouter);
 router.use(nightlyCycleRouter);
 router.use(shopifyRecoveryRouter);
 
