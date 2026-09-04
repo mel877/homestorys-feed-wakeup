@@ -28,3 +28,6 @@ META_DRY_RUN = "false"
 
 [nix]
 channel = "stable-25_05"
+
+[objectStorage]
+defaultBucketID = "replit-objstore-a3ea753a-6ed1-4690-8ae1-829c2fc8f039"
