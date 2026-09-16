@@ -247,7 +247,7 @@ export async function startScheduler(): Promise<void> {
       })
       .where(and(
         eq(syncRunsTable.status, "running"),
-        sql`COALESCE(${syncRunsTable.metadata}->>'architecture', '') <> 'durable-shopify'`,
+        sql`COALESCE(${syncRunsTable.metadata}->>'architecture', '') NOT IN ('durable-shopify', 'durable-feed')`,
       ))
       .returning({ id: syncRunsTable.id });
     if (reaped.length > 0) {
