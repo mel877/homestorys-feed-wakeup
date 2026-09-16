@@ -1,0 +1,28 @@
+name: Abandon old durable feed
+
+on:
+  workflow_dispatch:
+
+jobs:
+  abandon:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Abandon failed feed run
+        run: |
+          HTTP_CODE=$(curl -sS \
+            -o response.json \
+            -w "%{http_code}" \
+            -X POST \
+            "https://homestorys-flux.eteamsys.be/api/internal/feed-runs/abandon" \
+            -H "Authorization: Bearer $INTERNAL_API_SECRET" \
+            -H "Content-Type: application/json" \
+            --data '{"syncRunId":"74092150-28d6-4db6-878a-2f52e4d85c05","confirmation":"ABANDON_DURABLE_FEED_RUN"}')
+
+          echo "HTTP status: $HTTP_CODE"
+          cat response.json
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            exit 1
+          fi
+        env:
+          INTERNAL_API_SECRET: ${{ secrets.INTERNAL_API_SECRET }}
