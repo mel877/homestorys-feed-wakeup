@@ -346,12 +346,16 @@ export async function persistDurableFeedRunPlan(
       }
     }
 
-    const [active] = await tx
-      .select({ id: feedExportStepsTable.id })
-      .from(feedExportStepsTable)
-      .where(inArray(feedExportStepsTable.status, ["pending", "running"]))
-      .limit(1);
-    if (active) {
+    const active = await tx.execute(sql`
+      SELECT step.id
+      FROM feed_export_steps AS step
+      INNER JOIN sync_runs AS run
+        ON run.id = step.sync_run_id
+      WHERE step.status IN ('pending', 'running')
+        AND run.status = 'running'
+      LIMIT 1
+    `);
+    if (active.rows.length > 0) {
       return { status: "conflict", insertedSteps: 0 };
     }
 

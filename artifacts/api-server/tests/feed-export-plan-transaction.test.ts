@@ -7,11 +7,13 @@ const mocks = vi.hoisted(() => {
   const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
     const staged: string[] = [];
     const tx = {
-      execute: vi.fn().mockResolvedValue(undefined),
+      execute: vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValue({ rows: activeRows }),
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
-            limit: vi.fn().mockResolvedValue(activeRows),
+            limit: vi.fn().mockResolvedValue([]),
           })),
         })),
       })),
