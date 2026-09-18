@@ -18,7 +18,7 @@ concurrency:
 jobs:
   nightly-cycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
 
     env:
       NIGHTLY_CYCLE_URL: ${{ vars.NIGHTLY_CYCLE_URL }}
@@ -44,7 +44,7 @@ jobs:
 
           echo "Starting durable nightly cycle: $cycle_key"
 
-          deadline=$(( $(date +%s) + 10740 ))
+          deadline=$(( $(date +%s) + 17700 ))
 
           while [ "$(date +%s)" -lt "$deadline" ]; do
             body_file="$(mktemp)"
@@ -140,5 +140,5 @@ jobs:
             esac
           done
 
-          echo "Nightly cycle watchdog reached 179 minutes."
+          echo "Nightly cycle watchdog reached 295 minutes."
           exit 1
