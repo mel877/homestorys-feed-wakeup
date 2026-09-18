@@ -18,6 +18,7 @@ function dependencies(
     planFeed: vi.fn(),
     pumpFeed: vi.fn(),
     getFeedSummary: vi.fn(),
+    completeFeedRun: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

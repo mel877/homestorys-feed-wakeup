@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { planDurableFeedRun } from "./durable-feed-planner";
 import { runDurableFeedPump } from "./durable-feed-pump";
-import { getFeedExportStepSummary } from "./feed-export-step-repository";
+import { getFeedExportStepSummary, completeFeedExportRun } from "./feed-export-step-repository";
 import {
   runDurableShopifySyncSlice,
   type DurableShopifySyncResult,
@@ -32,6 +32,8 @@ export interface NightlyCycleDependencies {
     pending: number;
     running: number;
     completed: number;
+  completeFeedRun(runId: string): Promise<void>;
+  completeFeedRun(runId: string): Promise<void>;
     failed: number;
   }>;
 }
@@ -49,6 +51,7 @@ const defaultDependencies: NightlyCycleDependencies = {
   planFeed: (options) => planDurableFeedRun(options),
   pumpFeed: runDurableFeedPump,
   getFeedSummary: getFeedExportStepSummary,
+  completeFeedRun: completeFeedExportRun,
 };
 
 export async function advanceNightlyCycle(
@@ -111,6 +114,7 @@ export async function advanceNightlyCycle(
     };
   }
   if (summary.total > 0 && summary.completed === summary.total) {
+    await dependencies.completeFeedRun(plan.runId);
     return {
       status: "completed",
       phase: "feeds",

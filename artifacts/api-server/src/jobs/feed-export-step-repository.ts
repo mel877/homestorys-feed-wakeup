@@ -713,3 +713,13 @@ export async function withFeedFinalizationLock<T>(
     client.release();
   }
 }
+export async function completeFeedExportRun(syncRunId: string): Promise<void> {
+  await db
+    .update(syncRunsTable)
+    .set({
+      status: "completed",
+      finishedAt: new Date(),
+      durationMs: sql<number>`EXTRACT(EPOCH FROM (NOW() - ${syncRunsTable.startedAt})) * 1000`,
+    })
+    .where(eq(syncRunsTable.id, syncRunId));
+}
