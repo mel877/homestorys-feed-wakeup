@@ -264,11 +264,11 @@ describe("Google product API identifier contract", () => {
 
 describe("mapToGoogleResource", () => {
   it.each([
-    ["FR", "fr", "https://shop-fr.homestorys.com/products/fauteuil?variant=101", "https://shop.homestorys.com/fr/products/fauteuil?variant=101"],
+    ["FR", "fr", "https://shop-fr.homestorys.com/products/fauteuil?variant=101", "https://shop-fr.homestorys.com/products/fauteuil?variant=101"],
     ["BE_FR", "fr", "https://shop-fr.homestorys.com/products/fauteuil?variant=102", "https://shop.homestorys.com/fr/products/fauteuil?variant=102"],
-    ["DE", "de", "https://shop-de.homestorys.com/products/sessel?variant=103", "https://shop.homestorys.com/products/sessel?variant=103"],
+    ["DE", "de", "https://shop-de.homestorys.com/products/sessel?variant=103", "https://shop-de.homestorys.com/products/sessel?variant=103"],
     ["BE_DE", "de", "https://shop-de.homestorys.com/products/sessel?variant=104", "https://shop.homestorys.com/products/sessel?variant=104"],
-    ["AT", "de", "https://shop-de.homestorys.com/products/sessel?variant=105", "https://shop.homestorys.com/products/sessel?variant=105"],
+    ["AT", "de", "https://shop-de.homestorys.com/products/sessel?variant=105", "https://shop-de.homestorys.com/products/sessel?variant=105"],
     ["LU_DE", "de", "https://shop-de.homestorys.com/products/sessel?variant=106", "https://shop.homestorys.com/products/sessel?variant=106"],
     ["CH_FR", "fr", "https://shop.homestorys.com/fr-ch/products/fauteuil?variant=107", "https://shop.homestorys.com/fr-ch/products/fauteuil?variant=107"],
     ["CH_DE", "de", "https://shop.homestorys.com/de-ch/products/sessel?variant=108", "https://shop.homestorys.com/de-ch/products/sessel?variant=108"],

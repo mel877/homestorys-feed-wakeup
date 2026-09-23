@@ -49,14 +49,13 @@ const country = (
   availability: "in stock",
   shipping: `FR::Standard:9.50 ${currency}`,
 });
-
 describe("complete Meta market feed composition", () => {
   it.each([
-    ["FR", "EUR", "https://shop-fr.homestorys.com/products/fauteuil?variant=201", "https://shop.homestorys.com/fr/products/fauteuil?variant=201"],
+    ["FR", "EUR", "https://shop-fr.homestorys.com/products/fauteuil?variant=201", "https://shop-fr.homestorys.com/products/fauteuil?variant=201"],
     ["BE_FR", "EUR", "https://shop-fr.homestorys.com/products/fauteuil?variant=202", "https://shop.homestorys.com/fr/products/fauteuil?variant=202"],
-    ["DE", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=203", "https://shop.homestorys.com/products/sessel?variant=203"],
+    ["DE", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=203", "https://shop-de.homestorys.com/products/sessel?variant=203"],
     ["BE_DE", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=204", "https://shop.homestorys.com/products/sessel?variant=204"],
-    ["AT", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=205", "https://shop.homestorys.com/products/sessel?variant=205"],
+    ["AT", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=205", "https://shop-de.homestorys.com/products/sessel?variant=205"],
     ["LU_DE", "EUR", "https://shop-de.homestorys.com/products/sessel?variant=206", "https://shop.homestorys.com/products/sessel?variant=206"],
     ["CH_FR", "CHF", "https://shop.homestorys.com/fr-ch/products/fauteuil?variant=207", "https://shop.homestorys.com/fr-ch/products/fauteuil?variant=207"],
     ["CH_DE", "CHF", "https://shop.homestorys.com/de-ch/products/sessel?variant=208", "https://shop.homestorys.com/de-ch/products/sessel?variant=208"],
@@ -114,7 +113,7 @@ describe("complete Meta market feed composition", () => {
     expect(result).toEqual([{
       ...base("variant-1_FR"),
       ...language("variant-1_FR"),
-      link: "https://shop.homestorys.com/fr/variant-1_FR",
+     link: "https://shop-fr.homestorys.com/variant-1_FR",
       ...country("variant-1_FR"),
     }]);
     expect(Object.keys(result[0]!)).toEqual(META_MARKET_FEED_HEADERS);
