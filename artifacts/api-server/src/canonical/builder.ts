@@ -284,10 +284,7 @@ export function buildCanonical(
   const marketBaseUrl = market.base_url ?? "https://shop.homestorys.com/";
   // A language alias must use its own storefront URL, not the source
   // commercial market's URL (for example Swiss French reuses CH pricing).
-  const productUrl = market.pricing_market
-    ? buildShopifyProductUrl(marketBaseUrl, localizedHandle, variant.shopifyGid)
-    : pricing.productUrl
-      ?? buildShopifyProductUrl(marketBaseUrl, localizedHandle, variant.shopifyGid);
+  const productUrl = buildShopifyProductUrl(marketBaseUrl, localizedHandle, variant.shopifyGid);
 
   // ── Weight ────────────────────────────────────────────────────────────────
   const weightNorm = normaliseWeight(variant.weight, variant.weightUnit);

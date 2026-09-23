@@ -250,7 +250,33 @@ describe("Language market aliases", () => {
     );
   });
 });
+describe("BE_FR localized product URL", () => {
+  it("uses the localized French handle instead of the pricing product URL handle", () => {
+    const fixture = loadFixture("normal_product");
+    const input = makeInput(fixture);
 
+    const frenchTranslation = input.translations.find(
+      (translation) => translation.language === "fr",
+    );
+    expect(frenchTranslation).toBeDefined();
+    frenchTranslation!.handle = "produit-francais-localise";
+
+    const beFrPricing = input.marketVariants.find(
+      (market) => market.marketCode === "BE_FR",
+    );
+    expect(beFrPricing).toBeDefined();
+    beFrPricing!.productUrl =
+      "https://shop.homestorys.com/products/default-german-handle?variant=123";
+
+    const canonical = buildCanonical(input, "BE_FR");
+
+    expect(canonical).not.toBeNull();
+    expect(canonical!.productUrl).toContain(
+      "/products/produit-francais-localise?variant=",
+    );
+    expect(canonical!.productUrl).not.toContain("default-german-handle");
+  });
+});
 describe("Swiss currency guard", () => {
   it("accepts a CHF price for CH_DE", () => {
     const canonical = buildCanonical(makeSwissInput("CHF"), "CH_DE");
