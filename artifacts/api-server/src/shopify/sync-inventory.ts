@@ -9,7 +9,7 @@
  */
 
 import { db, variantsTable, inventoryLevelsTable, marketVariantsTable } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { logger as rootLogger } from "../lib/logger";
 import { loadConfig } from "../config";
 import type { ShopifyClient } from "./client";
@@ -186,17 +186,17 @@ export async function syncInventory(
   }
   logger.info("Starting inventory sync via bulk operation");
 
-  // Load variant GID → DB ID map
-  const dbVariants = await db
-    .select({ id: variantsTable.id, shopifyGid: variantsTable.shopifyGid, inventoryItemId: variantsTable.inventoryItemId })
-    .from(variantsTable);
+  let variantByGid = new Map<string, {
+    id: string;
+    shopifyGid: string;
+    inventoryItemId: string | null;
+  }>();
 
-  const variantByGid = new Map(dbVariants.map((v) => [v.shopifyGid, v]));
-  const variantByInventoryItemGid = new Map(
-    dbVariants
-      .filter((v) => v.inventoryItemId)
-      .map((v) => [v.inventoryItemId!, v]),
-  );
+  let variantByInventoryItemGid = new Map<string, {
+    id: string;
+    shopifyGid: string;
+    inventoryItemId: string | null;
+  }>();
 
   const durableMode = !!options.bulkResultUrl && !!options.commitUnit;
   const initialPendingInventoryGroup = options.pendingInventoryGroup;
@@ -244,7 +244,31 @@ export async function syncInventory(
   }
 
   logger.info({ inventoryItems: inventoryItems.size, totalNodes: nodeCount }, "Inventory bulk complete");
+  // Load only the variants referenced by this inventory slice.
+  const variantGids = [...inventoryItems.values()]
+    .map((item) => item.variant?.id)
+    .filter((gid): gid is string => typeof gid === "string");
 
+  if (variantGids.length > 0) {
+    const dbVariants = await db
+      .select({
+        id: variantsTable.id,
+        shopifyGid: variantsTable.shopifyGid,
+        inventoryItemId: variantsTable.inventoryItemId,
+      })
+      .from(variantsTable)
+      .where(inArray(variantsTable.shopifyGid, variantGids));
+
+    variantByGid = new Map(
+      dbVariants.map((variant) => [variant.shopifyGid, variant]),
+    );
+
+    variantByInventoryItemGid = new Map(
+      dbVariants
+        .filter((variant) => variant.inventoryItemId)
+        .map((variant) => [variant.inventoryItemId!, variant]),
+    );
+  }
   // Build rows to upsert
   type InventoryInsert = typeof inventoryLevelsTable.$inferInsert;
   const rows: InventoryInsert[] = [];
