@@ -463,6 +463,9 @@ function isExcludedFeedImage(img: ClassifiedImage): boolean {
     return true;
   }
 
+  // Mobitec material / finish swatches: Mobitec_Eiche_E02, Mobitec_Nussbaum_N11, Mobitec_K203_E10, etc.
+  if (/mobitec[-_][^/?]+[-_][a-z]\d{2}_[0-9a-f-]{20,}\.png/i.test(url)) return true;
+
   // Swatch code: "C148 · TENDER EARTH", "CF171 · SOFT GREY", "C049-GRAPHITE"
   if (/^cf?\d+[\s·\-–]/i.test(img.altText ?? "")) return true;
 
