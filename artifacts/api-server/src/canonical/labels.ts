@@ -21,6 +21,7 @@ export interface CustomLabels {
 
 export interface LabelsInput {
   isOutlet: boolean;
+  isExpo: boolean;
   isOnSale: boolean;
   isNew: boolean;
   isBestseller: boolean;
@@ -48,6 +49,7 @@ export function computeCustomLabels(input: LabelsInput): CustomLabels {
  * Lifecycle label — priority: outlet > sale > new > evergreen
  */
 function computeLifecycleLabel(input: LabelsInput): string {
+  if (input.isExpo) return "expo";
   if (input.isOutlet) return "outlet";
   if (input.isOnSale) return "sale";
   if (input.isNew) return "new";
