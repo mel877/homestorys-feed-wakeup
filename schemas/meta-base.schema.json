@@ -62,7 +62,7 @@
     },
     "custom_label_0": {
       "type": "string",
-      "enum": ["outlet", "sale", "new", "evergreen"]
+      "enum": ["outlet", "sale", "new", "evergreen", "expo"]
     },
     "custom_label_1": {
       "type": "string",

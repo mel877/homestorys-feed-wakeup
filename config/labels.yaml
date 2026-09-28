@@ -11,6 +11,7 @@ lifecycle_values:
   - sale
   - new
   - evergreen
+  - expo
 
 # Performance / bestseller classes
 performance_values:

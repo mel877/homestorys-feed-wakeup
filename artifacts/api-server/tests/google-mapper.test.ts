@@ -168,7 +168,7 @@ function makeConfig(): AppConfig {
       collection_mappings: [],
     },
     labels: {
-      lifecycle_values: ["outlet", "sale", "new", "evergreen"],
+      lifecycle_values: ["outlet", "sale", "new", "evergreen", "expo"],
       performance_values: ["bestseller", "high", "medium", "low", "unknown"],
       price_bands: [],
       discount_buckets: [],

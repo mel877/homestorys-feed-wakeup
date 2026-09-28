@@ -102,7 +102,7 @@ const testConfig: AppConfig = {
     collection_mappings: [],
   },
   labels: {
-    lifecycle_values: ["outlet", "sale", "new", "evergreen"],
+    lifecycle_values: ["outlet", "sale", "new", "evergreen", "expo"],
     performance_values: ["bestseller", "high", "medium", "low", "unknown"],
     price_bands: [
       { key: "0_500", min: 0, max: 499.99 },
