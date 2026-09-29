@@ -25,7 +25,7 @@ while (( SECONDS < deadline )); do
   : > "$response_file"
   http_code="$(
     curl --silent --show-error \
-      --max-time 90 \
+      --max-time 180 \
       --connect-timeout 15 \
       --output "$response_file" \
       --write-out '%{http_code}' \

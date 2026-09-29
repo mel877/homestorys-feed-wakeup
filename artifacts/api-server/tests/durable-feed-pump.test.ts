@@ -380,5 +380,37 @@ describe("durable feed pump", () => {
 
     expect(maxInFlight).toBe(1);
   });
+
+  it("lets only the first lane claim a finalizer", async () => {
+    const claimNext = vi.fn(async () => null);
+    const deps = dependencies(claimNext);
+
+    await runDurableFeedPump(
+      { workerId: "pump-worker", concurrency: 3, maxSteps: 16 },
+      deps,
+    );
+
+    const allowed = claimNext.mock.calls.map((call) =>
+      (call as unknown as [string, { allowFinalize?: boolean }])[1]?.allowFinalize);
+    expect(allowed.filter((value) => value === true)).toHaveLength(1);
+    expect(allowed.filter((value) => value === false)).toHaveLength(2);
+  });
+
+  it("does not start a finalizer when too little budget is left", async () => {
+    let clock = 0;
+    const claimNext = vi.fn(async () => null);
+    const deps = dependencies(claimNext, { now: () => clock });
+    clock = 0;
+    const pending = runDurableFeedPump({ workerId: "pump-worker", budgetMs: 30_000 }, {
+      ...deps,
+      recoverExpired: vi.fn(async () => {
+        clock = 15_000;
+        return 0;
+      }),
+    });
+    await pending;
+
+    expect(claimNext).toHaveBeenCalledWith("pump-worker", { allowFinalize: false });
+  });
 });
 

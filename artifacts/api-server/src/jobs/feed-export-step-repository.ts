@@ -463,18 +463,44 @@ function claimableStepCondition(now: Date) {
  * Claims exactly one eligible step with row locking. Two Autoscale instances
  * cannot receive the same step, and expired leases are reclaimed naturally.
  */
+export interface ClaimFeedExportStepOptions {
+  leaseMs?: number;
+  now?: Date;
+  /** false: only build steps (parallel lanes must not assemble whole files). */
+  allowFinalize?: boolean;
+}
+
 export async function claimNextFeedExportStep(
   workerId: string,
-  options: { leaseMs?: number; now?: Date } = {},
+  options: ClaimFeedExportStepOptions = {},
 ): Promise<FeedExportStepResult | null> {
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
   const now = options.now ?? new Date();
+  const allowFinalize = options.allowFinalize ?? true;
   const claimed = await db.transaction(async (tx) => {
+    // Serialize claims so the "one finalizer at a time" rule below also holds
+    // across overlapping requests. Claims are short, the lock is per tx.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('feed-export-step-claim'))`);
     const result = await tx.execute(sql`
       WITH candidate AS (
         SELECT id
         FROM feed_export_steps AS candidate_step
         WHERE ${claimableStepCondition(now)}
+          AND (
+            candidate_step.stage <> 'finalize'
+            OR (
+              ${allowFinalize}
+              -- A finalizer assembles and validates a whole feed file in
+              -- memory: running several at once exhausted the instance.
+              AND NOT EXISTS (
+                SELECT 1
+                FROM feed_export_steps AS busy_step
+                WHERE busy_step.stage = 'finalize'
+                  AND busy_step.status = 'running'
+                  AND busy_step.lease_expires_at > ${now}
+              )
+            )
+          )
         ORDER BY candidate_step.updated_at ASC, candidate_step.created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1

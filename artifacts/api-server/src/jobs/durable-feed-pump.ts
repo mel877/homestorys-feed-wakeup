@@ -18,6 +18,8 @@ export const MAX_PUMP_BUDGET_MS = 40_000;
 export const DEFAULT_PUMP_MAX_STEPS = 4;
 export const MAX_PUMP_STEPS = 24;
 export const MAX_PUMP_CONCURRENCY = 4;
+/** Do not start a finalizer (a whole-file assembly) with less budget left. */
+export const FINALIZE_MIN_REMAINING_MS = 20_000;
 
 export type PumpStatus =
   | "idle"
@@ -56,7 +58,10 @@ export interface DurableFeedPumpOptions {
 
 export interface DurableFeedPumpDependencies {
   recoverExpired(): Promise<number>;
-  claimNext(workerId: string): Promise<PumpClaim | null>;
+  claimNext(
+    workerId: string,
+    options?: { allowFinalize?: boolean },
+  ): Promise<PumpClaim | null>;
   executeBuild(
     step: PumpClaim["step"],
     workerId: string,
@@ -79,7 +84,7 @@ export interface DurableFeedPumpDependencies {
 function defaultDependencies(): DurableFeedPumpDependencies {
   return {
     recoverExpired: releaseExpiredFeedExportLeases,
-    claimNext: async (workerId) => claimNextFeedExportStep(workerId),
+    claimNext: async (workerId, options) => claimNextFeedExportStep(workerId, options),
     executeBuild: async (step, workerId, config) => {
       if (step.channel === "google") {
         return executeGoogleFeedBuildStep(
@@ -150,14 +155,19 @@ export async function runDurableFeedPump(
   // mostly DB and storage I/O, so a few lanes finish a run several times
   // faster than a single sequential loop. Claims use row locks, so lanes
   // never receive the same step.
-  const lane = async () => {
+  // Only the first lane may take a finalizer, and only with enough budget
+  // left; the other lanes run build batches.
+  const lane = async (laneIndex: number) => {
     while (
       !stopped &&
       started < maxSteps &&
       dependencies.now() - startedAt < budgetMs
     ) {
       started++;
-      const claimed = await dependencies.claimNext(workerId);
+      const remainingMs = budgetMs - (dependencies.now() - startedAt);
+      const claimed = await dependencies.claimNext(workerId, {
+        allowFinalize: laneIndex === 0 && remainingMs >= FINALIZE_MIN_REMAINING_MS,
+      });
       if (!claimed) {
         started--;
         return;
@@ -222,7 +232,7 @@ export async function runDurableFeedPump(
     }
   };
 
-  await Promise.all(Array.from({ length: concurrency }, () => lane()));
+  await Promise.all(Array.from({ length: concurrency }, (_, index) => lane(index)));
   if (stopped) {
     const result = stopped as DurableFeedPumpResult;
     return { ...result, processed, steps };
