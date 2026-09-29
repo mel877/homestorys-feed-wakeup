@@ -303,4 +303,82 @@ describe("durable feed pump", () => {
     expect(mockRunGoogleExport).not.toHaveBeenCalled();
     expect(mockRunMetaExport).not.toHaveBeenCalled();
   });
+
+  it("runs build steps in parallel lanes without claiming a step twice", async () => {
+    const queue = Array.from({ length: 6 }, (_, index) => ({
+      step: step({ id: `step-${index}`, batchIndex: index }),
+      reclaimed: false,
+    }));
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const executeBuild = vi.fn(async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight--;
+      return {};
+    });
+    const deps = dependencies(
+      vi.fn(async () => queue.shift() ?? null),
+      { executeBuild },
+    );
+
+    const result = await runDurableFeedPump(
+      { workerId: "pump-worker", concurrency: 3, maxSteps: 16 },
+      deps,
+    );
+
+    expect(result.status).toBe("processed");
+    expect(result.processed).toBe(6);
+    expect(maxInFlight).toBe(3);
+    expect(new Set(result.steps.map((entry) => entry.id)).size).toBe(6);
+  });
+
+  it("stops every lane after a step failure and reports it", async () => {
+    const queue = Array.from({ length: 6 }, (_, index) => ({
+      step: step({ id: `step-${index}`, batchIndex: index }),
+      reclaimed: false,
+    }));
+    const executeBuild = vi.fn(async (claimed: PumpClaim["step"]) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (claimed.id === "step-1") throw new Error("boom");
+      return {};
+    });
+    const deps = dependencies(
+      vi.fn(async () => queue.shift() ?? null),
+      { executeBuild },
+    );
+
+    const result = await runDurableFeedPump(
+      { workerId: "pump-worker", concurrency: 3, maxSteps: 16 },
+      deps,
+    );
+
+    expect(result.status).toBe("retry");
+    expect(result.error).toBe("boom");
+    expect(deps.failStep).toHaveBeenCalledTimes(1);
+    expect(queue.length).toBeGreaterThan(0);
+  });
+
+  it("stays sequential by default", async () => {
+    const queue = Array.from({ length: 3 }, (_, index) => ({
+      step: step({ id: `step-${index}` }),
+      reclaimed: false,
+    }));
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const executeBuild = vi.fn(async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return {};
+    });
+    const deps = dependencies(vi.fn(async () => queue.shift() ?? null), { executeBuild });
+
+    await runDurableFeedPump({ workerId: "pump-worker" }, deps);
+
+    expect(maxInFlight).toBe(1);
+  });
 });
+

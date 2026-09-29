@@ -42,6 +42,7 @@ export interface NightlyCycleDependencies {
     workerId: string;
     budgetMs: number;
     maxSteps: number;
+    concurrency?: number;
   }): Promise<{ status: string; processed: number; error?: string }>;
   getFeedSummary(runId: string): Promise<FeedRunSummary>;
   completeFeedRun(runId: string): Promise<void>;
@@ -62,6 +63,9 @@ export interface NightlyCycleResult {
   stuckSteps?: SettledDurableFeedRun["stuckSteps"];
   error?: string;
 }
+
+/** Parallel feed steps per nightly request (see runDurableFeedPump). */
+export const FEED_PUMP_CONCURRENCY = 3;
 
 const defaultDependencies: NightlyCycleDependencies = {
   advanceShopify: runDurableShopifySyncSlice,
@@ -96,7 +100,8 @@ async function driveFeedRun(
   const pump = await dependencies.pumpFeed({
     workerId,
     budgetMs: 40_000,
-    maxSteps: 8,
+    maxSteps: 16,
+    concurrency: FEED_PUMP_CONCURRENCY,
   });
   const settled = await dependencies.settleFeedRun(runId);
   const summary = await dependencies.getFeedSummary(runId);

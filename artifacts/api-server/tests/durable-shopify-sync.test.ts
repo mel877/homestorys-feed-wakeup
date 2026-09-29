@@ -410,4 +410,76 @@ describe("durable Shopify sync", () => {
       { checkpoint: { completedAt: "2026-08-31T07:00:00.000Z" } },
     );
   });
+
+  it("keeps advancing the same phase inside one slice while it makes progress", async () => {
+    const inventory = claim("inventory");
+    let offset = 0;
+    const executePhase = vi.fn(async (current: ShopifySyncClaim["step"]) => {
+      offset = Number((current.cursor as { byteOffset?: number } | null)?.byteOffset ?? 0);
+      if (offset >= 3_000) return { status: "completed" as const, checkpoint: { done: true } };
+      return { status: "running" as const, cursor: { byteOffset: offset + 1_000 } };
+    });
+    const deps = dependencies({
+      claimNext: vi.fn().mockResolvedValueOnce(inventory).mockResolvedValue(null),
+      executePhase,
+    });
+
+    await runDurableShopifySyncSlice({
+      cycleKey: "2026-08-30",
+      workerId: "worker-1",
+      maxSteps: 1,
+    }, deps);
+
+    expect(executePhase).toHaveBeenCalledTimes(4);
+    expect(deps.saveProgress).not.toHaveBeenCalled();
+    expect(deps.completeStep).toHaveBeenCalledWith(
+      inventory.step.id,
+      "worker-1",
+      { checkpoint: { done: true } },
+    );
+  });
+
+  it("returns instead of spinning when a phase makes no progress", async () => {
+    const products = claim("products");
+    const executePhase = vi.fn().mockResolvedValue({
+      status: "running",
+      checkpoint: { stage: "polling", operationId: "gid://shopify/BulkOperation/1" },
+    });
+    const deps = dependencies({
+      claimNext: vi.fn().mockResolvedValue(products),
+      executePhase,
+    });
+
+    const result = await runDurableShopifySyncSlice({
+      cycleKey: "2026-08-30",
+      workerId: "worker-1",
+      maxSteps: 1,
+    }, deps);
+
+    expect(result.status).toBe("running");
+    expect(executePhase).toHaveBeenCalledTimes(2);
+    expect(deps.saveProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it("throttles lease renewal instead of renewing on every chunk", async () => {
+    const pricing = claim("pricing");
+    const executePhase = vi.fn(async (_step, context) => {
+      for (let index = 0; index < 50; index++) await context.heartbeat();
+      return { status: "running" as const, checkpoint: { stage: "basePrices" } };
+    });
+    const deps = dependencies({
+      claimNext: vi.fn().mockResolvedValue(pricing),
+      executePhase,
+    });
+
+    await runDurableShopifySyncSlice({
+      cycleKey: "2026-08-30",
+      workerId: "worker-1",
+      maxSteps: 1,
+    }, deps);
+
+    // One renewal before the phase starts, none for the 100 throttled heartbeats.
+    expect(deps.renewLease).toHaveBeenCalledTimes(1);
+  });
 });
+

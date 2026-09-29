@@ -19,6 +19,8 @@ import type { BulkNode } from "./types";
 
 const logger = rootLogger.child({ module: "sync-inventory" });
 export const MAX_DURABLE_INVENTORY_LINES_PER_SLICE = 1_000;
+/** Inventory items committed per bounded read (was 25: ~1,500 HTTP calls). */
+export const MAX_DURABLE_INVENTORY_GROUPS_PER_SLICE = 200;
 
 export interface DurableInventoryGroup {
   parent: InventoryItemNode;
@@ -51,9 +53,14 @@ export async function readDurableInventoryGroups(
     groups.push(current);
     current = null;
   }
-  const firstUncommitted = groups[25];
+  const firstUncommitted = groups[MAX_DURABLE_INVENTORY_GROUPS_PER_SLICE];
   if (firstUncommitted) {
-    return { groups: groups.slice(0, 25), pendingGroup: null, nextByteOffset: firstUncommitted.startOffset, eof: false };
+    return {
+      groups: groups.slice(0, MAX_DURABLE_INVENTORY_GROUPS_PER_SLICE),
+      pendingGroup: null,
+      nextByteOffset: firstUncommitted.startOffset,
+      eof: false,
+    };
   }
   return {
     groups,
@@ -228,13 +235,14 @@ export async function syncInventory(
     });
     // Inventory is committed per bounded read; replay starts at a parent
     // boundary if the next parent did not fit.
-    const groups = grouped.groups.slice(0, 25);
+    const limit = MAX_DURABLE_INVENTORY_GROUPS_PER_SLICE;
+    const groups = grouped.groups.slice(0, limit);
     for (const group of groups) {
       acceptNode(group.parent);
       for (const child of group.children) acceptNode(child);
     }
-    durableNextByteOffset = grouped.groups[25]?.startOffset ?? grouped.nextByteOffset;
-    durableEof = grouped.eof && grouped.groups.length <= 25;
+    durableNextByteOffset = grouped.groups[limit]?.startOffset ?? grouped.nextByteOffset;
+    durableEof = grouped.eof && grouped.groups.length <= limit;
     options.pendingInventoryGroup = grouped.pendingGroup;
   } else {
     const bulkNodes = options.bulkResultUrl

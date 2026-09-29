@@ -37,6 +37,10 @@ import {
 
 export const REQUIRED_SHOPIFY_PHASES = SHOPIFY_PHASES;
 export const MAX_SHOPIFY_SLICE_STEPS = 2;
+/** Lease is 15 minutes: renewing it more often than this only costs SQL round trips. */
+export const SHOPIFY_HEARTBEAT_INTERVAL_MS = 30_000;
+/** Do not start another unit of the same phase with less time than this left. */
+export const SHOPIFY_MIN_CONTINUE_MS = 3_000;
 export {
   SHOPIFY_BULK_CONTENTION_ERROR,
   SHOPIFY_PRODUCTS_BULK_CONTENTION_ERROR,
@@ -431,19 +435,52 @@ export async function runDurableShopifySyncSlice(
           error: "Shopify step lease ownership was lost",
         };
       }
-      const output = await dependencies.executePhase(claim.step, {
-        workerId,
-        budgetMs,
-        deadlineMs,
-        heartbeat: () => dependencies.renewLease(claim.step.id, workerId),
-      });
+      // The lease was just renewed; the phases call heartbeat() before every
+      // chunk they read, so throttle the SQL renewal instead of running one
+      // UPDATE per network chunk.
+      let lastRenewalAt = Date.now();
+      const heartbeat = async () => {
+        if (Date.now() - lastRenewalAt < SHOPIFY_HEARTBEAT_INTERVAL_MS) return true;
+        const ok = await dependencies.renewLease(claim.step.id, workerId);
+        if (ok) lastRenewalAt = Date.now();
+        return ok;
+      };
+      const context = { workerId, budgetMs, deadlineMs, heartbeat };
+      // Keep advancing the same phase while the HTTP budget allows it instead
+      // of returning after a single page/batch: each round trip costs a full
+      // request, a claim and a checkpoint write.
+      let current = claim.step;
+      let output = await dependencies.executePhase(current, context);
+      while (
+        output.status === "running"
+        && deadlineMs - Date.now() >= SHOPIFY_MIN_CONTINUE_MS
+      ) {
+        const next = {
+          ...current,
+          cursor: output.cursor !== undefined ? output.cursor ?? null : current.cursor,
+          checkpoint: output.checkpoint !== undefined
+            ? output.checkpoint ?? null
+            : current.checkpoint,
+        };
+        // No progress (e.g. waiting on a Shopify bulk operation): stop here.
+        if (
+          JSON.stringify(next.cursor) === JSON.stringify(current.cursor)
+          && JSON.stringify(next.checkpoint) === JSON.stringify(current.checkpoint)
+        ) break;
+        current = next;
+        output = await dependencies.executePhase(current, context);
+      }
       if (output.status === "running") {
         const saved = await dependencies.saveProgress(
           claim.step.id,
           workerId,
           {
-            cursor: output.cursor,
-            checkpoint: output.checkpoint,
+            cursor: output.cursor !== undefined
+              ? output.cursor
+              : current.cursor as Record<string, unknown> | null,
+            checkpoint: output.checkpoint !== undefined
+              ? output.checkpoint
+              : current.checkpoint as Record<string, unknown> | null,
           },
         );
         return {

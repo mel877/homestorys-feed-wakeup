@@ -16,7 +16,8 @@ import { executeDurableFeedFinalizationStep } from "../exporters/durable-feed-fi
 export const DEFAULT_PUMP_BUDGET_MS = 30_000;
 export const MAX_PUMP_BUDGET_MS = 40_000;
 export const DEFAULT_PUMP_MAX_STEPS = 4;
-export const MAX_PUMP_STEPS = 8;
+export const MAX_PUMP_STEPS = 24;
+export const MAX_PUMP_CONCURRENCY = 4;
 
 export type PumpStatus =
   | "idle"
@@ -48,6 +49,8 @@ export interface DurableFeedPumpOptions {
   workerId?: string;
   budgetMs?: number;
   maxSteps?: number;
+  /** Steps processed in parallel inside one request (default 1). */
+  concurrency?: number;
   config?: AppConfig;
 }
 
@@ -119,89 +122,110 @@ export async function runDurableFeedPump(
   );
   const workerId = options.workerId ?? `feed-pump-${randomUUID()}`;
   const config = options.config ?? loadConfig();
+  const concurrency = Math.min(
+    Math.max(1, Math.floor(options.concurrency ?? 1)),
+    MAX_PUMP_CONCURRENCY,
+  );
   const reclaimed = await dependencies.recoverExpired();
   const steps: DurableFeedPumpResult["steps"] = [];
   let processed = 0;
+  let started = 0;
+  let stopped: DurableFeedPumpResult | null = null;
 
-  while (
-    steps.length < maxSteps &&
-    dependencies.now() - startedAt < budgetMs
-  ) {
-    const claimed = await dependencies.claimNext(workerId);
-    if (!claimed) break;
+  const stop = (status: PumpStatus, error: string) => {
+    if (stopped) return;
+    const elapsedMs = Math.max(0, dependencies.now() - startedAt);
+    stopped = {
+      status,
+      processed,
+      reclaimed,
+      elapsedMs,
+      remainingBudgetMs: Math.max(0, budgetMs - elapsedMs),
+      steps,
+      error,
+    };
+  };
 
-    try {
-      if (claimed.step.stage === "build") {
-        await dependencies.executeBuild(claimed.step, workerId, config);
-      } else if (claimed.step.stage === "finalize") {
-        await dependencies.executeFinalize(claimed.step, workerId, config);
-      } else {
-        throw new Error(`Unsupported durable feed step stage: ${claimed.step.stage}`);
+  // Each lane claims and runs steps one after the other. Build steps are
+  // mostly DB and storage I/O, so a few lanes finish a run several times
+  // faster than a single sequential loop. Claims use row locks, so lanes
+  // never receive the same step.
+  const lane = async () => {
+    while (
+      !stopped &&
+      started < maxSteps &&
+      dependencies.now() - startedAt < budgetMs
+    ) {
+      started++;
+      const claimed = await dependencies.claimNext(workerId);
+      if (!claimed) {
+        started--;
+        return;
       }
-      steps.push({
-        id: claimed.step.id,
-        stage: claimed.step.stage,
-        channel: claimed.step.channel,
-        status: "processed",
-        reclaimed: claimed.reclaimed,
-      });
-      processed++;
-    } catch (error) {
-      const finalizationConflict = claimed.step.stage === "finalize"
-        && error instanceof Error
-        && error.message.startsWith("Feed finalization is already running for ");
-      if (finalizationConflict) {
-        await dependencies.deferStep(claimed.step.id, workerId);
-        const elapsedMs = Math.max(0, dependencies.now() - startedAt);
+
+      try {
+        if (claimed.step.stage === "build") {
+          await dependencies.executeBuild(claimed.step, workerId, config);
+        } else if (claimed.step.stage === "finalize") {
+          await dependencies.executeFinalize(claimed.step, workerId, config);
+        } else {
+          throw new Error(`Unsupported durable feed step stage: ${claimed.step.stage}`);
+        }
         steps.push({
           id: claimed.step.id,
           stage: claimed.step.stage,
           channel: claimed.step.channel,
-          status: "conflict",
+          status: "processed",
           reclaimed: claimed.reclaimed,
         });
-        return {
-          status: "conflict",
-          processed,
-          reclaimed,
-          elapsedMs,
-          remainingBudgetMs: Math.max(0, budgetMs - elapsedMs),
-          steps,
-          error: error.message,
-        };
+        processed++;
+      } catch (error) {
+        const finalizationConflict = claimed.step.stage === "finalize"
+          && error instanceof Error
+          && error.message.startsWith("Feed finalization is already running for ");
+        if (finalizationConflict) {
+          await dependencies.deferStep(claimed.step.id, workerId);
+          steps.push({
+            id: claimed.step.id,
+            stage: claimed.step.stage,
+            channel: claimed.step.channel,
+            status: "conflict",
+            reclaimed: claimed.reclaimed,
+          });
+          stop("conflict", error.message);
+          return;
+        }
+        const isUnsupportedStage = claimed.step.stage !== "build"
+          && claimed.step.stage !== "finalize";
+        const failureStatus = await dependencies.failStep(
+          claimed.step.id,
+          workerId,
+          error,
+        );
+        const status = isUnsupportedStage
+          ? "error"
+          : failureStatus === "retry"
+            ? "retry"
+            : failureStatus === "conflict"
+              ? "conflict"
+              : "error";
+        steps.push({
+          id: claimed.step.id,
+          stage: claimed.step.stage,
+          channel: claimed.step.channel,
+          status,
+          reclaimed: claimed.reclaimed,
+        });
+        stop(status, error instanceof Error ? error.message : String(error));
+        return;
       }
-      const isUnsupportedStage = claimed.step.stage !== "build"
-        && claimed.step.stage !== "finalize";
-      const failureStatus = await dependencies.failStep(
-        claimed.step.id,
-        workerId,
-        error,
-      );
-      const status = isUnsupportedStage
-        ? "error"
-        : failureStatus === "retry"
-          ? "retry"
-          : failureStatus === "conflict"
-            ? "conflict"
-            : "error";
-      steps.push({
-        id: claimed.step.id,
-        stage: claimed.step.stage,
-        channel: claimed.step.channel,
-        status,
-        reclaimed: claimed.reclaimed,
-      });
-      const elapsedMs = Math.max(0, dependencies.now() - startedAt);
-      return {
-        status,
-        processed,
-        reclaimed,
-        elapsedMs,
-        remainingBudgetMs: Math.max(0, budgetMs - elapsedMs),
-        steps,
-        error: error instanceof Error ? error.message : String(error),
-      };
     }
+  };
+
+  await Promise.all(Array.from({ length: concurrency }, () => lane()));
+  if (stopped) {
+    const result = stopped as DurableFeedPumpResult;
+    return { ...result, processed, steps };
   }
 
   const elapsedMs = Math.max(0, dependencies.now() - startedAt);
