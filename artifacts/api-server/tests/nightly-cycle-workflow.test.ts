@@ -75,12 +75,12 @@ printf '%s' "$code"
 }
 
 describe("nightly GitHub workflow", () => {
-  it("runs once at 02:00 UTC with explicit non-overlapping concurrency", () => {
-    expect(workflow).toContain('cron: "0 2 * * *"');
+  it("runs at 02:00 UTC with explicit non-overlapping concurrency", () => {
+    expect(workflow).toContain('cron: "0 2 2-30/2 * *"');
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("group: durable-nightly-feed-cycle");
     expect(workflow).toContain("cancel-in-progress: false");
-    expect(workflow).toContain("timeout-minutes: 180");
+    expect(workflow).toContain("timeout-minutes: 300");
     expect(workflow).not.toContain("*/30");
   });
 
@@ -112,6 +112,30 @@ describe("nightly GitHub workflow", () => {
     expect(result.status).toBe(0);
     expect(result.calls).toBe(1);
     expect(result.stdout).toContain("Nightly cycle status=completed phase=feeds");
+  });
+
+  it("stops on a reported failure even when it is sent as HTTP 500", () => {
+    const result = runWorkflowRunner([
+      { code: 500, body: '{"status":"failed","phase":"feeds","error":"durable feed step failed"}' },
+      { code: 200, body: '{"status":"completed","phase":"feeds"}' },
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.calls).toBe(1);
+    expect(result.stdout).toContain("durable feed step failed");
+  });
+
+  it("keeps polling a running cycle and surfaces its error detail", () => {
+    const result = runWorkflowRunner([
+      { code: 200, body: '{"status":"running","phase":"feeds","blockingFeedRunId":"old-run","error":"previous durable feed run old-run is running"}' },
+      { code: 200, body: '{"status":"idle","phase":"feeds"}' },
+      { code: 200, body: '{"status":"completed","phase":"feeds","unpublishedFiles":[{"fileKey":"meta-language-fr","result":"blocked"}]}' },
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toBe(3);
+    expect(result.stdout).toContain("blockingFeedRunId=old-run");
+    expect(result.stdout).toContain("::warning::Feed meta-language-fr was not published (blocked)");
   });
 
   it("leaves no competing scheduled Shopify batch or direct export", () => {

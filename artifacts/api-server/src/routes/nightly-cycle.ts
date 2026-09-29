@@ -29,7 +29,10 @@ router.post("/nightly-cycle", async (req, res) => {
     const result = await advanceNightlyCycle({
       cycleKey: parsed.data.cycleKey ?? currentUtcCycleKey(),
     });
-    res.status(result.status === "failed" ? 500 : 200).json(result);
+    // A structured failure is a final answer, not a transient server error:
+    // the workflow retries 5xx responses, so a 500 here looped until the
+    // watchdog instead of stopping on the reported failure.
+    res.status(200).json(result);
   } catch (error) {
     req.log?.error?.({ err: error }, "Nightly durable cycle failed");
     res.status(503).json({

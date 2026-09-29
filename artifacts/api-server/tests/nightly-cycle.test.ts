@@ -19,6 +19,16 @@ function dependencies(
     pumpFeed: vi.fn(),
     getFeedSummary: vi.fn(),
     completeFeedRun: vi.fn().mockResolvedValue(undefined),
+    failFeedRun: vi.fn().mockResolvedValue(undefined),
+    settleFeedRun: vi.fn().mockResolvedValue({
+      skipped: 0,
+      claimable: 1,
+      waitingRetry: 0,
+      leased: 0,
+      stuckSteps: [],
+    }),
+    findActiveFeedRun: vi.fn().mockResolvedValue(null),
+    listUnpublishedFiles: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
 }
@@ -130,5 +140,131 @@ describe("nightly cycle orchestration", () => {
 
     expect(result.status).toBe("completed");
     expect(result.feedRunId).toBe("feed-run-1");
+  });
+
+  const completedShopify = () => vi.fn().mockResolvedValue({
+    status: "completed",
+    runId: "shopify-run-2",
+    phase: "completion",
+    processed: 0,
+    reclaimed: 0,
+  });
+
+  it("drives a blocking previous feed run instead of waiting on it forever", async () => {
+    const pumpFeed = vi.fn().mockResolvedValue({ status: "idle", processed: 0 });
+    const completeFeedRun = vi.fn().mockResolvedValue(undefined);
+    const settleFeedRun = vi.fn().mockResolvedValue({
+      skipped: 2,
+      claimable: 0,
+      waitingRetry: 0,
+      leased: 0,
+      stuckSteps: [],
+    });
+    const deps = dependencies({
+      advanceShopify: completedShopify(),
+      planFeed: vi.fn().mockResolvedValue({ status: "conflict", totalSteps: 0 }),
+      findActiveFeedRun: vi.fn().mockResolvedValue({ runId: "old-feed-run" }),
+      pumpFeed,
+      settleFeedRun,
+      completeFeedRun,
+      getFeedSummary: vi.fn().mockResolvedValue({
+        total: 190, pending: 0, running: 0, completed: 190, failed: 0,
+      }),
+    });
+
+    const result = await advanceNightlyCycle({ cycleKey: "2026-09-28", workerId: "n" }, deps);
+
+    expect(pumpFeed).toHaveBeenCalledTimes(1);
+    expect(settleFeedRun).toHaveBeenCalledWith("old-feed-run");
+    expect(completeFeedRun).toHaveBeenCalledWith("old-feed-run");
+    expect(result).toMatchObject({
+      status: "running",
+      phase: "feeds",
+      blockingFeedRunId: "old-feed-run",
+    });
+  });
+
+  it("fails a deadlocked feed run so it cannot block the next plan", async () => {
+    const failFeedRun = vi.fn().mockResolvedValue(undefined);
+    const deps = dependencies({
+      advanceShopify: completedShopify(),
+      planFeed: vi.fn().mockResolvedValue({ status: "existing", runId: "feed-run-2", totalSteps: 0 }),
+      pumpFeed: vi.fn().mockResolvedValue({ status: "idle", processed: 0 }),
+      settleFeedRun: vi.fn().mockResolvedValue({
+        skipped: 0,
+        claimable: 0,
+        waitingRetry: 0,
+        leased: 0,
+        stuckSteps: [{ id: "step-1", stage: "finalize", fileKey: "meta-market-FR" }],
+      }),
+      failFeedRun,
+      getFeedSummary: vi.fn().mockResolvedValue({
+        total: 190, pending: 1, running: 0, completed: 189, failed: 0,
+      }),
+    });
+
+    const result = await advanceNightlyCycle({ cycleKey: "2026-09-28", workerId: "n" }, deps);
+
+    expect(result.status).toBe("failed");
+    expect(result.stuckSteps).toHaveLength(1);
+    expect(failFeedRun).toHaveBeenCalledWith("feed-run-2", expect.stringContaining("deadlocked"));
+  });
+
+  it("marks the feed run failed when a step exhausted its retries", async () => {
+    const failFeedRun = vi.fn().mockResolvedValue(undefined);
+    const deps = dependencies({
+      advanceShopify: completedShopify(),
+      planFeed: vi.fn().mockResolvedValue({ status: "existing", runId: "feed-run-2", totalSteps: 0 }),
+      pumpFeed: vi.fn().mockResolvedValue({ status: "error", processed: 0, error: "boom" }),
+      failFeedRun,
+      getFeedSummary: vi.fn().mockResolvedValue({
+        total: 190, pending: 10, running: 0, completed: 179, failed: 1,
+      }),
+    });
+
+    const result = await advanceNightlyCycle({ cycleKey: "2026-09-28", workerId: "n" }, deps);
+
+    expect(result).toMatchObject({ status: "failed", error: "boom" });
+    expect(failFeedRun).toHaveBeenCalledWith("feed-run-2", "boom");
+  });
+
+  it("stays idle while steps wait for a retry backoff", async () => {
+    const failFeedRun = vi.fn();
+    const deps = dependencies({
+      advanceShopify: completedShopify(),
+      planFeed: vi.fn().mockResolvedValue({ status: "existing", runId: "feed-run-2", totalSteps: 0 }),
+      pumpFeed: vi.fn().mockResolvedValue({ status: "idle", processed: 0 }),
+      settleFeedRun: vi.fn().mockResolvedValue({
+        skipped: 0, claimable: 0, waitingRetry: 1, leased: 0, stuckSteps: [],
+      }),
+      failFeedRun,
+      getFeedSummary: vi.fn().mockResolvedValue({
+        total: 190, pending: 1, running: 0, completed: 189, failed: 0,
+      }),
+    });
+
+    const result = await advanceNightlyCycle({ cycleKey: "2026-09-28", workerId: "n" }, deps);
+
+    expect(result.status).toBe("idle");
+    expect(failFeedRun).not.toHaveBeenCalled();
+  });
+
+  it("reports feeds kept back by the publication gate on completion", async () => {
+    const deps = dependencies({
+      advanceShopify: completedShopify(),
+      planFeed: vi.fn().mockResolvedValue({ status: "existing", runId: "feed-run-2", totalSteps: 0 }),
+      pumpFeed: vi.fn().mockResolvedValue({ status: "idle", processed: 0 }),
+      listUnpublishedFiles: vi.fn().mockResolvedValue([
+        { fileKey: "meta-language-fr", result: "blocked" },
+      ]),
+      getFeedSummary: vi.fn().mockResolvedValue({
+        total: 190, pending: 0, running: 0, completed: 190, failed: 0,
+      }),
+    });
+
+    const result = await advanceNightlyCycle({ cycleKey: "2026-09-28", workerId: "n" }, deps);
+
+    expect(result.status).toBe("completed");
+    expect(result.unpublishedFiles).toEqual([{ fileKey: "meta-language-fr", result: "blocked" }]);
   });
 });

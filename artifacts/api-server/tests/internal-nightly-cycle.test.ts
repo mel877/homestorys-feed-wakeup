@@ -61,4 +61,20 @@ describe("POST /api/internal/nightly-cycle", () => {
       cycleKey: "2026-08-30",
     });
   });
+
+  it("returns a structured failure as HTTP 200 so the workflow stops instead of retrying", async () => {
+    mockAdvanceNightlyCycle.mockResolvedValueOnce({
+      status: "failed",
+      phase: "feeds",
+      sourceSyncRunId: "shopify-run-1",
+      error: "durable feed step failed",
+    });
+    const response = await request(app)
+      .post("/api/internal/nightly-cycle")
+      .set("Authorization", "Bearer nightly-test-secret")
+      .send({ cycleKey: "2026-08-30" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("failed");
+  });
 });

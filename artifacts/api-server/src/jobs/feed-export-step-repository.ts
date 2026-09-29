@@ -6,9 +6,8 @@ import {
   type FeedExportStep,
   type InsertFeedExportStep,
 } from "@workspace/db";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import {
-  claimStep,
   completeStep,
   failStep,
   type FeedExportStepState,
@@ -386,22 +385,19 @@ export async function persistDurableFeedRunPlan(
 }
 
 /**
- * Claims exactly one eligible step with row locking. Two Autoscale instances
- * cannot receive the same step, and expired leases are reclaimed naturally.
+ * SQL condition (on alias candidate_step) matching a step a worker may claim.
+ * Shared by the claim query and the deadlock detector so both agree.
  */
-export async function claimNextFeedExportStep(
-  workerId: string,
-  options: { leaseMs?: number; now?: Date } = {},
-): Promise<FeedExportStepResult | null> {
-  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
-  const now = options.now ?? new Date();
-  const claimed = await db.transaction(async (tx) => {
-    const result = await tx.execute(sql`
-      WITH candidate AS (
-        SELECT id
-        FROM feed_export_steps AS candidate_step
-        WHERE
+function claimableStepCondition(now: Date) {
+  return sql`
           candidate_step.stage IN ('build', 'finalize')
+          -- Never pump steps that belong to a failed, abandoned or completed run.
+          AND EXISTS (
+            SELECT 1
+            FROM sync_runs AS candidate_run
+            WHERE candidate_run.id = candidate_step.sync_run_id
+              AND candidate_run.status = 'running'
+          )
           AND (
             (
               candidate_step.status = 'pending'
@@ -460,6 +456,25 @@ export async function claimNextFeedExportStep(
               )
             )
           )
+  `;
+}
+
+/**
+ * Claims exactly one eligible step with row locking. Two Autoscale instances
+ * cannot receive the same step, and expired leases are reclaimed naturally.
+ */
+export async function claimNextFeedExportStep(
+  workerId: string,
+  options: { leaseMs?: number; now?: Date } = {},
+): Promise<FeedExportStepResult | null> {
+  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  const now = options.now ?? new Date();
+  const claimed = await db.transaction(async (tx) => {
+    const result = await tx.execute(sql`
+      WITH candidate AS (
+        SELECT id
+        FROM feed_export_steps AS candidate_step
+        WHERE ${claimableStepCondition(now)}
         ORDER BY candidate_step.updated_at ASC, candidate_step.created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
@@ -721,5 +736,205 @@ export async function completeFeedExportRun(syncRunId: string): Promise<void> {
       finishedAt: new Date(),
       durationMs: sql<number>`EXTRACT(EPOCH FROM (NOW() - ${syncRunsTable.startedAt})) * 1000`,
     })
-    .where(eq(syncRunsTable.id, syncRunId));
+    .where(and(
+      eq(syncRunsTable.id, syncRunId),
+      eq(syncRunsTable.status, "running"),
+    ));
+}
+
+export async function failFeedExportRun(
+  syncRunId: string,
+  reason: string,
+): Promise<void> {
+  await db
+    .update(syncRunsTable)
+    .set({
+      status: "failed",
+      finishedAt: new Date(),
+      durationMs: sql<number>`EXTRACT(EPOCH FROM (NOW() - ${syncRunsTable.startedAt})) * 1000`,
+      metadata: sql`COALESCE(${syncRunsTable.metadata}, '{}'::jsonb) || ${JSON.stringify({
+        failureReason: reason,
+      })}::jsonb`,
+    })
+    .where(and(
+      eq(syncRunsTable.id, syncRunId),
+      eq(syncRunsTable.status, "running"),
+    ));
+}
+
+/**
+ * Returns the running durable feed run that blocks a new plan, if any.
+ */
+export async function findActiveDurableFeedRun(): Promise<{ runId: string } | null> {
+  const result = await db.execute(sql`
+    SELECT run.id
+    FROM sync_runs AS run
+    WHERE run.run_type = 'export'
+      AND run.status = 'running'
+      AND EXISTS (
+        SELECT 1
+        FROM feed_export_steps AS step
+        WHERE step.sync_run_id = run.id
+          AND step.status IN ('pending', 'running')
+      )
+    ORDER BY run.created_at ASC
+    LIMIT 1
+  `);
+  const row = result.rows[0] as { id: string } | undefined;
+  return row ? { runId: String(row.id) } : null;
+}
+
+export interface SettledDurableFeedRun {
+  /** Finalizers closed because a required component was not published. */
+  skipped: number;
+  /** Steps a worker could claim right now. */
+  claimable: number;
+  /** Pending steps waiting for a retry backoff (not a deadlock). */
+  waitingRetry: number;
+  /** Running steps whose lease is still held by a live worker. */
+  leased: number;
+  /**
+   * Sample of pending steps when nothing is claimable, waiting or leased:
+   * they can never run (deadlock).
+   */
+  stuckSteps: Array<{ id: string; stage: string; fileKey: string | null }>;
+}
+
+/**
+ * Resolves finalizers that can never run and detects deadlocked steps.
+ *
+ * A Meta market finalizer requires its base/language/country finalizers to be
+ * completed AND published. When a component is blocked by the validation or
+ * snapshot gate (completed, published=false) or has failed, the dependent
+ * finalizer used to stay pending forever: the run never completed, stayed
+ * "running", and every following nightly plan was rejected as a conflict.
+ */
+export async function settleDurableFeedRun(
+  syncRunId: string,
+): Promise<SettledDurableFeedRun> {
+  let skipped = 0;
+  for (let pass = 0; pass < 5; pass++) {
+    const result = await db.execute(sql`
+      UPDATE feed_export_steps AS step
+      SET
+        status = 'completed',
+        checkpoint = COALESCE(step.checkpoint, '{}'::jsonb) || jsonb_build_object(
+          'result', 'skipped',
+          'published', false,
+          'skippedReason', 'required component feed was not published'
+        ),
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        available_at = NULL,
+        completed_at = NOW(),
+        last_error = 'skipped: required component feed was not published',
+        updated_at = NOW()
+      WHERE step.sync_run_id = ${syncRunId}::uuid
+        AND step.stage = 'finalize'
+        AND step.status = 'pending'
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(
+            COALESCE(step.checkpoint->'requiredFinalizerFileKeys', '[]'::jsonb)
+          ) AS required(file_key)
+          WHERE EXISTS (
+            SELECT 1
+            FROM feed_export_steps AS dependency_step
+            WHERE dependency_step.sync_run_id = step.sync_run_id
+              AND dependency_step.channel = step.channel
+              AND dependency_step.stage = 'finalize'
+              AND dependency_step.checkpoint->>'fileKey' = required.file_key
+              AND (
+                dependency_step.status = 'failed'
+                OR (
+                  dependency_step.status = 'completed'
+                  AND COALESCE(dependency_step.checkpoint->>'published', 'false') <> 'true'
+                )
+              )
+          )
+        )
+      RETURNING step.id
+    `);
+    if (result.rows.length === 0) break;
+    skipped += result.rows.length;
+  }
+
+  const now = new Date();
+  const stateResult = await db.execute(sql`
+    SELECT
+      (
+        SELECT COUNT(*)::int
+        FROM feed_export_steps AS candidate_step
+        WHERE candidate_step.sync_run_id = ${syncRunId}::uuid
+          AND ${claimableStepCondition(now)}
+      ) AS claimable,
+      (
+        SELECT COUNT(*)::int
+        FROM feed_export_steps AS step
+        WHERE step.sync_run_id = ${syncRunId}::uuid
+          AND step.status = 'pending'
+          AND step.available_at IS NOT NULL
+          AND step.available_at > ${now}
+      ) AS waiting_retry,
+      (
+        SELECT COUNT(*)::int
+        FROM feed_export_steps AS step
+        WHERE step.sync_run_id = ${syncRunId}::uuid
+          AND step.status = 'running'
+          AND step.lease_expires_at IS NOT NULL
+          AND step.lease_expires_at > ${now}
+      ) AS leased
+  `);
+  const state = stateResult.rows[0] as {
+    claimable: number;
+    waiting_retry: number;
+    leased: number;
+  } | undefined;
+  const claimable = Number(state?.claimable ?? 0);
+  const waitingRetry = Number(state?.waiting_retry ?? 0);
+  const leased = Number(state?.leased ?? 0);
+
+  let stuckSteps: SettledDurableFeedRun["stuckSteps"] = [];
+  if (claimable === 0 && waitingRetry === 0 && leased === 0) {
+    const pendingResult = await db.execute(sql`
+      SELECT id, stage, checkpoint->>'fileKey' AS file_key
+      FROM feed_export_steps
+      WHERE sync_run_id = ${syncRunId}::uuid
+        AND status = 'pending'
+      ORDER BY stage, checkpoint->>'fileKey', batch_index
+      LIMIT 20
+    `);
+    stuckSteps = (pendingResult.rows as Array<{
+      id: string;
+      stage: string;
+      file_key: string | null;
+    }>).map((row) => ({
+      id: String(row.id),
+      stage: String(row.stage),
+      fileKey: row.file_key,
+    }));
+  }
+  return { skipped, claimable, waitingRetry, leased, stuckSteps };
+}
+
+export async function listUnpublishedFeedFiles(
+  syncRunId: string,
+): Promise<Array<{ fileKey: string; result: string }>> {
+  const result = await db.execute(sql`
+    SELECT
+      checkpoint->>'fileKey' AS file_key,
+      COALESCE(checkpoint->>'result', status) AS result
+    FROM feed_export_steps
+    WHERE sync_run_id = ${syncRunId}::uuid
+      AND stage = 'finalize'
+      AND (
+        status = 'failed'
+        OR (status = 'completed' AND COALESCE(checkpoint->>'published', 'false') <> 'true')
+      )
+    ORDER BY checkpoint->>'fileKey'
+  `);
+  return (result.rows as Array<{ file_key: string | null; result: string }>).map((row) => ({
+    fileKey: String(row.file_key ?? "unknown"),
+    result: String(row.result),
+  }));
 }
