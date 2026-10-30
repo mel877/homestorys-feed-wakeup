@@ -75,8 +75,14 @@ printf '%s' "$code"
 }
 
 describe("nightly GitHub workflow", () => {
-  it("runs at 02:00 UTC with explicit non-overlapping concurrency", () => {
-    expect(workflow).toContain('cron: "0 2 2-30/2 * *"');
+  it("runs at 02:17 UTC with catch-up triggers and non-overlapping concurrency", () => {
+    const crons = [...workflow.matchAll(/cron: "([^"]+)"/g)].map((match) => match[1]);
+    expect(crons).toEqual([
+      "17 2 2-30/2 * *",
+      "47 4 2-30/2 * *",
+      "37 8 2-30/2 * *",
+      "07 13 2-30/2 * *",
+    ]);
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("group: durable-nightly-feed-cycle");
     expect(workflow).toContain("cancel-in-progress: false");

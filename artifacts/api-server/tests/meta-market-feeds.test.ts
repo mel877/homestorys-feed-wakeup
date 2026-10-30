@@ -1,9 +1,12 @@
+import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import {
   META_MARKET_FEED_HEADERS,
   META_MARKET_FEEDS,
   composeMetaMarketRows,
+  flattenRow,
 } from "../src/exporters/meta/market-feeds";
+import { parseDelimitedRecords } from "../src/validation/feed-validator";
 
 const base = (id: string) => ({
   id,
@@ -194,5 +197,26 @@ describe("complete Meta market feed composition", () => {
       languageRows: [language("variant-1_DE", "Sofa")],
       countryRows: [country("variant-1_DE", "EUR", "100.00", "100.00")],
     })).toThrow("sale_price");
+  });
+
+  it("keeps every parsed component value identical when flattening a retained row", async () => {
+    const csv = 'id,title,description,link\n'
+      + 'v1_FR,"Canapé ""Élise"" 🛋️","Lin, bois\nmassif — 3 places",\n';
+    const records: string[][] = [];
+    for await (const record of parseDelimitedRecords(Readable.from([csv]), ",")) {
+      records.push(record);
+    }
+    const [headers, values] = records as [string[], string[]];
+    const row = Object.fromEntries(headers.map((header, index) => [header, values[index]!]));
+
+    const flat = flattenRow(row);
+
+    expect(flat).toEqual(row);
+    expect(flat).toEqual({
+      id: "v1_FR",
+      title: 'Canapé "Élise" 🛋️',
+      description: "Lin, bois\nmassif — 3 places",
+      link: "",
+    });
   });
 });
