@@ -137,10 +137,21 @@ async function readRows<T extends { id: string }>(
       (!options.ids || options.ids.has(row.id)) &&
       (!options.include || options.include(row))
     ) {
-      rows.push(row);
+      rows.push(flattenRow(row));
     }
   }
   return rows;
+}
+
+/** The parser builds each field one character at a time, which V8 keeps as a
+ * rope of one node per character (~30x the text size). Rows retained for a
+ * whole market must hold flat copies, or a market feed exhausts the heap. */
+export function flattenRow<T extends object>(row: T): T {
+  const flat: Record<string, string> = {};
+  for (const [key, value] of Object.entries(row)) {
+    flat[key] = value ? Buffer.from(value as string, "utf8").toString("utf8") : value;
+  }
+  return flat as T;
 }
 
 function serializeLine(row: MetaMarketRow): string {
