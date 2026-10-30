@@ -1,8 +1,16 @@
 name: Durable nightly Shopify and feed cycle
 
 on:
+  # GitHub scheduled runs are best effort: they are often delayed by hours
+  # and are sometimes dropped, especially on the hour. The extra triggers
+  # are catch-ups for the same UTC day: the cycle is idempotent per cycle
+  # key, so a later trigger resumes an unfinished cycle or returns
+  # "completed" at once, and the concurrency group never runs two at a time.
   schedule:
-    - cron: "0 2 2-30/2 * *"
+    - cron: "17 2 2-30/2 * *"
+    - cron: "47 4 2-30/2 * *"
+    - cron: "37 8 2-30/2 * *"
+    - cron: "07 13 2-30/2 * *"
 
   workflow_dispatch:
     inputs:
